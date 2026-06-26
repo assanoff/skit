@@ -1,0 +1,20 @@
+# {{.Name}}
+
+Scaffolded with [`skit new`](https://github.com/assanoff/skit).
+
+## Run
+
+```bash
+go mod tidy        # resolve github.com/assanoff/skit
+go run .
+curl localhost:8080/hello
+curl localhost:8080/healthz
+```
+
+## Next steps
+
+- Add config (`skit/config`), Postgres (`skit/dbx`), and your
+  business modules under `core/`.
+- Add gRPC, metrics, the transactional outbox, and background workers as needed —
+  see the [`skit-x`](https://github.com/assanoff/skit-x) application
+  for the full wiring.

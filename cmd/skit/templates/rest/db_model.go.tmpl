@@ -1,0 +1,46 @@
+package {{.Pkg}}db
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+
+	"{{.Module}}/core/{{.Pkg}}"
+)
+
+// db{{.Type}} is the database representation of a {{.Type}}.
+type db{{.Type}} struct {
+	ID          uuid.UUID `db:"id"`
+	Name        string    `db:"name"`
+	Description string    `db:"description"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
+}
+
+func toDB(v {{.Pkg}}.{{.Type}}) db{{.Type}} {
+	return db{{.Type}}{
+		ID:          v.ID,
+		Name:        v.Name,
+		Description: v.Description,
+		CreatedAt:   v.CreatedAt.UTC(),
+		UpdatedAt:   v.UpdatedAt.UTC(),
+	}
+}
+
+func toCore(r db{{.Type}}) {{.Pkg}}.{{.Type}} {
+	return {{.Pkg}}.{{.Type}}{
+		ID:          r.ID,
+		Name:        r.Name,
+		Description: r.Description,
+		CreatedAt:   r.CreatedAt.In(time.UTC),
+		UpdatedAt:   r.UpdatedAt.In(time.UTC),
+	}
+}
+
+func toCoreSlice(rows []db{{.Type}}) []{{.Pkg}}.{{.Type}} {
+	out := make([]{{.Pkg}}.{{.Type}}, len(rows))
+	for i, r := range rows {
+		out[i] = toCore(r)
+	}
+	return out
+}

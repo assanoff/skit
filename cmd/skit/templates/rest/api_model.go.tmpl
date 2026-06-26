@@ -1,0 +1,47 @@
+package {{.Pkg}}
+
+import (
+	"time"
+
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
+)
+
+// Create{{.Type}}Req is the request body for creating a single {{.Pkg}}.
+type Create{{.Type}}Req struct {
+	Name        string `json:"name" validate:"required,max=100"`
+	Description string `json:"description" validate:"max=500"`
+}
+
+// Update{{.Type}}Req is the request body for a partial {{.Pkg}} update; nil fields
+// are left unchanged.
+type Update{{.Type}}Req struct {
+	Name        *string `json:"name" validate:"omitempty,max=100"`
+	Description *string `json:"description" validate:"omitempty,max=500"`
+}
+
+// Response is the REST representation of a {{.Pkg}}.
+type Response struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func toResponse(v {{.Pkg}}core.{{.Type}}) Response {
+	return Response{
+		ID:          v.ID.String(),
+		Name:        v.Name,
+		Description: v.Description,
+		CreatedAt:   v.CreatedAt,
+		UpdatedAt:   v.UpdatedAt,
+	}
+}
+
+func toResponseList(vs []{{.Pkg}}core.{{.Type}}) []Response {
+	out := make([]Response, len(vs))
+	for i, v := range vs {
+		out[i] = toResponse(v)
+	}
+	return out
+}

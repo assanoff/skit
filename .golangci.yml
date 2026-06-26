@@ -1,0 +1,70 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+    - wastedassign
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+    errcheck:
+      # Writes to stdout/stderr (CLI progress, log lines) don't warrant error
+      # handling; everything else must still be checked.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - unparam
+          - bodyclose
+      - path: mocks/
+        linters:
+          - revive
+      - path: httplog/
+        linters:
+          - revive
+          - errorlint
+          - gocritic
+          - staticcheck
+      # Vendored third-party code (lib/pq array support, MIT) kept verbatim in
+      # sqldb/dbarray; do not hold it to our lint standards.
+      - path: sqldb/dbarray/
+        linters:
+          - revive
+          - errorlint
+          - gocritic
+          - staticcheck
+          - govet
+          - unparam
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/assanoff/skit
+  exclusions:
+    generated: lax
+    paths:
+      - httplog
+      - sqldb/dbarray

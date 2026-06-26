@@ -1,0 +1,228 @@
+package {{.Pkg}}db_test
+
+import (
+	"context"
+	"io"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/matryer/is"
+
+	"github.com/assanoff/skit/dbtest"
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/order"
+	"github.com/assanoff/skit/page"
+
+	"{{.Module}}/core/{{.Pkg}}"
+	"{{.Module}}/core/{{.Pkg}}/{{.Pkg}}db"
+)
+
+// schema is the {{.Plural}} table the Store targets, created inline so this test
+// is self-contained — it does not depend on the service's migrations package.
+// Keep it in sync with the migration `skit add rest` printed, including the
+// keyset index that keeps QueryByCursor O(limit) at any depth.
+const schema = `
+CREATE TABLE IF NOT EXISTS {{.Plural}} (
+	id          uuid PRIMARY KEY,
+	name        text NOT NULL,
+	description text NOT NULL DEFAULT '',
+	created_at  timestamptz NOT NULL,
+	updated_at  timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS {{.Plural}}_created_at_id_desc_idx ON {{.Plural}} (created_at DESC, id DESC);`
+
+// newStore starts a Postgres container, creates the {{.Plural}} table, and returns
+// a Store bound to it. Skipped under -short, as it needs Docker.
+func newStore(ctx context.Context, t *testing.T) *{{.Pkg}}db.Store {
+	t.Helper()
+
+	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
+	if _, err := pg.DB.ExecContext(ctx, schema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+
+	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	return {{.Pkg}}db.NewStore(log, pg.DB)
+}
+
+// seed inserts {{.Plural}} named by names with strictly increasing created_at, so
+// the default (created_at DESC) order is deterministic: the last name is newest.
+func seed(ctx context.Context, t *testing.T, s *{{.Pkg}}db.Store, names ...string) []{{.Pkg}}.{{.Type}} {
+	t.Helper()
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	out := make([]{{.Pkg}}.{{.Type}}, len(names))
+	for i, name := range names {
+		at := base.Add(time.Duration(i) * time.Hour)
+		v := {{.Pkg}}.{{.Type}}{
+			ID:          uuid.New(),
+			Name:        name,
+			Description: "",
+			CreatedAt:   at,
+			UpdatedAt:   at,
+		}
+		if err := s.Create(ctx, v); err != nil {
+			t.Fatalf("seed %q: %v", name, err)
+		}
+		out[i] = v
+	}
+	return out
+}
+
+// Test{{.Type}}StoreCursor walks the keyset (cursor) listing end to end: it pages
+// through QueryByCursor following the next token and asserts every row is visited
+// exactly once and the cursor terminates (empty next) on the last page.
+func Test{{.Type}}StoreCursor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+	is := is.New(t)
+
+	ctx := context.Background()
+	s := newStore(ctx, t)
+
+	created := seed(ctx, t, s, "a", "b", "c", "d", "e")
+	want := map[uuid.UUID]bool{}
+	for _, v := range created {
+		want[v.ID] = true
+	}
+
+	seen := map[uuid.UUID]bool{}
+	token := ""
+	pages := 0
+	for {
+		items, next, err := s.QueryByCursor(ctx, {{.Pkg}}.QueryFilter{}, page.NewCursor(token, 2))
+		is.NoErr(err)
+		for _, it := range items {
+			is.True(!seen[it.ID]) // no row repeats across pages
+			seen[it.ID] = true
+		}
+		pages++
+		if next == "" {
+			break
+		}
+		is.Equal(len(items), 2) // a full page precedes a next cursor
+		token = next
+		if pages > len(created) {
+			t.Fatal("cursor did not terminate")
+		}
+	}
+
+	is.Equal(len(seen), len(created)) // every row visited exactly once
+	for id := range want {
+		is.True(seen[id]) // and they are the ones we created
+	}
+	is.Equal(pages, 3) // 2 + 2 + 1
+}
+
+// Test{{.Type}}StoreOffsetAndCount exercises offset Query and Count: a full first
+// page, the remainder on the last page, and an (unfiltered) total.
+func Test{{.Type}}StoreOffsetAndCount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+	is := is.New(t)
+
+	ctx := context.Background()
+	s := newStore(ctx, t)
+	seed(ctx, t, s, "a", "b", "c", "d", "e")
+
+	total, err := s.Count(ctx, {{.Pkg}}.QueryFilter{})
+	is.NoErr(err)
+	is.Equal(total, 5) // unfiltered total
+
+	p1, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, {{.Pkg}}.DefaultOrder, page.New(1, 2))
+	is.NoErr(err)
+	is.Equal(len(p1), 2) // full page
+
+	p3, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, {{.Pkg}}.DefaultOrder, page.New(3, 2))
+	is.NoErr(err)
+	is.Equal(len(p3), 1) // remainder
+}
+
+// Test{{.Type}}StoreFilter exercises QueryFilter: name and description are
+// case-insensitive substrings, they combine, and Count honors the same filter so a
+// filtered total stays consistent with the filtered page.
+func Test{{.Type}}StoreFilter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+	is := is.New(t)
+
+	ctx := context.Background()
+	s := newStore(ctx, t)
+
+	ptr := func(v string) *string {
+		return &v
+	}
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	rows := []struct{ name, desc string }{
+		{"Alpha Gadget", "red"},
+		{"Beta Gadget", "blue"},
+		{"Gamma Widget", "red"},
+	}
+	for i, r := range rows {
+		at := base.Add(time.Duration(i) * time.Hour)
+		err := s.Create(ctx, {{.Pkg}}.{{.Type}}{
+			ID:          uuid.New(),
+			Name:        r.name,
+			Description: r.desc,
+			CreatedAt:   at,
+			UpdatedAt:   at,
+		})
+		is.NoErr(err)
+	}
+
+	// name: case-insensitive substring -> the two "Gadget"s; Count agrees.
+	nameFilter := {{.Pkg}}.QueryFilter{Name: ptr("gadget")}
+	byName, err := s.Query(ctx, nameFilter, {{.Pkg}}.DefaultOrder, page.New(1, 100))
+	is.NoErr(err)
+	is.Equal(len(byName), 2)
+	cnt, err := s.Count(ctx, nameFilter)
+	is.NoErr(err)
+	is.Equal(cnt, 2)
+
+	// combined name + description -> Alpha Gadget only.
+	combined := {{.Pkg}}.QueryFilter{Name: ptr("gadget"), Description: ptr("red")}
+	got, err := s.Query(ctx, combined, {{.Pkg}}.DefaultOrder, page.New(1, 100))
+	is.NoErr(err)
+	is.Equal(len(got), 1)
+	is.Equal(got[0].Name, "Alpha Gadget")
+}
+
+// Test{{.Type}}StoreOrdering exercises ?order_by against the allowlist: name in
+// both directions, the default (created_at DESC, newest first), and an error for a
+// field outside the db allowlist (so a client cannot order by an arbitrary column).
+func Test{{.Type}}StoreOrdering(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+	is := is.New(t)
+
+	ctx := context.Background()
+	s := newStore(ctx, t)
+
+	// Created oldest->newest: Banana, Apple, Cherry. So default (created_at DESC)
+	// is Cherry, Apple, Banana.
+	seed(ctx, t, s, "Banana", "Apple", "Cherry")
+
+	names := func(by order.By) []string {
+		items, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, by, page.New(1, 100))
+		is.NoErr(err)
+		out := make([]string, len(items))
+		for i, it := range items {
+			out[i] = it.Name
+		}
+		return out
+	}
+
+	is.Equal(names(order.NewBy({{.Pkg}}.OrderByName, order.ASC)), []string{"Apple", "Banana", "Cherry"})  // name ascending
+	is.Equal(names(order.NewBy({{.Pkg}}.OrderByName, order.DESC)), []string{"Cherry", "Banana", "Apple"}) // name descending
+	is.Equal(names({{.Pkg}}.DefaultOrder), []string{"Cherry", "Apple", "Banana"})                         // default: created_at DESC
+
+	// A field outside the db allowlist is rejected by the store.
+	_, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, order.By{Field: "description", Direction: order.ASC}, page.New(1, 100))
+	is.True(err != nil)
+}

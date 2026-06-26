@@ -1,0 +1,29 @@
+# Binaries
+/bin/
+*.exe
+*.test
+*.out
+# Compiled CLI dropped at the repo root by `go build ./cmd/skit`.
+/skit
+
+# Go
+vendor/
+go.work
+go.work.sum
+
+# Env / secrets
+.env
+.env.local
+*.local
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Coverage (all artifacts live under /coverdata/ — see Makefile COVERDIR)
+/coverdata/
+coverage.txt
+coverage.html
+
+.claude

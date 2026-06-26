@@ -1,0 +1,4 @@
+{
+  "greeting": "Hello",
+  "widget_not_found": "widget {{.id}} not found"
+}

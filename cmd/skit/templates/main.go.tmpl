@@ -1,0 +1,56 @@
+// Command {{.Name}} is a skit-based service scaffolded by `skit new`.
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/assanoff/skit/closer"
+	"github.com/assanoff/skit/health"
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/rest/router"
+	"github.com/assanoff/skit/worker"
+)
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "fatal:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	log := logger.New(os.Stdout, logger.Config{Service: "{{.Name}}", Level: logger.LevelInfo})
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	defer closer.CloseSync()
+
+	r := router.New()
+	r.HandleFunc("GET /healthz", health.Liveness())
+	r.HandleFunc("GET /hello", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, "hello from {{.Name}}")
+	})
+
+	srv := &http.Server{Addr: ":8080", Handler: r, ReadHeaderTimeout: 5 * time.Second}
+
+	group := worker.NewGroup(log.Slog(), 10*time.Second)
+	group.Add(worker.RunnableFunc{
+		NameValue: "http",
+		StartFn: func(ctx context.Context) error {
+			log.Info(ctx, "listening", "addr", srv.Addr)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				return err
+			}
+			return nil
+		},
+		StopFn: func(ctx context.Context) error { return srv.Shutdown(ctx) },
+	})
+
+	return group.Run(ctx)
+}

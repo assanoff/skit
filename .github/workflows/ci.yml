@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.sum
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -short ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  # Verify semantic-version compatibility of the public module against the
+  # latest release tag. Skipped on the first release (no tag yet).
+  #
+  # The showcase app (CRUD + integration tests against Postgres/RabbitMQ) lives
+  # in its own repo (assanoff/skit-x) and is exercised by that repo's CI;
+  # this workflow only covers the SDK module itself.
+  gorelease:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags needed for the base comparison
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: gorelease
+        # gorelease infers the base from the latest tag (or "none" before the
+        # first release) and prints the suggested next version. On v1+ it exits
+        # non-zero if there are incompatible API changes without a major bump;
+        # on v0.x incompatible changes are reported but do not fail the build.
+        run: go run golang.org/x/exp/cmd/gorelease@latest

@@ -1,0 +1,76 @@
+edition = "2023";
+
+package {{.Pkg}}.v1;
+
+import "google/protobuf/go_features.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "{{.Module}}/gen/{{.Pkg}}/v1;{{.Pkg}}v1";
+
+// Use Google's Opaque API for Go: monolithic generated code, lazy decoding,
+// fewer allocations (the official performance path that replaces vtprotobuf).
+option features.(pb.go).api_level = API_OPAQUE;
+
+// Keep proto3-like semantics by default: singular fields have no presence.
+// Fields that need presence opt in with [features.field_presence = EXPLICIT].
+option features.field_presence = IMPLICIT;
+
+// {{.Type}} mirrors the domain entity over the wire.
+message {{.Type}} {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message Create{{.Type}}Request {
+  string name = 1;
+  string description = 2;
+}
+message Create{{.Type}}Response {
+  {{.Type}} {{.Snake}} = 1;
+}
+
+message Get{{.Type}}Request {
+  string id = 1;
+}
+message Get{{.Type}}Response {
+  {{.Type}} {{.Snake}} = 1;
+}
+
+message List{{.PluralType}}Request {
+  // Offset paging (1-based). Unset/zero falls back to the first page and the
+  // default page size. The REST list also exposes ?order_by and filters; add
+  // matching fields here when the gRPC client needs them.
+  int32 page = 1;
+  int32 page_size = 2;
+}
+message List{{.PluralType}}Response {
+  repeated {{.Type}} {{.Plural}} = 1;
+}
+
+message Update{{.Type}}Request {
+  string id = 1;
+  // Explicit presence so the server can distinguish "unset" from "empty"
+  // (partial update), the editions equivalent of proto3 `optional`.
+  string name = 2 [features.field_presence = EXPLICIT];
+  string description = 3 [features.field_presence = EXPLICIT];
+}
+message Update{{.Type}}Response {
+  {{.Type}} {{.Snake}} = 1;
+}
+
+message Delete{{.Type}}Request {
+  string id = 1;
+}
+message Delete{{.Type}}Response {}
+
+// {{.Type}}Service is the gRPC counterpart of the REST {{.Pkg}} API.
+service {{.Type}}Service {
+  rpc Create{{.Type}}(Create{{.Type}}Request) returns (Create{{.Type}}Response);
+  rpc Get{{.Type}}(Get{{.Type}}Request) returns (Get{{.Type}}Response);
+  rpc List{{.PluralType}}(List{{.PluralType}}Request) returns (List{{.PluralType}}Response);
+  rpc Update{{.Type}}(Update{{.Type}}Request) returns (Update{{.Type}}Response);
+  rpc Delete{{.Type}}(Delete{{.Type}}Request) returns (Delete{{.Type}}Response);
+}

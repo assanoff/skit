@@ -1,0 +1,134 @@
+// Package {{.Pkg}} is a business module scaffolded by `skit add rest`.
+// The Core holds business logic and depends only on the Store interface declared
+// here; the concrete SQL implementation lives in the nested {{.Pkg}}db package.
+// This keeps the domain testable and storage-agnostic.
+package {{.Pkg}}
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/assanoff/skit/errs"
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/order"
+	"github.com/assanoff/skit/page"
+	"github.com/assanoff/skit/dbx"
+)
+
+// Store is the persistence contract for {{.Plural}}. The Core depends on this
+// interface; concrete implementations (e.g. {{.Pkg}}db) live elsewhere.
+type Store interface {
+	Create(ctx context.Context, {{.Recv}} {{.Type}}) error
+	Update(ctx context.Context, {{.Recv}} {{.Type}}) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	QueryByID(ctx context.Context, id uuid.UUID) ({{.Type}}, error)
+	Query(ctx context.Context, filter QueryFilter, by order.By, pg page.Page) ([]{{.Type}}, error)
+	QueryByCursor(ctx context.Context, filter QueryFilter, cur page.Cursor) (items []{{.Type}}, next string, err error)
+	Count(ctx context.Context, filter QueryFilter) (int, error)
+}
+
+// Core implements the {{.Pkg}} business logic.
+type Core struct {
+	log   *logger.Logger
+	store Store
+}
+
+// NewCore constructs a Core.
+func NewCore(log *logger.Logger, store Store) *Core {
+	return &Core{log: log, store: store}
+}
+
+// Create validates and persists a new {{.Pkg}}.
+func (c *Core) Create(ctx context.Context, n New{{.Type}}) ({{.Type}}, error) {
+	now := time.Now().UTC()
+	{{.Recv}} := {{.Type}}{
+		ID:          uuid.New(),
+		Name:        n.Name,
+		Description: n.Description,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := c.store.Create(ctx, {{.Recv}}); err != nil {
+		if errors.Is(err, dbx.ErrDBDuplicatedEntry) {
+			return {{.Type}}{}, errs.Newf(errs.AlreadyExists, "{{.Pkg}} %q already exists", n.Name)
+		}
+		return {{.Type}}{}, errs.New(errs.Internal, err)
+	}
+	return {{.Recv}}, nil
+}
+
+// QueryByID returns a {{.Pkg}} or a NotFound error.
+func (c *Core) QueryByID(ctx context.Context, id uuid.UUID) ({{.Type}}, error) {
+	{{.Recv}}, err := c.store.QueryByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, dbx.ErrDBNotFound) {
+			return {{.Type}}{}, errs.Newf(errs.NotFound, "{{.Pkg}} %s not found", id)
+		}
+		return {{.Type}}{}, errs.New(errs.Internal, err)
+	}
+	return {{.Recv}}, nil
+}
+
+// Query returns one page of {{.Plural}} matching filter, ordered by.
+func (c *Core) Query(ctx context.Context, filter QueryFilter, by order.By, pg page.Page) ([]{{.Type}}, error) {
+	{{.Recv}}s, err := c.store.Query(ctx, filter, by, pg)
+	if err != nil {
+		return nil, errs.New(errs.Internal, err)
+	}
+	return {{.Recv}}s, nil
+}
+
+// QueryByCursor returns up to cur.Limit() {{.Plural}} matching filter,
+// newest-first, starting after the keyset boundary the cursor encodes (the first
+// page when its token is empty), plus an opaque next-page cursor token — empty
+// when there are no more rows. Unlike Query (offset), it is stable under
+// concurrent inserts and stays cheap at any depth. Forward-only (no prev).
+func (c *Core) QueryByCursor(ctx context.Context, filter QueryFilter, cur page.Cursor) ([]{{.Type}}, string, error) {
+	{{.Recv}}s, next, err := c.store.QueryByCursor(ctx, filter, cur)
+	if err != nil {
+		return nil, "", errs.New(errs.Internal, err)
+	}
+	return {{.Recv}}s, next, nil
+}
+
+// Count returns the number of {{.Plural}} matching filter.
+func (c *Core) Count(ctx context.Context, filter QueryFilter) (int, error) {
+	n, err := c.store.Count(ctx, filter)
+	if err != nil {
+		return 0, errs.New(errs.Internal, err)
+	}
+	return n, nil
+}
+
+// Update applies a partial update and persists it. Nil fields are left unchanged.
+func (c *Core) Update(ctx context.Context, id uuid.UUID, u Update{{.Type}}) ({{.Type}}, error) {
+	{{.Recv}}, err := c.QueryByID(ctx, id)
+	if err != nil {
+		return {{.Type}}{}, err
+	}
+	if u.Name != nil {
+		{{.Recv}}.Name = *u.Name
+	}
+	if u.Description != nil {
+		{{.Recv}}.Description = *u.Description
+	}
+	{{.Recv}}.UpdatedAt = time.Now().UTC()
+	if err := c.store.Update(ctx, {{.Recv}}); err != nil {
+		return {{.Type}}{}, errs.New(errs.Internal, err)
+	}
+	return {{.Recv}}, nil
+}
+
+// Delete removes a {{.Pkg}}.
+func (c *Core) Delete(ctx context.Context, id uuid.UUID) error {
+	if err := c.store.Delete(ctx, id); err != nil {
+		if errors.Is(err, dbx.ErrDBNotFound) {
+			return errs.Newf(errs.NotFound, "{{.Pkg}} %s not found", id)
+		}
+		return errs.New(errs.Internal, err)
+	}
+	return nil
+}
