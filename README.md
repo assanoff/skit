@@ -1,8 +1,10 @@
 # skit
 
-A Go SDK for building production services that speak **REST and/or gRPC**, backed by Postgres, with
-first-class observability (slog + OpenTelemetry traces + Prometheus metrics), reliable background
+skit ([S]ervice [KIT]) Go SDK (software development kit) for building production web services that speak **REST and/or gRPC**, backed by Postgres, with first-class observability (slog + OpenTelemetry traces + Prometheus metrics), reliable background
 workers, and a transactional outbox.
+
+This is NOT a framework
+This is a just a building block of production ready application in Go
 
 It distills patterns from several reference services into a single, importable module
 (`github.com/assanoff/skit`). A separate repo,
