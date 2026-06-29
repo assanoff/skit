@@ -11,7 +11,7 @@ import (
 
 	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/logger"
-	"github.com/assanoff/skit/worker"
+	"github.com/assanoff/skit/retry"
 )
 
 // PG is the Postgres-backed implementation of Store (and StatsReader). Every
@@ -32,7 +32,7 @@ import (
 type PG struct {
 	log     *logger.Logger
 	db      sqlx.ExtContext
-	backoff worker.Backoff
+	backoff retry.Backoff
 }
 
 var (
@@ -44,7 +44,7 @@ var (
 type Options struct {
 	// Backoff schedules retries (next_attempt_at) for failed-but-retryable
 	// events. Defaults to base 2s, factor 2, max 5m.
-	Backoff worker.Backoff
+	Backoff retry.Backoff
 }
 
 // NewPG builds a Postgres outbox store. The table is created by a migration

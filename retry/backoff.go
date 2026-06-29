@@ -1,4 +1,4 @@
-package worker
+package retry
 
 import (
 	"math"
@@ -7,7 +7,8 @@ import (
 
 // Backoff computes retry delays with exponential growth and optional jitter,
 // capped at Max, and exposes a max-attempts budget. It is shared by retrying
-// HTTP clients and reliable processors so backoff policy lives in one place.
+// HTTP clients, reliable processors, and the Do helper so backoff policy lives
+// in one place.
 type Backoff struct {
 	// Base is the delay for the first retry (attempt 1).
 	Base time.Duration

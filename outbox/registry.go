@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -65,14 +66,15 @@ func WithMarshaler(m Marshaler) RouteOption {
 // A pointer type registers its element type, so emitting either T or *T
 // resolves the same route.
 //
-// It panics on a wiring mistake — empty name/topic or a duplicate type — since
-// these are caught at startup, not at runtime.
-func Register[T any](r *Registry, eventType, topic string, opts ...RouteOption) {
+// It returns an error — it never panics — on a wiring mistake (empty name/topic
+// or a duplicate type), so the caller surfaces it at startup where the
+// registration is wired.
+func Register[T any](r *Registry, eventType, topic string, opts ...RouteOption) error {
 	if eventType == "" {
-		panic("outbox: Register: event type name is required")
+		return errors.New("outbox: register: event type name is required")
 	}
 	if topic == "" {
-		panic("outbox: Register: topic is required")
+		return errors.New("outbox: register: topic is required")
 	}
 
 	rt := route{
@@ -90,9 +92,10 @@ func Register[T any](r *Registry, eventType, topic string, opts ...RouteOption) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, dup := r.routes[key]; dup {
-		panic(fmt.Sprintf("outbox: Register: type %s already registered", key))
+		return fmt.Errorf("outbox: register: type %s already registered", key)
 	}
 	r.routes[key] = rt
+	return nil
 }
 
 // lookup resolves the route for a value's type. The value may be a pointer to a

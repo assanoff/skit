@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/assanoff/skit/worker"
+	"github.com/assanoff/skit/retry"
 )
 
 // fastBackoff keeps retries near-instant so tests don't sleep.
-func fastBackoff(maxAttempts int) worker.Backoff {
-	return worker.Backoff{Base: time.Millisecond, Max: 2 * time.Millisecond, MaxAttempts: maxAttempts}
+func fastBackoff(maxAttempts int) retry.Backoff {
+	return retry.Backoff{Base: time.Millisecond, Max: 2 * time.Millisecond, MaxAttempts: maxAttempts}
 }
 
 func TestRetryEventuallySucceeds(t *testing.T) {
@@ -140,7 +140,7 @@ func TestRetryHonorsRetryAfterSeconds(t *testing.T) {
 	// Max clamps the 1s Retry-After down so the test stays fast; the point is
 	// that the header path is taken rather than the backoff delay.
 	client := &http.Client{Transport: NewRetryTransport(nil, RetryConfig{
-		Backoff: worker.Backoff{Base: time.Hour, Max: 5 * time.Millisecond, MaxAttempts: 3},
+		Backoff: retry.Backoff{Base: time.Hour, Max: 5 * time.Millisecond, MaxAttempts: 3},
 		Rand:    func() float64 { return 0 },
 	})}
 

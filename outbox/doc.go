@@ -66,8 +66,10 @@
 // Register each event type, then build the store and the workers:
 //
 //	reg := outbox.NewRegistry()
-//	outbox.Register[widget.Created](reg, "widget.created", "widgets",
-//	    outbox.WithKey("created"))
+//	if err := outbox.Register[widget.Created](reg, "widget.created", "widgets",
+//	    outbox.WithKey("created")); err != nil {
+//	    return err
+//	}
 //
 //	store := outbox.NewPG(log, db, outbox.Options{})       // Postgres-backed Store
 //	group.Add(outbox.NewRelay(log, store, publisher, outbox.RelayConfig{}))

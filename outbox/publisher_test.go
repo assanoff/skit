@@ -41,9 +41,18 @@ type widgetCreated struct {
 	Name string `json:"name"`
 }
 
+// mustRegister registers T's route and fails the test on a wiring error, so the
+// setup in the success-path tests stays a single line.
+func mustRegister[T any](t *testing.T, r *Registry, eventType, topic string, opts ...RouteOption) {
+	t.Helper()
+	if err := Register[T](r, eventType, topic, opts...); err != nil {
+		t.Fatalf("register %s: %v", eventType, err)
+	}
+}
+
 func TestRegistryPublishResolvesRoute(t *testing.T) {
 	reg := NewRegistry()
-	Register[widgetCreated](reg, "widget.created", "widgets", WithKey("created"))
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets", WithKey("created"))
 
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)
@@ -75,7 +84,7 @@ func TestPublishInjectsTraceContext(t *testing.T) {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	reg := NewRegistry()
-	Register[widgetCreated](reg, "widget.created", "widgets")
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)
 
@@ -109,7 +118,7 @@ func TestPublishInjectsTraceContext(t *testing.T) {
 
 func TestPublishWithoutTraceLeavesHeadersEmpty(t *testing.T) {
 	reg := NewRegistry()
-	Register[widgetCreated](reg, "widget.created", "widgets")
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)
 
@@ -125,7 +134,7 @@ func TestPublishOptionsOverrideRoute(t *testing.T) {
 	// One Go payload type registered with a default route; each publish picks a
 	// different CloudEvents type at runtime via As — the promocode/events shape.
 	reg := NewRegistry()
-	Register[widgetCreated](reg, "promo.created", "push-gateway", WithKey("push-gateway.send"))
+	mustRegister[widgetCreated](t, reg, "promo.created", "push-gateway", WithKey("push-gateway.send"))
 
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)
@@ -156,7 +165,7 @@ func TestPublishOptionsOverrideRoute(t *testing.T) {
 
 func TestRegistryPublishPointerResolvesSameRoute(t *testing.T) {
 	reg := NewRegistry()
-	Register[widgetCreated](reg, "widget.created", "widgets")
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)
@@ -184,20 +193,29 @@ func TestRegistryPublishUnregisteredFails(t *testing.T) {
 	}
 }
 
-func TestRegisterDuplicatePanics(t *testing.T) {
+func TestRegisterDuplicateErrors(t *testing.T) {
 	reg := NewRegistry()
-	Register[widgetCreated](reg, "widget.created", "widgets")
-	defer func() {
-		if recover() == nil {
-			t.Error("expected panic on duplicate registration")
-		}
-	}()
-	Register[widgetCreated](reg, "widget.created", "widgets")
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
+
+	err := Register[widgetCreated](reg, "widget.created", "widgets")
+	if err == nil || !strings.Contains(err.Error(), "already registered") {
+		t.Fatalf("expected duplicate-registration error, got %v", err)
+	}
+}
+
+func TestRegisterValidationErrors(t *testing.T) {
+	reg := NewRegistry()
+	if err := Register[widgetCreated](reg, "", "widgets"); err == nil {
+		t.Error("expected an error for an empty event type")
+	}
+	if err := Register[widgetCreated](reg, "widget.created", ""); err == nil {
+		t.Error("expected an error for an empty topic")
+	}
 }
 
 func TestWithContentTypeAndMarshaler(t *testing.T) {
 	reg := NewRegistry()
-	Register[widgetCreated](reg, "widget.created", "widgets",
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets",
 		WithContentType("application/x-custom"),
 		WithMarshaler(func(any) ([]byte, error) { return []byte("RAW"), nil }))
 

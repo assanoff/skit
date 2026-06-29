@@ -8,7 +8,7 @@ import (
 )
 
 func TestInMemScheduleDedup(t *testing.T) {
-	q := NewInMem(time.Minute)
+	q := NewInMem(Options{LeaseTimeout: time.Minute})
 	ctx := context.Background()
 
 	ins, err := q.Schedule(ctx, ScheduleParams{Name: "job-1", Kind: "x"})
@@ -29,7 +29,7 @@ func TestInMemScheduleDedup(t *testing.T) {
 }
 
 func TestInMemClaimLeasesExclusively(t *testing.T) {
-	q := NewInMem(time.Minute)
+	q := NewInMem(Options{LeaseTimeout: time.Minute})
 	ctx := context.Background()
 
 	for range 3 {
@@ -66,7 +66,7 @@ func TestInMemClaimLeasesExclusively(t *testing.T) {
 }
 
 func TestInMemLeaseExpiryAllowsReclaim(t *testing.T) {
-	q := NewInMem(time.Minute)
+	q := NewInMem(Options{LeaseTimeout: time.Minute})
 	ctx := context.Background()
 
 	q.Schedule(ctx, ScheduleParams{Name: "j", Kind: "x"})
@@ -89,7 +89,7 @@ func TestInMemLeaseExpiryAllowsReclaim(t *testing.T) {
 }
 
 func TestInMemMarkDone(t *testing.T) {
-	q := NewInMem(time.Minute)
+	q := NewInMem(Options{LeaseTimeout: time.Minute})
 	ctx := context.Background()
 
 	q.Schedule(ctx, ScheduleParams{Name: "j", Kind: "x"})
@@ -109,7 +109,7 @@ func TestInMemMarkDone(t *testing.T) {
 }
 
 func TestInMemMarkFailedRetryable(t *testing.T) {
-	q := NewInMem(time.Minute)
+	q := NewInMem(Options{LeaseTimeout: time.Minute, RetryDelay: 10 * time.Second})
 	ctx := context.Background()
 
 	q.Schedule(ctx, ScheduleParams{Name: "j", Kind: "x"})
@@ -119,10 +119,15 @@ func TestInMemMarkFailedRetryable(t *testing.T) {
 		t.Fatalf("mark failed: %v", err)
 	}
 
-	// Released: immediately claimable again.
-	again, _ := q.Claim(ctx, now, 1)
+	// Not immediately claimable: a retryable failure waits RetryDelay.
+	if got, _ := q.Claim(ctx, now, 1); len(got) != 0 {
+		t.Fatalf("retryable task should wait RetryDelay, got %d", len(got))
+	}
+
+	// Claimable again after RetryDelay, with the last error preserved.
+	again, _ := q.Claim(ctx, now.Add(10*time.Second), 1)
 	if len(again) != 1 {
-		t.Fatalf("expected retryable task to be reclaimable, got %d", len(again))
+		t.Fatalf("expected retryable task to be reclaimable after RetryDelay, got %d", len(again))
 	}
 	if again[0].LastError != "boom" {
 		t.Errorf("expected last_error preserved, got %q", again[0].LastError)
@@ -130,7 +135,7 @@ func TestInMemMarkFailedRetryable(t *testing.T) {
 }
 
 func TestInMemMarkFailedTerminal(t *testing.T) {
-	q := NewInMem(time.Minute)
+	q := NewInMem(Options{LeaseTimeout: time.Minute})
 	ctx := context.Background()
 
 	q.Schedule(ctx, ScheduleParams{Name: "j", Kind: "x"})
@@ -150,7 +155,7 @@ func TestInMemMarkFailedTerminal(t *testing.T) {
 }
 
 func TestInMemDelayedTaskNotReady(t *testing.T) {
-	q := NewInMem(time.Minute)
+	q := NewInMem(Options{LeaseTimeout: time.Minute})
 	ctx := context.Background()
 	now := time.Now().UTC()
 

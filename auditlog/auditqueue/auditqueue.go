@@ -14,6 +14,7 @@ package auditqueue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -71,11 +72,13 @@ func (r *Recorder) logErr(ctx context.Context, op string, entry auditlog.NewAudi
 	}
 }
 
-// Worker drains audit tasks from the queue into the audit core.
+// errBadEvent marks a permanently undecodable task payload. It is classified as
+// terminal so the processor dead-letters the task instead of retrying it.
+var errBadEvent = errors.New("auditqueue: undecodable event")
+
+// Worker records claimed audit tasks into the audit core.
 type Worker struct {
-	q     queue.Queue
-	core  *auditlog.Core
-	batch int
+	core *auditlog.Core
 }
 
 // WorkerConfig configures the queue-draining loop.
@@ -86,41 +89,52 @@ type WorkerConfig struct {
 	Batch int
 }
 
-// NewWorker returns a worker.Runnable that claims audit tasks and records them.
-// Supervise it in a worker.Group. log may be nil.
-func NewWorker(q queue.Queue, core *auditlog.Core, log *logger.Logger, cfg WorkerConfig) *worker.Loop {
-	w := &Worker{q: q, core: core, batch: cfg.Batch}
-	if w.batch <= 0 {
-		w.batch = 100
+// NewWorker returns a worker.Loop that claims audit tasks and records them via
+// the audit core. It drives a worker.Processor (q is both Source and Sink) with
+// a queue.Mux dispatching the audit Kind, so the claim -> handle -> ack/retry
+// loop, retry scheduling, and dead-lettering are shared with every other queue
+// consumer instead of hand-rolled. Supervise the returned Loop in a
+// worker.Group. log may be nil.
+//
+// It returns an error only if wiring the Mux fails — which cannot happen here,
+// as the single registration uses a constant Kind and a non-nil handler.
+func NewWorker(q queue.Queue, core *auditlog.Core, log *logger.Logger, cfg WorkerConfig) (*worker.Loop, error) {
+	batch := cfg.Batch
+	if batch <= 0 {
+		batch = 100
 	}
 	var sl *slog.Logger
 	if log != nil {
 		sl = log.Slog()
 	}
+
+	w := &Worker{core: core}
+	mux := queue.NewMux()
+	if err := mux.Register(Kind, w.handle); err != nil {
+		return nil, fmt.Errorf("auditqueue: new worker: %w", err)
+	}
+
+	proc := worker.NewProcessor[queue.Task](sl, q, mux, q, worker.ProcessorConfig{
+		Name:       "auditlog-queue",
+		BatchSize:  batch,
+		IsTerminal: func(err error) bool { return errors.Is(err, errBadEvent) },
+	})
 	return worker.NewLoop(sl, worker.LoopConfig{
 		Name:               "auditlog-queue",
 		Interval:           cfg.Interval,
 		ImmediateFirstTick: true,
-	}, w.tick)
+	}, proc.Tick()), nil
 }
 
-func (w *Worker) tick(ctx context.Context) error {
-	tasks, err := w.q.Claim(ctx, time.Now(), w.batch)
-	if err != nil {
-		return fmt.Errorf("auditqueue: claim: %w", err)
+// handle records one audit task. An undecodable payload is terminal (it will
+// never parse); a record failure is returned as-is so the queue retries it.
+func (w *Worker) handle(ctx context.Context, t queue.Task) error {
+	var ev auditbus.Event
+	if err := json.Unmarshal(t.Payload, &ev); err != nil {
+		return fmt.Errorf("%w: %w", errBadEvent, err)
 	}
-	for _, t := range tasks {
-		var ev auditbus.Event
-		if err := json.Unmarshal(t.Payload, &ev); err != nil {
-			// Undecodable payload will never succeed; park it as a dead letter.
-			_ = w.q.MarkFailed(ctx, t, "auditqueue: decode: "+err.Error(), true, time.Now())
-			continue
-		}
-		if err := auditbus.Record(ctx, w.core, ev); err != nil {
-			_ = w.q.MarkFailed(ctx, t, err.Error(), false, time.Now())
-			continue
-		}
-		_ = w.q.MarkDone(ctx, t, time.Now())
+	if err := auditbus.Record(ctx, w.core, ev); err != nil {
+		return fmt.Errorf("auditqueue: record: %w", err)
 	}
 	return nil
 }

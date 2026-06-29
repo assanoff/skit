@@ -8,14 +8,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/assanoff/skit/worker"
+	"github.com/assanoff/skit/retry"
 )
 
 // RetryConfig configures a RetryTransport.
 type RetryConfig struct {
 	// Backoff drives the delay between attempts and the total-attempt budget via
 	// its MaxAttempts field. MaxAttempts <= 1 disables retries (a single try).
-	Backoff worker.Backoff
+	Backoff retry.Backoff
 	// Statuses are the response status codes that trigger a retry. When empty it
 	// defaults to {429 Too Many Requests, 503 Service Unavailable}.
 	Statuses []int

@@ -21,6 +21,7 @@ type InMem struct {
 	byName       map[string]int64
 	leasedAt     map[int64]time.Time
 	leaseTimeout time.Duration
+	retryDelay   time.Duration
 }
 
 var (
@@ -29,16 +30,23 @@ var (
 	_ worker.Sink[Task]   = (*InMem)(nil)
 )
 
-// NewInMem builds an in-memory queue. leaseTimeout defaults to 5m when <= 0.
-func NewInMem(leaseTimeout time.Duration) *InMem {
-	if leaseTimeout <= 0 {
-		leaseTimeout = 5 * time.Minute
+// NewInMem builds an in-memory queue. It takes the same Options as NewPG;
+// LeaseTimeout defaults to 5m and RetryDelay to 30s when <= 0.
+func NewInMem(opts Options) *InMem {
+	lease := opts.LeaseTimeout
+	if lease <= 0 {
+		lease = 5 * time.Minute
+	}
+	retryDelay := opts.RetryDelay
+	if retryDelay <= 0 {
+		retryDelay = 30 * time.Second
 	}
 	return &InMem{
 		tasks:        map[int64]*Task{},
 		byName:       map[string]int64{},
 		leasedAt:     map[int64]time.Time{},
-		leaseTimeout: leaseTimeout,
+		leaseTimeout: lease,
+		retryDelay:   retryDelay,
 	}
 }
 
@@ -145,10 +153,11 @@ func (q *InMem) MarkFailed(_ context.Context, t Task, errMsg string, terminal bo
 		cur.RunAt = deadLetterTime
 		return nil
 	}
-	// Retryable: release the lease and make it immediately claimable again.
+	// Retryable: release the lease and reschedule run_at to now+retryDelay so a
+	// later Claim retries it without busy-looping.
 	cur.LeaseID = ""
 	delete(q.leasedAt, cur.ID)
-	cur.RunAt = now
+	cur.RunAt = now.Add(q.retryDelay)
 	return nil
 }
 

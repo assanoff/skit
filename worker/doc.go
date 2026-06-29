@@ -13,7 +13,8 @@
 //   - Pool: bounded-concurrency fan-out of one-shot jobs.
 //   - Processor[T]: a reliable claim -> handle -> ack/retry batch pipeline,
 //     built from a Source, Handler, and Sink, and run as a Loop.
-//   - Backoff: exponential backoff with jitter and a max-attempts budget.
+//   - Retry[T]: wraps a Handler with in-process retry (over the retry package)
+//     so transient failures are absorbed before the Sink records the outcome.
 //
 // # Loops and pacing
 //
@@ -79,9 +80,8 @@
 // HandleTimeout, IsTerminal (nil = all failures retryable), Now (default
 // time.Now().UTC; override in tests).
 //
-// Backoff: Base (first-retry delay), Max (cap; 0 = uncapped), Factor (default
-// 2), MaxAttempts (retry budget; checked via Exhausted), Jitter in [0,1]
-// (apply via NextWithRand, which takes the random fraction for determinism).
+// Retry wraps a Handler using retry.Config (Backoff + IsTerminal); the backoff
+// policy itself now lives in the retry package.
 //
 // Group: NewGroup(log, shutdownTimeout) — shutdownTimeout of 0 means no bound
 // on how long Run waits for Runnables to Stop.

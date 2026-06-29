@@ -26,6 +26,7 @@ type PG struct {
 	log          *logger.Logger
 	db           *sqlx.DB
 	leaseTimeout time.Duration
+	retryDelay   time.Duration
 }
 
 // Compile-time checks: PG is a Queue and plugs into worker.Processor.
@@ -35,12 +36,19 @@ var (
 	_ worker.Sink[Task]   = (*PG)(nil)
 )
 
-// Options configures a PG queue.
+// Options configures a queue (PG and InMem share it).
 type Options struct {
 	// LeaseTimeout is how long a claimed task stays leased before another
 	// consumer may reclaim it, guarding against a consumer that died mid-process
 	// (default 5m).
 	LeaseTimeout time.Duration
+	// RetryDelay is how long a retryable (non-terminal) failure waits before the
+	// task becomes claimable again — it reschedules run_at to now+RetryDelay
+	// instead of retrying immediately, so a persistently failing task does not
+	// busy-loop (default 30s). Permanent failures (terminal=true) are
+	// dead-lettered regardless. For fast in-process retries of transient errors,
+	// wrap the handler with Retry; this delay governs the durable store retry.
+	RetryDelay time.Duration
 }
 
 // NewPG builds a Postgres queue. It does not create the table; run a migration
@@ -50,7 +58,11 @@ func NewPG(log *logger.Logger, db *sqlx.DB, opts Options) *PG {
 	if lease <= 0 {
 		lease = 5 * time.Minute
 	}
-	return &PG{log: log, db: db, leaseTimeout: lease}
+	retryDelay := opts.RetryDelay
+	if retryDelay <= 0 {
+		retryDelay = 30 * time.Second
+	}
+	return &PG{log: log, db: db, leaseTimeout: lease, retryDelay: retryDelay}
 }
 
 // EnsureSchema creates the backing table and index if they do not exist.
@@ -141,12 +153,13 @@ func (q *PG) MarkDone(ctx context.Context, t Task, _ time.Time) error {
 }
 
 // MarkFailed releases a failed task for retry (terminal=false: clears the lease
-// and makes it claimable now) or parks it as a dead letter (terminal=true: sets
-// done_at so Claim skips it but Cleanup can reap it). Guarded by the same lease
-// predicate as MarkDone.
+// and reschedules run_at to now+retryDelay so a later Claim retries it without
+// busy-looping) or parks it as a dead letter (terminal=true: sets done_at so
+// Claim skips it but Cleanup can reap it). Guarded by the same lease predicate
+// as MarkDone.
 func (q *PG) MarkFailed(ctx context.Context, t Task, errMsg string, terminal bool, now time.Time) error {
 	const retryQuery = `
-UPDATE queue_tasks SET lease_id = NULL, leased_at = NULL, last_error = :last_error, run_at = :now
+UPDATE queue_tasks SET lease_id = NULL, leased_at = NULL, last_error = :last_error, run_at = :next_run
 WHERE id = :id AND lease_id = :lease_id AND done_at IS NULL`
 	const deadQuery = `
 UPDATE queue_tasks SET done_at = :now, lease_id = NULL, last_error = :last_error
@@ -156,7 +169,8 @@ WHERE id = :id AND lease_id = :lease_id AND done_at IS NULL`
 		LeaseID   string    `db:"lease_id"`
 		LastError string    `db:"last_error"`
 		Now       time.Time `db:"now"`
-	}{ID: t.ID, LeaseID: t.LeaseID, LastError: errMsg, Now: now}
+		NextRun   time.Time `db:"next_run"`
+	}{ID: t.ID, LeaseID: t.LeaseID, LastError: errMsg, Now: now, NextRun: now.Add(q.retryDelay)}
 
 	query := retryQuery
 	if terminal {
