@@ -135,6 +135,9 @@ go run ./cmd/skit new github.com/you/svc          # embedded starter
 go run ./cmd/skit new github.com/you/svc --template github.com/some/tmpl  # via gonew
 ```
 
+See [quick-start.md](quick-start.md) for an end-to-end walkthrough: scaffolding a
+service, running it, and generating REST/gRPC modules with the `skit` CLI.
+
 ## Messaging & transactional outbox
 
 `broker` + `outbox` give reliable, exactly-the-domain-write event publishing
