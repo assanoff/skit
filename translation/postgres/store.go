@@ -30,9 +30,9 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 // Compile-time check that Store satisfies the domain contract.
 var _ translation.Store = (*Store)(nil)
 
-// schemaLockKey is a fixed application-defined key for the transaction-level
-// advisory lock that serializes EnsureSchema across processes.
-const schemaLockKey = 0x7472_616e_736c_6174 // "translat" as hex
+// schemaLockKey keys the transaction-level advisory lock that serializes
+// EnsureSchema across replicas booting at once.
+var schemaLockKey = dbx.AdvisoryKey("skit.translation.schema")
 
 // Schema returns the DDL for the translations table.
 func Schema() string {
@@ -51,20 +51,12 @@ CREATE INDEX IF NOT EXISTS idx_translation_lookup
     ON translations (model_name, key_id, language_id);`
 }
 
-// EnsureSchema creates the translations table if absent.
-//
-// Prefer running the DDL as a migration in production — goose already serializes
-// migrations with its own advisory lock. EnsureSchema is for tests and simple
-// boot-time setup; when several replicas call it concurrently a bare
-// CREATE TABLE IF NOT EXISTS can race, so the DDL runs under a transaction-level
-// advisory lock that auto-releases on commit.
+// EnsureSchema creates the translations table if absent. It is safe to call at
+// startup, including from several replicas at once: the DDL runs under a
+// transaction-scoped advisory lock that auto-releases on commit, so concurrent
+// boots serialize instead of racing on CREATE TABLE.
 func (s *Store) EnsureSchema(ctx context.Context) error {
-	return dbx.WithinTran(ctx, s.log, s.db, func(tx *sqlx.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", int64(schemaLockKey)); err != nil {
-			return fmt.Errorf("translation: advisory lock: %w", err)
-		}
-		return dbx.ExecContext(ctx, s.log, tx, Schema())
-	})
+	return dbx.EnsureSchema(ctx, s.log, s.db, schemaLockKey, Schema())
 }
 
 // translationRow is the row representation for upserts.

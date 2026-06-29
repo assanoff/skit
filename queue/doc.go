@@ -18,7 +18,7 @@
 // MarkFailed):
 //
 //	q := queue.NewPG(log, db, queue.Options{LeaseTimeout: 5 * time.Minute})
-//	if err := q.EnsureSchema(ctx); err != nil { // tests; in prod run Schema() as a migration
+//	if err := q.EnsureSchema(ctx); err != nil { // safe at startup, even across replicas
 //	    return err
 //	}
 //
@@ -61,9 +61,12 @@
 //
 // # Schema
 //
-// Schema returns the DDL for the fixed queue_tasks table and its ready-task
-// index; embed it in a migration. PG.EnsureSchema runs the same DDL directly
-// and is convenient in tests.
+// The backing table is owned by this package, so you don't hand-write a
+// migration for it: call PG.EnsureSchema at startup to provision it. The DDL is
+// idempotent (CREATE ... IF NOT EXISTS) and runs under a transaction-scoped
+// advisory lock, so several replicas can call it concurrently without racing.
+// Schema returns the same DDL as a string if you'd rather embed it in your own
+// migration tooling instead.
 //
 // # Semantics
 //

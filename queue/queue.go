@@ -57,8 +57,9 @@ type Queue interface {
 	MarkFailed(ctx context.Context, t Task, errMsg string, terminal bool, now time.Time) error
 }
 
-// Schema returns the DDL that creates the queue_tasks table and its index. Use
-// it in a migration, or call PG.EnsureSchema in tests.
+// Schema returns the DDL that creates the queue_tasks table and its index. Call
+// PG.EnsureSchema at startup to provision it (advisory-lock guarded, replica-
+// safe); Schema is exposed for embedding the DDL in your own migration tooling.
 func Schema() string {
 	return `
 CREATE TABLE IF NOT EXISTS queue_tasks (

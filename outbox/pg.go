@@ -47,8 +47,8 @@ type Options struct {
 	Backoff retry.Backoff
 }
 
-// NewPG builds a Postgres outbox store. The table is created by a migration
-// (or EnsureSchema in tests), not here.
+// NewPG builds a Postgres outbox store. The table is provisioned by
+// EnsureSchema (call it at startup), not here.
 func NewPG(log *logger.Logger, db *sqlx.DB, opts Options) *PG {
 	bo := opts.Backoff
 	if bo.Base == 0 {
@@ -70,9 +70,21 @@ func (s *PG) WithTx(tx sqlx.ExtContext) Store {
 	return &c
 }
 
-// EnsureSchema creates the outbox table and indexes if absent.
+// schemaLockKey keys the transaction-level advisory lock that serializes
+// EnsureSchema across replicas booting at once.
+var schemaLockKey = dbx.AdvisoryKey("skit.outbox.schema")
+
+// EnsureSchema creates the outbox table and indexes if absent. It is safe to
+// call at startup, including from several replicas at once: the DDL runs under a
+// transaction-scoped advisory lock, so concurrent boots serialize instead of
+// racing on CREATE TABLE. A tx-bound store (via WithTx) just runs the DDL — the
+// caller owns the transaction and any locking.
 func (s *PG) EnsureSchema(ctx context.Context) error {
-	return dbx.ExecContext(ctx, s.log, s.db, Schema())
+	db, ok := s.db.(*sqlx.DB)
+	if !ok {
+		return dbx.ExecContext(ctx, s.log, s.db, Schema())
+	}
+	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
 }
 
 // Insert writes pending events. Bound to the caller's transaction when the
@@ -306,7 +318,9 @@ FROM outbox_events`
 }
 
 // Schema returns the DDL creating the outbox_events table and its pending-scan
-// index. Apply it in a migration, or call PG.EnsureSchema in tests.
+// index. Call PG.EnsureSchema at startup to provision it (advisory-lock guarded,
+// replica-safe); Schema is exposed for embedding the DDL in your own migration
+// tooling.
 func Schema() string {
 	return `
 CREATE TABLE IF NOT EXISTS outbox_events (

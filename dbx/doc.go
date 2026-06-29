@@ -95,6 +95,15 @@
 // NewBeginner adapts a *sqlx.DB, and ExtContext extracts the query surface from
 // a started transaction.
 //
+// # Schema provisioning
+//
+// EnsureSchema applies idempotent DDL at startup under a transaction-scoped
+// Postgres advisory lock, so several service replicas can provision the same
+// table concurrently without racing — this is how the SDK storage packages
+// (outbox, queue, auditlog, translation) create their own tables without a
+// hand-written migration. AdvisoryKey derives a stable, collision-resistant lock
+// key from a namespaced name (e.g. "skit.outbox.schema").
+//
 // # Config
 //
 // Config fields: User, Password, Host, Name, Schema (sets search_path),

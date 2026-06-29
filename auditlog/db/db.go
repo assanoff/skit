@@ -36,30 +36,21 @@ func (s *Store) WithTx(tx sqlx.ExtContext) auditlog.Store {
 	return &Store{log: s.log, db: tx}
 }
 
-// schemaLockKey is a fixed application-defined key for the transaction-level
-// advisory lock that serializes EnsureSchema across processes.
-const schemaLockKey = 0x6175_6469_746c_6f67 // "auditlog" as hex
+// schemaLockKey keys the transaction-level advisory lock that serializes
+// EnsureSchema across replicas booting at once.
+var schemaLockKey = dbx.AdvisoryKey("skit.auditlog.schema")
 
-// EnsureSchema creates the audit_log table and indexes if absent.
-//
-// Prefer running the DDL as a migration in production — goose already serializes
-// migrations with its own advisory lock. EnsureSchema is for tests and simple
-// boot-time setup; when several replicas call it concurrently, a bare
-// CREATE TABLE IF NOT EXISTS can still race ("tuple concurrently updated"), so
-// the DDL runs under a transaction-level advisory lock that auto-releases on
-// commit. A tx-bound store (via WithTx) just runs the DDL — the caller owns the
-// transaction and any locking.
+// EnsureSchema creates the audit_log table and indexes if absent. It is safe to
+// call at startup, including from several replicas at once: the DDL runs under a
+// transaction-scoped advisory lock that auto-releases on commit, so concurrent
+// boots serialize instead of racing on CREATE TABLE. A tx-bound store (via
+// WithTx) just runs the DDL — the caller owns the transaction and any locking.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	db, ok := s.db.(*sqlx.DB)
 	if !ok {
 		return dbx.ExecContext(ctx, s.log, s.db, Schema())
 	}
-	return dbx.WithinTran(ctx, s.log, db, func(tx *sqlx.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", int64(schemaLockKey)); err != nil {
-			return fmt.Errorf("auditlog: advisory lock: %w", err)
-		}
-		return dbx.ExecContext(ctx, s.log, tx, Schema())
-	})
+	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
 }
 
 // Save inserts a new audit log entry.
@@ -199,8 +190,10 @@ func (s *Store) OverThreshold(ctx context.Context, threshold, limit int) ([]audi
 	return out, nil
 }
 
-// Schema returns the DDL creating the audit_log table and its indexes. Apply it
-// in a migration, or call Store.EnsureSchema in tests. The UNIQUE constraint on
+// Schema returns the DDL creating the audit_log table and its indexes. Call
+// Store.EnsureSchema at startup to provision it (advisory-lock guarded, replica-
+// safe); Schema is exposed for embedding the DDL in your own migration tooling.
+// The UNIQUE constraint on
 // (model_type, model_id, version) makes the read-modify-write in Core.Create safe
 // under concurrency: a racing insert at the same version fails instead of
 // duplicating.

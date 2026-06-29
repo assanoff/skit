@@ -65,9 +65,16 @@ func NewPG(log *logger.Logger, db *sqlx.DB, opts Options) *PG {
 	return &PG{log: log, db: db, leaseTimeout: lease, retryDelay: retryDelay}
 }
 
-// EnsureSchema creates the backing table and index if they do not exist.
+// schemaLockKey keys the transaction-level advisory lock that serializes
+// EnsureSchema across replicas booting at once.
+var schemaLockKey = dbx.AdvisoryKey("skit.queue.schema")
+
+// EnsureSchema creates the backing table and index if they do not exist. It is
+// safe to call at startup, including from several replicas at once: the DDL runs
+// under a transaction-scoped advisory lock, so concurrent boots serialize
+// instead of racing on CREATE TABLE.
 func (q *PG) EnsureSchema(ctx context.Context) error {
-	return dbx.ExecContext(ctx, q.log, q.db, Schema())
+	return dbx.EnsureSchema(ctx, q.log, q.db, schemaLockKey, Schema())
 }
 
 // Schedule enqueues a task. An empty Name is replaced with a unique value so the
