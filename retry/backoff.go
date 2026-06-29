@@ -12,7 +12,8 @@ import (
 type Backoff struct {
 	// Base is the delay for the first retry (attempt 1).
 	Base time.Duration
-	// Max caps the delay (0 = uncapped).
+	// Max caps the delay (0 = uncapped). It is a hard ceiling on the final
+	// value: the returned delay never exceeds Max, even after jitter.
 	Max time.Duration
 	// Factor is the multiplier per attempt (defaults to 2 when <= 1).
 	Factor float64
@@ -52,6 +53,12 @@ func (b Backoff) NextWithRand(attempt int, randFraction float64) time.Duration {
 	}
 	if delay < 0 {
 		delay = 0
+	}
+	// Max is a hard ceiling on the final delay. Jitter is applied to a center
+	// already capped at Max, so upward jitter (Jitter up to 1 can nearly double
+	// it) could exceed Max — re-clamp here to keep the result within [0, Max].
+	if b.Max > 0 && delay > float64(b.Max) {
+		delay = float64(b.Max)
 	}
 	return time.Duration(delay)
 }

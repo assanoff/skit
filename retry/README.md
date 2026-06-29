@@ -211,3 +211,7 @@ server's `Retry-After` header — see the `httpmw` package.
   a single attempt too (`Do` never loops unboundedly).
 - **`Rand` is only used by the default `Backoff` cadence.** A custom `Strategy`
   computes its own (deterministic) delay.
+- **`Backoff.Max` is a hard ceiling.** The returned delay never exceeds `Max`,
+  even with jitter — full upward jitter (`Jitter: 1`) is clamped back to `Max`
+  rather than overshooting it. `Jitter: 1` also means the delay can drop to `0`,
+  so use a smaller jitter (e.g. `0.1`–`0.3`) if a retry should always wait.

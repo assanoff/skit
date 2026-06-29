@@ -47,3 +47,26 @@ func TestBackoffJitterBounds(t *testing.T) {
 		t.Errorf("max jitter: got %s want 1200ms", got)
 	}
 }
+
+func TestBackoffMaxIsHardCeiling(t *testing.T) {
+	// Center clamps to Max=3s (attempt 3 would be 4s uncapped). With Jitter=1,
+	// upward jitter would push the delay to ~6s, but Max is a hard ceiling.
+	b := Backoff{Base: time.Second, Factor: 2, Max: 3 * time.Second, Jitter: 1}
+
+	if got := b.NextWithRand(3, 1); got != 3*time.Second {
+		t.Errorf("full upward jitter at cap: got %s, want 3s (hard ceiling)", got)
+	}
+	if got := b.NextWithRand(3, 0.5); got > 3*time.Second {
+		t.Errorf("no-jitter point: got %s, want <= 3s", got)
+	}
+	if got := b.NextWithRand(3, 0); got != 0 {
+		t.Errorf("full downward jitter: got %s, want 0", got)
+	}
+
+	// The ceiling also bounds an early attempt whose center is below Max once
+	// upward jitter would carry it past Max (1s center, Jitter=1 -> up to 2s,
+	// here under Max so it is not clamped).
+	if got := b.NextWithRand(1, 1); got != 2*time.Second {
+		t.Errorf("attempt 1 max jitter under cap: got %s, want 2s", got)
+	}
+}
