@@ -52,6 +52,13 @@ func scaffold(out io.Writer, opts scaffoldOpts) error {
 		dir = name
 	}
 
+	// --replace only has an effect on the full bootstrap (its go.mod carries the
+	// replace directive); the minimal starter and the gonew passthrough ignore
+	// it. Fail loudly rather than scaffold a go.mod silently missing the replace.
+	if opts.Replace != "" && !opts.Full {
+		return fmt.Errorf("--replace requires --full: the minimal starter has no replace directive (re-run with --full, or drop --replace)")
+	}
+
 	if opts.Template != "" {
 		return runGonew(out, opts.Template, opts.Module, dir)
 	}

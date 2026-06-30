@@ -73,6 +73,87 @@ func TestScaffoldRefusesNonEmptyDir(t *testing.T) {
 	}
 }
 
+func TestScaffoldReplaceRequiresFull(t *testing.T) {
+	// --replace without --full must fail before writing anything: the minimal
+	// go.mod has no replace directive, so silently succeeding would mislead.
+	dir := filepath.Join(t.TempDir(), "svc")
+	err := scaffold(&bytes.Buffer{}, scaffoldOpts{
+		Module:  "github.com/me/svc",
+		Dir:     dir,
+		Replace: "../skit",
+	})
+	if err == nil {
+		t.Fatal("expected --replace without --full to be rejected")
+	}
+	if !strings.Contains(err.Error(), "--replace requires --full") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Errorf("validation should fail before creating %s", dir)
+	}
+}
+
+func TestScaffoldFullWithReplace(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "svc")
+	if err := scaffold(&bytes.Buffer{}, scaffoldOpts{
+		Module:  "github.com/me/svc",
+		Dir:     dir,
+		Full:    true,
+		Replace: "../skit",
+	}); err != nil {
+		t.Fatalf("scaffold --full --replace: %v", err)
+	}
+
+	// go.mod carries the replace directive pointing at the local SDK path.
+	gomod := readFile(t, filepath.Join(dir, "go.mod"))
+	if !strings.Contains(gomod, "replace github.com/assanoff/skit => ../skit") {
+		t.Errorf("go.mod missing replace directive:\n%s", gomod)
+	}
+
+	// The cmd entrypoint and its subcommands are scaffolded and parse as Go.
+	for _, rel := range []string{
+		"main.go",
+		filepath.Join("internal", "cmd", "root.go"),
+		filepath.Join("internal", "cmd", "serve.go"),
+		filepath.Join("internal", "cmd", "migrate.go"),
+		filepath.Join("internal", "cmd", "version.go"),
+	} {
+		p := filepath.Join(dir, rel)
+		if _, err := parser.ParseFile(token.NewFileSet(), p, nil, parser.AllErrors); err != nil {
+			t.Errorf("generated %s does not parse: %v", rel, err)
+		}
+	}
+
+	// Dotfiles that go:embed cannot carry with a leading dot are restored.
+	for _, dotfile := range []string{".gitignore", ".env.example"} {
+		if _, err := os.Stat(filepath.Join(dir, dotfile)); err != nil {
+			t.Errorf("%s not generated: %v", dotfile, err)
+		}
+	}
+}
+
+func TestScaffoldFullRefusesCollision(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "svc")
+	// Pre-create a file the full bootstrap would write.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := scaffold(&bytes.Buffer{}, scaffoldOpts{
+		Module: "github.com/me/svc",
+		Dir:    dir,
+		Full:   true,
+	})
+	if err == nil {
+		t.Fatal("expected full scaffold to refuse overwriting an existing file")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
