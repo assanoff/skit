@@ -123,16 +123,26 @@
 //
 // # API
 //
+// Every concern is a transport/application pair (see the method map above) — the
+// bare verb speaks net/http, the App suffix speaks the typed rest layer. The two
+// surfaces live in sibling files (http.go, app.go) around the core type in
+// router.go:
+//
 //   - New(appMids ...rest.MidFunc): build a Router; appMids wrap every HandleApp
 //     route, outermost first.
+//   - Use / With(mws ...Middleware): add transport middleware to this group (Use,
+//     mutating, applies to later routes) or to a derived sub-router (With,
+//     immutable). Both shadow the embedded routegroup methods so the transport
+//     surface stays visible on the type.
+//   - Handle / HandleFunc(pattern, h, mws ...Middleware): mount a raw net/http
+//     handler with optional per-route transport middleware. With no mws they
+//     behave exactly like the embedded routegroup methods they shadow.
+//   - UseApp / WithApp(mw ...rest.MidFunc): the typed twins of Use / With.
 //   - HandleApp(pattern, rest.HandlerFunc, mids ...rest.MidFunc): mount a typed
 //     handler; per-route mids sit inside appMids, the result registers as an
 //     http.Handler and is encoded via rest.Respond.
-//   - UseApp / WithApp(mw ...rest.MidFunc): add application middleware to this
-//     group (mutating) or a derived group (immutable) — twins of Use / With.
-//   - Mount(pattern): a sub-router rooted at a path prefix.
-//   - Route(fn): register a nested group via a callback receiving a sub-router.
-//   - With(mws ...Middleware): a sub-router with extra net/http middleware.
-//   - Embedded *routegroup.Bundle methods (Handle, HandleFunc, Use, ...) remain
-//     available for raw net/http handlers.
+//   - Mount(pattern) / Route(fn): compose sub-routers (a path prefix, or a
+//     callback-scoped group); both carry transport + application middleware.
+//   - Other embedded *routegroup.Bundle methods (HandleFiles, HandleRoot, ...)
+//     remain available for raw net/http use.
 package router

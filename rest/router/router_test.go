@@ -12,8 +12,9 @@ import (
 	"github.com/assanoff/skit/rest/router"
 )
 
-// recorder collects an ordered trace of which middleware ran, so tests can
-// assert the transport-outside / application-inside nesting.
+// recorder collects an ordered trace of which middleware/handler ran, so tests
+// can assert the transport-outside / application-inside nesting. It is shared by
+// the router, transport, and app test files (all in package router_test).
 type recorder struct {
 	order []string
 }
@@ -38,10 +39,19 @@ func (rec *recorder) transportMid(name string) router.Middleware {
 	}
 }
 
-func (rec *recorder) handler(name string) rest.HandlerFunc {
+// appHandler is a typed rest.HandlerFunc marker.
+func (rec *recorder) appHandler(name string) rest.HandlerFunc {
 	return func(_ context.Context, _ *http.Request) rest.ResponseEncoder {
 		rec.order = append(rec.order, name)
 		return rest.JSON("ok")
+	}
+}
+
+// rawHandler is a standard http.Handler marker that records and 200s.
+func (rec *recorder) rawHandler(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		rec.order = append(rec.order, name)
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -51,9 +61,9 @@ func get(r *router.Router, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestNestingOrder locks the model: transport middleware wraps the boundary
-// (outermost), then global app middleware, then group app middleware (WithApp),
-// then per-route middleware, then the handler.
+// TestNestingOrder locks the cross-layer model: transport middleware wraps the
+// boundary (outermost), then global app middleware (New), then group app
+// middleware (WithApp), then per-route middleware, then the handler.
 func TestNestingOrder(t *testing.T) {
 	is := is.New(t)
 	var rec recorder
@@ -62,61 +72,44 @@ func TestNestingOrder(t *testing.T) {
 	r.Use(rec.transportMid("transport"))      // global transport middleware
 
 	admin := r.WithApp(rec.appMid("app-group")) // application sub-group
-	admin.HandleApp("GET /x", rec.handler("handler"), rec.appMid("app-route"))
+	admin.HandleApp("GET /x", rec.appHandler("handler"), rec.appMid("app-route"))
 
 	is.Equal(get(r, "/x").Code, http.StatusOK) // route serves 200
 	is.Equal(rec.order, []string{"transport", "app-global", "app-group", "app-route", "handler"})
 }
 
-// TestStandardHandlerSkipsAppMiddleware verifies a raw http.Handler registered
-// via the embedded Handle runs transport middleware but NOT application
-// middleware (app middleware only wraps HandleApp routes).
-func TestStandardHandlerSkipsAppMiddleware(t *testing.T) {
+// TestMountPrefixesAndInherits verifies Mount roots routes under a path prefix
+// and carries the parent's application middleware into the sub-router.
+func TestMountPrefixesAndInherits(t *testing.T) {
 	is := is.New(t)
 	var rec recorder
 
 	r := router.New(rec.appMid("app-global"))
-	r.Use(rec.transportMid("transport"))
+	api := r.Mount("/api")
+	api.HandleApp("GET /widgets", rec.appHandler("widgets"))
 
-	r.Handle("GET /raw", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		rec.order = append(rec.order, "raw")
-		w.WriteHeader(http.StatusTeapot)
-	}))
-
-	is.Equal(get(r, "/raw").Code, http.StatusTeapot)
-	// app middleware must not wrap a raw handler — only the transport stack does.
-	is.Equal(rec.order, []string{"transport", "raw"})
+	is.Equal(get(r, "/api/widgets").Code, http.StatusOK)   // prefixed path resolves
+	is.Equal(rec.order, []string{"app-global", "widgets"}) // inherited app middleware ran
+	is.Equal(get(r, "/widgets").Code, http.StatusNotFound) // unprefixed path is not registered
 }
 
-// TestWithAppDoesNotLeak verifies WithApp is immutable: app middleware added to
-// a derived group does not affect routes registered on the parent.
-func TestWithAppDoesNotLeak(t *testing.T) {
+// TestRouteScopesMiddleware verifies middleware added inside a Route callback is
+// scoped to that group and does not leak onto routes registered on the parent.
+func TestRouteScopesMiddleware(t *testing.T) {
 	is := is.New(t)
 	var rec recorder
 
-	r := router.New(rec.appMid("app-global"))
-	admin := r.WithApp(rec.appMid("app-admin"))
-	admin.HandleApp("GET /admin", rec.handler("admin-handler"))
-	r.HandleApp("GET /public", rec.handler("public-handler")) // parent, no app-admin
+	r := router.New()
+	r.Route(func(g *router.Router) {
+		g.Use(rec.transportMid("scoped"))
+		g.HandleFunc("GET /in", rec.rawHandler("in"))
+	})
+	r.HandleFunc("GET /out", rec.rawHandler("out")) // sibling on the parent
 
-	get(r, "/public")
-	is.Equal(rec.order, []string{"app-global", "public-handler"}) // parent unaffected
+	is.Equal(get(r, "/in").Code, http.StatusOK)
+	is.Equal(rec.order, []string{"scoped", "in"})
 
 	rec.order = nil
-	get(r, "/admin")
-	is.Equal(rec.order, []string{"app-global", "app-admin", "admin-handler"})
-}
-
-// TestUseApp verifies the mutating UseApp applies to handlers registered after
-// it, with existing app middleware staying outermost.
-func TestUseApp(t *testing.T) {
-	is := is.New(t)
-	var rec recorder
-
-	r := router.New(rec.appMid("app-global"))
-	r.UseApp(rec.appMid("app-added"))
-	r.HandleApp("GET /y", rec.handler("handler"))
-
-	get(r, "/y")
-	is.Equal(rec.order, []string{"app-global", "app-added", "handler"})
+	is.Equal(get(r, "/out").Code, http.StatusOK)
+	is.Equal(rec.order, []string{"out"}) // scoped middleware did not leak to parent
 }
