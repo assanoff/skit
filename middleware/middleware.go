@@ -27,3 +27,10 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	r.bytes += n
 	return n, err
 }
+
+// Unwrap exposes the underlying ResponseWriter so http.ResponseController can
+// reach optional interfaces (Flusher/Hijacker/…) through this wrapper — e.g.
+// SSE handlers that Flush per event. Without it, wrapping would mask Flush.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
