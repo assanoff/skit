@@ -17,7 +17,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | Package | Purpose |
 |---|---|
 | `errs` | Error type with stable codes, REST/gRPC mapping, validation, secret sanitization |
-| `logger` | `slog`-based logger: `trace_id` injection, level fan-out (stdout + Sentry), access log |
+| `logger` | `slog`-based logger: `trace_id` injection, level fan-out (stdout + Sentry), additive per-level side-effect hooks (`Events`, e.g. alert on error), caller-skip variants, access log |
 | `otel` | Tracing bootstrap, span helpers, `GetTraceID`, route-excluding sampler |
 | `dbx` | `sqlx`/`pgx` helpers: named queries, `WithinTran`, bulk insert/upsert/update, retries |
 | `dim` | Slim dependency-injection: lazy `Provider[T]`, `Once`/`OnceWithName`, `NewResource` with init/cleanup logging |

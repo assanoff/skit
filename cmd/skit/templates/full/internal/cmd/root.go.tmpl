@@ -56,6 +56,13 @@ func buildLogger(cfg config.ServerOpts) *logger.Logger {
 		Level:     parseLevel(cfg.LogLevel),
 		AddSource: true,
 		TraceIDFn: skotel.GetTraceID,
+		// Fire a side effect on ERROR (alerting, Sentry, ...) without changing
+		// stdout logging. The record carries service, trace_id and any
+		// With/Named attributes. Keep it fast — offload slow work.
+		//
+		// Events: logger.Events{
+		// 	Error: func(ctx context.Context, r slog.Record) { alert.Capture(ctx, r) },
+		// },
 	})
 	slog.SetDefault(log.Slog())
 	return log

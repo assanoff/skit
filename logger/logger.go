@@ -24,6 +24,9 @@ type TraceIDFn func(ctx context.Context) string
 // Logger is the application logger.
 type Logger struct {
 	handler slog.Handler
+	// discard short-circuits every log call when the sink is io.Discard, so
+	// tests and benchmarks pay nothing for records that would be thrown away.
+	discard bool
 }
 
 // Config configures a Logger.
@@ -36,6 +39,10 @@ type Config struct {
 	AddSource bool
 	// TraceIDFn injects "trace_id"; may be nil.
 	TraceIDFn TraceIDFn
+	// Events assigns an optional side-effect callback per level (e.g. fire an
+	// alert on Error). It is additive: the record is still written to the sink
+	// (including any FanoutHandler). Zero value installs no hook. See Events.
+	Events Events
 }
 
 // New builds a Logger writing JSON to w. For multi-sink behavior, build the
@@ -46,16 +53,38 @@ func New(w io.Writer, cfg Config) *Logger {
 		AddSource:   cfg.AddSource,
 		ReplaceAttr: replaceAttr,
 	})
-	return NewWithHandler(h, cfg)
+	l := NewWithHandler(h, cfg)
+	// Discard sink → nothing to write; flag it so log() bails out before
+	// building the record (and before firing any Events hook).
+	if w == io.Discard {
+		l.discard = true
+	}
+	return l
 }
 
 // NewWithHandler builds a Logger from a custom slog.Handler (e.g. a
-// FanoutHandler). The service attribute and TraceIDFn from cfg are applied.
+// FanoutHandler). The service attribute, TraceIDFn and Events from cfg are
+// applied.
 //
 // Trace-id injection is installed as a handler wrapper (not in the Logger's
 // write path), so it also applies to any *slog.Logger derived via Slog() and to
 // third-party middleware that logs through the same handler (e.g. httplog).
+//
+// The handler stack, innermost (closest to the sink) first, is:
+//
+//	h (the given sink, e.g. a FanoutHandler)
+//	└─ eventHandler   (if cfg.Events is set: side-effect hooks, additive)
+//	   └─ WithAttrs(service)
+//	      └─ traceHandler (if cfg.TraceIDFn is set)
+//
+// The ordering is deliberate: the event hook sits below service/trace so its
+// callback sees the service attribute (accumulated via WithAttrs) and the
+// trace_id (added to the record by traceHandler), i.e. the full context the
+// record is written with. See Events.
 func NewWithHandler(h slog.Handler, cfg Config) *Logger {
+	if cfg.Events.any() {
+		h = newEventHandler(h, cfg.Events)
+	}
 	if cfg.Service != "" {
 		h = h.WithAttrs([]slog.Attr{slog.String("service", cfg.Service)})
 	}
@@ -74,21 +103,52 @@ func (l *Logger) Slog() *slog.Logger { return slog.New(l.handler) }
 
 // Debug logs at debug level.
 func (l *Logger) Debug(ctx context.Context, msg string, args ...any) {
-	l.log(ctx, LevelDebug, msg, args...)
+	l.log(ctx, LevelDebug, 0, msg, args...)
 }
 
 // Info logs at info level.
 func (l *Logger) Info(ctx context.Context, msg string, args ...any) {
-	l.log(ctx, LevelInfo, msg, args...)
+	l.log(ctx, LevelInfo, 0, msg, args...)
 }
 
 // Warn logs at warn level.
 func (l *Logger) Warn(ctx context.Context, msg string, args ...any) {
-	l.log(ctx, LevelWarn, msg, args...)
+	l.log(ctx, LevelWarn, 0, msg, args...)
 }
 
 func (l *Logger) Error(ctx context.Context, msg string, args ...any) {
-	l.log(ctx, LevelError, msg, args...)
+	l.log(ctx, LevelError, 0, msg, args...)
+}
+
+// The *c variants log at the same levels but let the caller skip extra stack
+// frames when attributing the "source" (file:line) attribute. skip is the
+// number of frames ABOVE the immediate caller to climb: skip=0 is identical to
+// the plain method (attributes the direct caller), skip=1 blames the caller's
+// caller, and so on. Use them when the logger is reached through a helper of
+// your own so the source points at real call sites, not the wrapper.
+//
+//	func (s *svc) logErr(ctx context.Context, msg string, args ...any) {
+//		s.log.Errorc(ctx, 1, msg, args...) // source = logErr's caller
+//	}
+
+// Debugc logs at debug level, skipping skip extra source frames.
+func (l *Logger) Debugc(ctx context.Context, skip int, msg string, args ...any) {
+	l.log(ctx, LevelDebug, skip, msg, args...)
+}
+
+// Infoc logs at info level, skipping skip extra source frames.
+func (l *Logger) Infoc(ctx context.Context, skip int, msg string, args ...any) {
+	l.log(ctx, LevelInfo, skip, msg, args...)
+}
+
+// Warnc logs at warn level, skipping skip extra source frames.
+func (l *Logger) Warnc(ctx context.Context, skip int, msg string, args ...any) {
+	l.log(ctx, LevelWarn, skip, msg, args...)
+}
+
+// Errorc logs at error level, skipping skip extra source frames.
+func (l *Logger) Errorc(ctx context.Context, skip int, msg string, args ...any) {
+	l.log(ctx, LevelError, skip, msg, args...)
 }
 
 // Named returns a child Logger tagged with logger=name. Use it to derive
@@ -111,14 +171,19 @@ func (l *Logger) With(args ...any) *Logger {
 		attrs = append(attrs, a)
 		return true
 	})
-	return &Logger{handler: l.handler.WithAttrs(attrs)}
+	return &Logger{handler: l.handler.WithAttrs(attrs), discard: l.discard}
 }
 
-func (l *Logger) log(ctx context.Context, level Level, msg string, args ...any) {
+func (l *Logger) log(ctx context.Context, level Level, skip int, msg string, args ...any) {
+	if l.discard {
+		return
+	}
 	if !l.handler.Enabled(ctx, level) {
 		return
 	}
-	rec := slog.NewRecord(now(), level, msg, pc(3))
+	// pc(3) attributes the direct caller of the exported method (user code);
+	// skip climbs further for callers reached through a wrapper (the *c methods).
+	rec := slog.NewRecord(now(), level, msg, pc(3+skip))
 	rec.Add(args...)
 	// trace_id is injected by the handler wrapper (see traceHandler), so it
 	// applies uniformly here and via Slog().
