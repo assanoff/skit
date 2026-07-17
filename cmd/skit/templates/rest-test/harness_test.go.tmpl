@@ -1,0 +1,71 @@
+package tests
+
+// Shared integration-test harness. It boots the REAL application HTTP handler
+// (full middleware + routing, exactly as `serve` assembles it) against a
+// throwaway Postgres started with testcontainers, so end-to-end tests exercise
+// the whole stack. One file per project; feature suites (Test_<Entity>) live
+// alongside it and reuse startup/run.
+
+import (
+	"context"
+	"io"
+	"testing"
+	"time"
+
+	"github.com/assanoff/skit/apitest"
+	"github.com/assanoff/skit/dbtest"
+	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/logger"
+
+	"{{.Module}}/internal/app/config"
+	"{{.Module}}/internal/app/server"
+	"{{.Module}}/internal/migrations"
+)
+
+// startup starts a migrated Postgres container, builds the application handler
+// wired to it, and returns an apitest.Server for driving HTTP plus the
+// *dbtest.Postgres for seeding/inspection. The container is torn down via
+// t.Cleanup.
+func startup(ctx context.Context, t *testing.T) (*apitest.Server, *dbtest.Postgres) {
+	t.Helper()
+
+	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{Migrations: migrations.FS})
+
+	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	h, err := server.Handler(ctx, testOpts(pg.Config), log)
+	if err != nil {
+		t.Fatalf("build handler: %v", err)
+	}
+	return apitest.New(t, h), pg
+}
+
+// testOpts builds a valid ServerOpts for tests: transports are handler-only (no
+// listeners), background workers and the broker are off, and the DB points at
+// the test container.
+func testOpts(db dbx.Config) config.ServerOpts {
+	return config.ServerOpts{
+		Service:  "test",
+		Env:      "test",
+		LogLevel: "error",
+		HTTP:     config.HTTP{RequestTimeout: 30 * time.Second, BodySizeLimit: 1 << 20},
+		DB: config.DB{
+			User:         db.User,
+			Password:     db.Password,
+			Host:         db.Host,
+			Name:         db.Name,
+			Schema:       db.Schema,
+			MaxIdleConns: 5,
+			MaxOpenConns: 20,
+			DisableTLS:   true,
+		},
+		Worker: config.Worker{Disabled: true},
+		Broker: config.Broker{Enabled: false},
+	}
+}
+
+// run is a named subtest — the orchestrator style: one Test_<Entity> boots the
+// server, seeds, then runs case functions in order via run(...).
+func run(t *testing.T, name string, fn func(t *testing.T)) {
+	t.Helper()
+	t.Run(name, fn)
+}

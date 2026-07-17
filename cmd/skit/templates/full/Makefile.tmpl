@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 GO ?= go
 
-.PHONY: help run build test tidy lint migrate-up migrate-down migrate-status compose-up compose-down
+.PHONY: help run build test tidy lint generate migrate-up migrate-down migrate-status compose-up compose-down
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}'
@@ -17,6 +17,9 @@ test: ## Run unit tests (short, race)
 
 tidy: ## go mod tidy
 	$(GO) mod tidy
+
+generate: ## Generate code: mocks (moq) via //go:generate directives
+	$(GO) generate ./...
 
 lint: ## Run golangci-lint
 	golangci-lint run ./...

@@ -18,8 +18,11 @@ import (
 	"github.com/assanoff/skit/dbx"
 )
 
+//go:generate go tool moq -out mocks/store.go -pkg mocks . Store
+
 // Store is the persistence contract for {{.Plural}}. The Core depends on this
 // interface; concrete implementations (e.g. {{.Pkg}}db) live elsewhere.
+// Run `make generate` (moq) to (re)generate mocks/StoreMock for tests.
 type Store interface {
 	Create(ctx context.Context, {{.Recv}} {{.Type}}) error
 	Update(ctx context.Context, {{.Recv}} {{.Type}}) error

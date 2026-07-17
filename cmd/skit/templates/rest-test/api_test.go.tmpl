@@ -1,0 +1,118 @@
+package {{.Pkg}}
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/brianvoe/gofakeit/v7"
+	"github.com/google/uuid"
+	"github.com/matryer/is"
+
+	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/order"
+	"github.com/assanoff/skit/page"
+	"github.com/assanoff/skit/rest"
+
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
+	"{{.Module}}/core/{{.Pkg}}/mocks"
+)
+
+// API tests for the {{.Pkg}} transport. They mock the Store (moq) and drive the
+// handler directly through the rest boundary — rest.HandlerFunc is itself an
+// http.Handler (ServeHTTP), so no router or middleware is required. Attach
+// middleware yourself when a test needs it, e.g.:
+//
+//	rest.ChainMiddleware(h.create, someMid).ServeHTTP(w, req)
+//
+// Assertions use matryer/is; input data uses gofakeit; one test function per
+// case (no table tests).
+
+// newTestHandler builds the {{.Pkg}} handler over a mocked Store, so tests
+// exercise the transport + business logic without a database.
+func newTestHandler(store *mocks.StoreMock) *Handler {
+	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	return New({{.Pkg}}core.NewCore(log, store))
+}
+
+func TestRest_Create{{.Type}}_201(t *testing.T) {
+	is := is.New(t)
+
+	name := gofakeit.ProductName()
+	store := &mocks.StoreMock{
+		CreateFunc: func(ctx context.Context, {{.Recv}} {{.Pkg}}core.{{.Type}}) error {
+			is.Equal({{.Recv}}.Name, name) // handler decoded and forwarded the field
+			return nil
+		},
+	}
+	h := newTestHandler(store)
+
+	body, _ := json.Marshal(map[string]any{"name": name, "description": gofakeit.Sentence(6)})
+	req := httptest.NewRequest(http.MethodPost, "/{{.Plural}}", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	rest.HandlerFunc(h.create).ServeHTTP(w, req) // direct, no middleware
+
+	is.Equal(w.Code, http.StatusCreated)  // 201
+	is.Equal(len(store.CreateCalls()), 1) // Create invoked exactly once
+}
+
+func TestRest_Get{{.Type}}_404(t *testing.T) {
+	is := is.New(t)
+
+	store := &mocks.StoreMock{
+		QueryByIDFunc: func(ctx context.Context, id uuid.UUID) ({{.Pkg}}core.{{.Type}}, error) {
+			return {{.Pkg}}core.{{.Type}}{}, dbx.ErrDBNotFound
+		},
+	}
+	h := newTestHandler(store)
+
+	req := httptest.NewRequest(http.MethodGet, "/{{.Plural}}/x", nil)
+	req.SetPathValue("id", uuid.NewString())
+	w := httptest.NewRecorder()
+
+	rest.HandlerFunc(h.queryByID).ServeHTTP(w, req)
+
+	is.Equal(w.Code, http.StatusNotFound) // 404 mapped from dbx.ErrDBNotFound
+}
+
+func TestRest_Get{{.Type}}_BadID_400(t *testing.T) {
+	is := is.New(t)
+	h := newTestHandler(&mocks.StoreMock{})
+
+	req := httptest.NewRequest(http.MethodGet, "/{{.Plural}}/not-a-uuid", nil)
+	req.SetPathValue("id", "not-a-uuid")
+	w := httptest.NewRecorder()
+
+	rest.HandlerFunc(h.queryByID).ServeHTTP(w, req)
+
+	is.Equal(w.Code, http.StatusBadRequest) // 400 invalid id
+}
+
+func TestRest_List{{.Type}}_200(t *testing.T) {
+	is := is.New(t)
+	now := time.Now().UTC()
+
+	store := &mocks.StoreMock{
+		QueryFunc: func(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by order.By, pg page.Page) ([]{{.Pkg}}core.{{.Type}}, error) {
+			return []{{.Pkg}}core.{{.Type}}{ {ID: uuid.New(), Name: gofakeit.ProductName(), CreatedAt: now, UpdatedAt: now} }, nil
+		},
+		CountFunc: func(ctx context.Context, filter {{.Pkg}}core.QueryFilter) (int, error) {
+			return 1, nil
+		},
+	}
+	h := newTestHandler(store)
+
+	req := httptest.NewRequest(http.MethodGet, "/{{.Plural}}?page=1&rows=10", nil)
+	w := httptest.NewRecorder()
+
+	rest.HandlerFunc(h.query).ServeHTTP(w, req)
+
+	is.Equal(w.Code, http.StatusOK) // 200
+}

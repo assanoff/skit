@@ -1,6 +1,10 @@
 module {{.Module}}
 
 go 1.26
+
+// moq (mock generator) recorded as a tool dependency so `make generate` runs it
+// via `go tool moq` without a global install. `go mod tidy` resolves the version.
+tool github.com/matryer/moq
 {{if .Replace}}
 require github.com/assanoff/skit v0.0.0
 

@@ -35,6 +35,27 @@ func (c *addRestCommand) Execute([]string) error {
 	})
 }
 
+// addRestTestCommand scaffolds tests for an existing REST module: fast API tests
+// over a mocked Store (moq) plus an integration suite (testcontainers) that
+// drives the real application handler.
+type addRestTestCommand struct {
+	Dir    string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module string `long:"module" description:"module path (default: read from go.mod)"`
+	Plural string `long:"plural" description:"route/table plural (default: <name>+\"s\")"`
+	Args   struct {
+		Name string `positional-arg-name:"name" description:"entity name, e.g. widget or order-line"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addRestTestCommand) Execute([]string) error {
+	return addRESTTest(os.Stdout, addRESTOpts{
+		Dir:    c.Dir,
+		Module: c.Module,
+		Plural: c.Plural,
+		Name:   c.Args.Name,
+	})
+}
+
 type addRESTOpts struct {
 	Dir    string // service root (holds go.mod)
 	Module string // module path; resolved from go.mod when empty
@@ -124,6 +145,108 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 
 	printRESTNextSteps(out, data, full)
 	return nil
+}
+
+// addRESTTest generates tests for an existing REST module: the API test (mocked
+// Store) in the entity's api package, an integration suite in tests/, and a
+// shared tests/ harness (created once, reused by later suites).
+func addRESTTest(out io.Writer, opts addRESTOpts) error {
+	if !nameRE.MatchString(opts.Name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	}
+
+	dir := opts.Dir
+	if dir == "" {
+		dir = "."
+	}
+
+	module := opts.Module
+	if module == "" {
+		m, err := moduleFromGoMod(dir)
+		if err != nil {
+			return err
+		}
+		module = m
+	}
+
+	words := splitWords(opts.Name)
+	pkg := strings.ToLower(strings.Join(words, ""))
+	plural := opts.Plural
+	if plural == "" {
+		plural = pkg + "s"
+	}
+	data := restData{
+		Module: module,
+		Pkg:    pkg,
+		Type:   pascal(words),
+		Recv:   pkg[:1],
+		Plural: plural,
+	}
+
+	// The tests target an existing module; fail early with a clear pointer if it
+	// hasn't been scaffolded yet.
+	if _, err := os.Stat(filepath.Join(dir, "core", pkg)); os.IsNotExist(err) {
+		return fmt.Errorf("no core/%s in %s — run `skit add rest %s` first", pkg, dir, opts.Name)
+	}
+
+	apiTest := filepath.Join(dir, "api", pkg, pkg+"_test.go")
+	intTest := filepath.Join(dir, "tests", pkg+"_test.go")
+
+	// Per-entity test files are never overwritten.
+	for _, dest := range []string{apiTest, intTest} {
+		if _, err := os.Stat(dest); err == nil {
+			return fmt.Errorf("%s already exists — refusing to overwrite", dest)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	if err := renderFile(apiTest, "templates/rest-test/api_test.go.tmpl", data); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "  created %s\n", apiTest)
+
+	if err := renderFile(intTest, "templates/rest-test/integration_test.go.tmpl", data); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "  created %s\n", intTest)
+
+	// The tests/ harness is shared across suites: create it once, skip if present.
+	harness := filepath.Join(dir, "tests", "harness_test.go")
+	switch _, err := os.Stat(harness); {
+	case os.IsNotExist(err):
+		if err := renderFile(harness, "templates/rest-test/harness_test.go.tmpl", data); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  created %s\n", harness)
+	case err == nil:
+		fmt.Fprintf(out, "  skipped %s (already exists)\n", harness)
+	default:
+		return err
+	}
+
+	printRESTTestNextSteps(out, data)
+	return nil
+}
+
+// printRESTTestNextSteps prints the mock-generation, tidy and run steps.
+func printRESTTestNextSteps(out io.Writer, d restData) {
+	fmt.Fprintf(out, `
+Scaffolded tests for %[1]q. Next:
+
+1. Generate the Store mock (moq) the API test needs (if not already):
+
+   make generate        # or: go generate ./...
+
+2. Resolve the new test dependencies (matryer/is, gofakeit):
+
+   go mod tidy
+
+3. Run them:
+
+   go test ./api/%[1]s/...              # API tests: mocked store, no docker
+   go test ./tests/ -run Test_%[2]s     # integration: needs docker, skipped under -short
+`, d.Pkg, d.Type)
 }
 
 // addGRPCCommand scaffolds a gRPC module for one entity: a .proto contract plus

@@ -1,0 +1,108 @@
+package tests
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/brianvoe/gofakeit/v7"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+	"github.com/matryer/is"
+
+	"github.com/assanoff/skit/apitest"
+	"github.com/assanoff/skit/logger"
+
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
+	"{{.Module}}/core/{{.Pkg}}/{{.Pkg}}db"
+)
+
+// seed holds the fixtures inserted before the {{.Pkg}} cases run.
+type seed struct {
+	items []{{.Pkg}}core.{{.Type}}
+}
+
+// Test_{{.Type}} is the integration orchestrator: it boots the full app against a
+// throwaway Postgres, seeds fixtures, then runs each endpoint case in order.
+// Requires Docker; skipped under `go test -short`.
+func Test_{{.Type}}(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+	t.Parallel()
+
+	ctx := context.Background()
+	srv, pg := startup(ctx, t)
+
+	sd := insertSeedData(ctx, t, pg.DB)
+
+	run(t, "list-200", list200(srv, sd))
+	run(t, "get-200", get200(srv, sd))
+	run(t, "get-404", get404(srv))
+	run(t, "create-201", create201(srv))
+}
+
+// insertSeedData writes a few {{.Plural}} through the store (gofakeit data) so
+// the read endpoints have something to return.
+func insertSeedData(ctx context.Context, t *testing.T, db *sqlx.DB) seed {
+	t.Helper()
+	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	store := {{.Pkg}}db.NewStore(log, db)
+
+	var sd seed
+	now := time.Now().UTC()
+	for i := 0; i < 3; i++ {
+		it := {{.Pkg}}core.{{.Type}}{
+			ID:          uuid.New(),
+			Name:        gofakeit.ProductName(),
+			Description: gofakeit.Sentence(8),
+			CreatedAt:   now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:   now,
+		}
+		if err := store.Create(ctx, it); err != nil {
+			t.Fatalf("seed create: %v", err)
+		}
+		sd.items = append(sd.items, it)
+	}
+	return sd
+}
+
+func list200(srv *apitest.Server, sd seed) func(t *testing.T) {
+	return func(t *testing.T) {
+		is := is.New(t)
+		resp := srv.Get("/{{.Plural}}?page=1&rows=10")
+		resp.ExpectStatus(http.StatusOK)
+		total, ok := resp.JSON()["total"].(float64)
+		is.True(ok)                               // paginated envelope carries a total
+		is.True(int(total) >= len(sd.items))      // at least the seeded rows are listed
+	}
+}
+
+func get200(srv *apitest.Server, sd seed) func(t *testing.T) {
+	return func(t *testing.T) {
+		is := is.New(t)
+		id := sd.items[0].ID.String()
+		resp := srv.Get("/{{.Plural}}/" + id)
+		resp.ExpectStatus(http.StatusOK)
+		is.Equal(resp.JSON()["id"], id)
+	}
+}
+
+func get404(srv *apitest.Server) func(t *testing.T) {
+	return func(t *testing.T) {
+		srv.Get("/{{.Plural}}/" + uuid.NewString()).ExpectStatus(http.StatusNotFound)
+	}
+}
+
+func create201(srv *apitest.Server) func(t *testing.T) {
+	return func(t *testing.T) {
+		is := is.New(t)
+		body, _ := json.Marshal(map[string]any{"name": gofakeit.ProductName(), "description": gofakeit.Sentence(6)})
+		resp := srv.PostJSON("/{{.Plural}}", string(body))
+		resp.ExpectStatus(http.StatusCreated)
+		is.True(resp.JSON()["id"] != nil)
+	}
+}

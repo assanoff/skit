@@ -94,6 +94,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if _, err := add.AddCommand("rest-test", "scaffold tests for a REST module",
+		"Generate API (mocked-store) tests and an integration suite for one entity.", &addRestTestCommand{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if _, err := add.AddCommand("grpc", "scaffold a gRPC module",
 		"Generate a .proto contract + a gRPC handler adapting one entity's Core.", &addGRPCCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)

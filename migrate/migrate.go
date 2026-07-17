@@ -90,8 +90,12 @@ func (m *Migrator) Status(ctx context.Context) ([]MigrationStatus, error) {
 	return out, nil
 }
 
-// Close releases the provider's resources. It does not close the underlying
-// database handle passed to New.
+// Close releases the Migrator. It deliberately does NOT close the underlying
+// database handle passed to New: New does not take ownership, so the caller owns
+// the handle's lifecycle. (goose's provider.Close would close the *sql.DB, which
+// silently breaks callers that keep using their handle after migrating — e.g.
+// dbtest.NewPostgres hands back a live pool. goose holds no other resources that
+// require release once Up/Down/Status have returned.)
 func (m *Migrator) Close() error {
-	return m.provider.Close()
+	return nil
 }
