@@ -103,7 +103,7 @@ func renderStarter(out io.Writer, opts scaffoldOpts, name, dir string) error {
 		fmt.Fprintf(out, "  created %s\n", filepath.Join(dir, outName))
 	}
 
-	fmt.Fprintf(out, "\nScaffolded %q in %s/\n\nNext:\n  cd %s && go mod tidy && go run .\n", opts.Module, dir, dir)
+	fmt.Fprintf(out, "\nScaffolded %q in %s/\n\nNext:\n  cd %s && go mod tidy && go run .\n\nAdd a REST CRUD module with:\n  skit add rest <name>          # e.g. skit add rest widget\n", opts.Module, dir, dir)
 	return nil
 }
 

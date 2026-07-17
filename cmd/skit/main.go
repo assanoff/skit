@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	flags "github.com/jessevdk/go-flags"
@@ -39,7 +40,35 @@ func (versionCommand) Execute([]string) error {
 	return nil
 }
 
+// printIntro is shown when skit is run with no command, so a first-time user
+// sees the getting-started path rather than a terse "specify a command" error.
+func printIntro(w io.Writer) {
+	fmt.Fprint(w, `skit — scaffold and manage skit-based services.
+
+Get started — scaffold a full HTTP service (config, deps, server, migrations, docker-compose):
+
+  skit new github.com/you/svc --full
+  cd svc && go mod tidy
+
+Then add a REST CRUD module for an entity:
+
+  skit add rest <name>          # e.g. skit add rest widget
+
+Help:
+
+  skit -h                       # top-level help and all commands
+  skit <command> -h             # help for a command (new, add rest, add grpc, version)
+`)
+}
+
 func main() {
+	// No command → show the getting-started intro instead of go-flags' terse
+	// "Please specify one command" error.
+	if len(os.Args) == 1 {
+		printIntro(os.Stdout)
+		return
+	}
+
 	var opts struct{}
 	p := flags.NewParser(&opts, flags.Default)
 	p.LongDescription = "skit scaffolds and manages skit-based services."

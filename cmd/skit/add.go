@@ -117,7 +117,12 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 		fmt.Fprintf(out, "  created %s\n", f.dest)
 	}
 
-	printRESTNextSteps(out, data)
+	// Detect the full bootstrap (internal/app/deps present) so the next-step
+	// wiring hint matches what the project actually looks like.
+	_, err := os.Stat(filepath.Join(dir, "internal", "app", "deps"))
+	full := err == nil
+
+	printRESTNextSteps(out, data, full)
 	return nil
 }
 
@@ -234,37 +239,77 @@ Scaffolded the %q gRPC module. The handler adapts %s.Core, so run `+"`skit add r
 
 // printRESTNextSteps prints the migration and wiring a developer must add by
 // hand — they are app-specific (migration numbering, the deps container) and not
-// safe to generate blindly.
-func printRESTNextSteps(out io.Writer, d restData) {
+// safe to generate blindly. The wiring hint (step 2) adapts to the project shape:
+// the full bootstrap wires through internal/app/deps + internal/app/server, the
+// minimal starter directly where the router is built.
+func printRESTNextSteps(out io.Writer, d restData, full bool) {
+	// Step 1 — migration (same for both project shapes).
 	fmt.Fprintf(out, `
-Scaffolded the %q module. Next:
+Scaffolded the %[1]q module. Next:
 
-1. Add a migration for the table (e.g. internal/migrations/NNNN_%s.sql). The
-   composite index backs the keyset (cursor) listing — GET /%s/cursor:
+1. Add a migration for the table (e.g. internal/migrations/NNNN_%[2]s.sql). The
+   composite index backs the keyset (cursor) listing — GET /%[2]s/cursor:
 
-   CREATE TABLE %s (
+   CREATE TABLE %[2]s (
        id          UUID PRIMARY KEY,
        name        TEXT NOT NULL,
        description TEXT NOT NULL DEFAULT '',
        created_at  TIMESTAMPTZ NOT NULL,
        updated_at  TIMESTAMPTZ NOT NULL
    );
-   CREATE INDEX %s_created_at_id_desc_idx ON %s (created_at DESC, id DESC);
+   CREATE INDEX %[2]s_created_at_id_desc_idx ON %[2]s (created_at DESC, id DESC);
+`, d.Pkg, d.Plural)
 
-2. Wire it where you build the router (e.g. app/deps + app/server):
+	// Step 2 — wiring, tailored to the project shape.
+	if full {
+		// [1]=Pkg [2]=Type [3]=Module
+		fmt.Fprintf(out, `
+2. Wire it into the full bootstrap:
 
-   store := %sdb.NewStore(log, db)
-   core  := %s.NewCore(log, store)
-   %sapi.New(core).Routes(r.HandleApp)   // import alias: %sapi "%s/api/%s"
+   a) internal/app/deps/deps.go — add providers to Deps and register the initializer:
 
+      %[2]sCore    dim.Provider[*%[1]s.Core]
+      %[2]sHandler dim.Provider[*%[1]sapi.Handler]
+      // ... add init%[2]s to the Initializers slice
+
+   b) new file internal/app/deps/%[1]s.go:
+
+      var init%[2]s = func(c *Deps) (dim.CleanupFunc, error) {
+          c.%[2]sCore = dim.Once(func(ctx context.Context) (*%[1]s.Core, error) {
+              return %[1]s.NewCore(c.Logger, %[1]sdb.NewStore(c.Logger, c.DB(ctx))), nil
+          })
+          c.%[2]sHandler = dim.Once(func(ctx context.Context) (*%[1]sapi.Handler, error) {
+              return %[1]sapi.New(c.%[2]sCore(ctx)), nil
+          })
+          return nil, nil
+      }
+      // imports: "%[3]s/core/%[1]s", "%[3]s/core/%[1]s/%[1]sdb", %[1]sapi "%[3]s/api/%[1]s"
+
+   c) internal/app/server (Install) — register the routes on the handle seam:
+
+      d.%[2]sHandler(ctx).Routes(handle)
+`, d.Pkg, d.Type, d.Module)
+	} else {
+		// [1]=Pkg [2]=Module
+		fmt.Fprintf(out, `
+2. Wire it where you build the router:
+
+   store := %[1]sdb.NewStore(log, db)
+   core  := %[1]s.NewCore(log, store)
+   %[1]sapi.New(core).Routes(r.HandleApp)   // import alias: %[1]sapi "%[2]s/api/%[1]s"
+`, d.Pkg, d.Module)
+	}
+
+	// Steps 3–4 — tidy/build and the generated listing test (same for both).
+	fmt.Fprintf(out, `
 3. go mod tidy && go build ./...
 
-4. The generated %sdb/listing_test.go covers the listing set (cursor, offset,
+4. The generated %[1]sdb/listing_test.go covers the listing set (cursor, offset,
    filter, ordering) against a real Postgres via testcontainers — it needs
    Docker and is skipped under "go test -short":
 
-   go test ./core/%s/...
-`, d.Pkg, d.Pkg, d.Plural, d.Plural, d.Plural, d.Plural, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Module, d.Pkg, d.Pkg, d.Pkg)
+   go test ./core/%[1]s/...
+`, d.Pkg)
 }
 
 // moduleFromGoMod reads the module path from dir/go.mod.

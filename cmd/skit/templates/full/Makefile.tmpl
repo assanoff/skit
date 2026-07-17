@@ -6,8 +6,8 @@ GO ?= go
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}'
 
-run: ## Run the HTTP server (serve)
-	$(GO) run . serve
+run: ## Run the HTTP server (serve). Ctrl+C shuts down gracefully (not a make error).
+	@trap 'exit 0' INT; $(GO) run . serve
 
 build: ## Build the binary into bin/
 	$(GO) build -o bin/{{.Name}} .
