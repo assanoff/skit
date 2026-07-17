@@ -74,15 +74,31 @@ func Open(cfg Config) (*sqlx.DB, error) {
 	return db, nil
 }
 
+// DefaultStatusCheckTimeout bounds StatusCheck when it is called with a context
+// that carries no deadline of its own (e.g. context.Background()). Without it a
+// non-transient failure — wrong port, missing database, bad credentials, TLS
+// mismatch — would retry forever and hang the caller silently. Pass a
+// context.WithTimeout to choose a different bound.
+const DefaultStatusCheckTimeout = 30 * time.Second
+
 // StatusCheck pings the database, retrying until it is reachable or ctx is done.
 //
 // On timeout it returns errors.Join(ctx.Err(), lastPingErr) rather than a bare
 // "context deadline exceeded", so the real cause — connection refused, TLS
 // failure, password authentication failed — is visible at the call site instead
 // of being masked by the deadline.
+//
+// If ctx has no deadline, DefaultStatusCheckTimeout is applied as a backstop so
+// a persistent failure surfaces its error instead of hanging forever.
 func StatusCheck(ctx context.Context, db *sqlx.DB) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, DefaultStatusCheckTimeout)
+		defer cancel()
 	}
 
 	var pingErr error
