@@ -134,7 +134,7 @@ func (h *Handler) queryByID(ctx context.Context, r *http.Request) rest.ResponseE
 	if err != nil {
 		return errs.From(err)
 	}
-	return rest.JSON(toResponse({{.Recv}}))
+	return toResponse({{.Recv}}) // Response implements rest.ResponseEncoder
 }
 
 // update applies a partial update to a {{.Pkg}}.
@@ -153,7 +153,7 @@ func (h *Handler) update(ctx context.Context, r *http.Request) rest.ResponseEnco
 	if err != nil {
 		return errs.From(err)
 	}
-	return rest.JSON(toResponse({{.Recv}}))
+	return toResponse({{.Recv}}) // Response implements rest.ResponseEncoder
 }
 
 // delete removes a {{.Pkg}}.

@@ -1,31 +1,79 @@
 package {{.Pkg}}
 
 import (
+	"encoding/json"
 	"time"
+	"unicode/utf8"
+
+	"github.com/assanoff/skit/errs"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 )
 
-// Create{{.Type}}Req is the request body for creating a single {{.Pkg}}.
+// Create{{.Type}}Req is the request body for creating a single {{.Pkg}}. It owns
+// its wire format (Decode) and its own validation (Validate); rest.Decode calls
+// both. Adjust the rules in Validate to match your domain.
 type Create{{.Type}}Req struct {
-	Name        string `json:"name" validate:"required,max=100"`
-	Description string `json:"description" validate:"max=500"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// Decode implements rest.Decoder.
+func (req *Create{{.Type}}Req) Decode(data []byte) error {
+	return json.Unmarshal(data, req)
+}
+
+// Validate reports the first violated rule as an *errs.Error (InvalidArgument),
+// which rest maps to HTTP 400.
+func (req Create{{.Type}}Req) Validate() error {
+	switch {
+	case req.Name == "":
+		return errs.Newf(errs.InvalidArgument, "name is required")
+	case utf8.RuneCountInString(req.Name) > 100:
+		return errs.Newf(errs.InvalidArgument, "name must be at most 100 characters")
+	case utf8.RuneCountInString(req.Description) > 500:
+		return errs.Newf(errs.InvalidArgument, "description must be at most 500 characters")
+	}
+	return nil
 }
 
 // Update{{.Type}}Req is the request body for a partial {{.Pkg}} update; nil fields
 // are left unchanged.
 type Update{{.Type}}Req struct {
-	Name        *string `json:"name" validate:"omitempty,max=100"`
-	Description *string `json:"description" validate:"omitempty,max=500"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
 }
 
-// Response is the REST representation of a {{.Pkg}}.
+// Decode implements rest.Decoder.
+func (req *Update{{.Type}}Req) Decode(data []byte) error {
+	return json.Unmarshal(data, req)
+}
+
+// Validate checks only the fields that were provided (non-nil).
+func (req Update{{.Type}}Req) Validate() error {
+	if req.Name != nil && utf8.RuneCountInString(*req.Name) > 100 {
+		return errs.Newf(errs.InvalidArgument, "name must be at most 100 characters")
+	}
+	if req.Description != nil && utf8.RuneCountInString(*req.Description) > 500 {
+		return errs.Newf(errs.InvalidArgument, "description must be at most 500 characters")
+	}
+	return nil
+}
+
+// Response is the REST representation of a {{.Pkg}}. It implements
+// rest.ResponseEncoder (Encode), so a handler can return it directly.
 type Response struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Encode implements rest.ResponseEncoder.
+func (r Response) Encode() ([]byte, string, error) {
+	data, err := json.Marshal(r)
+	return data, "application/json", err
 }
 
 func toResponse(v {{.Pkg}}core.{{.Type}}) Response {

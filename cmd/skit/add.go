@@ -122,6 +122,9 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 		{filepath.Join(dbPkgDir, "listing_test.go"), "templates/rest/listing_test.go.tmpl"},
 		{filepath.Join(apiPkgDir, pkg+".go"), "templates/rest/api.go.tmpl"},
 		{filepath.Join(apiPkgDir, "model.go"), "templates/rest/api_model.go.tmpl"},
+		// Declares the mocks package so its import resolves before the first
+		// `make generate`; moq writes StoreMock alongside this file.
+		{filepath.Join(corePkgDir, "mocks", "doc.go"), "templates/rest/mocks_doc.go.tmpl"},
 	}
 	for _, f := range files {
 		if _, err := os.Stat(f.dest); err == nil {
@@ -234,13 +237,13 @@ func printRESTTestNextSteps(out io.Writer, d restData) {
 	fmt.Fprintf(out, `
 Scaffolded tests for %[1]q. Next:
 
-1. Generate the Store mock (moq) the API test needs (if not already):
-
-   make generate        # or: go generate ./...
-
-2. Resolve the new test dependencies (matryer/is, gofakeit):
+1. Resolve the new test dependencies (matryer/is, gofakeit) and the moq tool:
 
    go mod tidy
+
+2. Generate the Store mock (moq) the API test needs:
+
+   make generate        # or: go generate ./...
 
 3. Run them:
 
