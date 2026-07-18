@@ -1,0 +1,40 @@
+package {{.Pkg}}
+
+import (
+	"context"
+	"io"
+	"testing"
+
+	"github.com/matryer/is"
+
+	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/logger"
+)
+
+func newTestConsumer() *Consumer {
+	return New(logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError}))
+}
+
+func Test{{.Type}}ConsumerAcksValid(t *testing.T) {
+	is := is.New(t)
+	c := newTestConsumer()
+
+	got := c.Handle(context.Background(), broker.Message{
+		Type: "{{.Pkg}}.event",
+		ID:   "1",
+		Data: []byte(`{}`),
+	})
+	is.Equal(got, broker.Ack) // a well-formed payload is acknowledged
+}
+
+func Test{{.Type}}ConsumerDiscardsMalformed(t *testing.T) {
+	is := is.New(t)
+	c := newTestConsumer()
+
+	got := c.Handle(context.Background(), broker.Message{
+		Type: "{{.Pkg}}.event",
+		ID:   "2",
+		Data: []byte(`{`), // invalid JSON
+	})
+	is.Equal(got, broker.Discard) // malformed payload is dropped, never requeued
+}

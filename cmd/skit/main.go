@@ -50,14 +50,16 @@ Get started — scaffold a full HTTP service (config, deps, server, migrations, 
   skit new github.com/you/svc --full
   cd svc && go mod tidy
 
-Then add a REST CRUD module for an entity:
+Then add modules to the service:
 
-  skit add rest <name>          # e.g. skit add rest widget
+  skit add rest <name>          # REST CRUD (core + store + transport + tests)
+  skit add grpc <name>          # gRPC module (.proto + handler)
+  skit add consumer <name>      # broker-agnostic message consumer
 
 Help:
 
   skit -h                       # top-level help and all commands
-  skit <command> -h             # help for a command (new, add rest, add grpc, version)
+  skit <command> -h             # help for a command (new, add rest, add grpc, add consumer, version)
 `)
 }
 
@@ -101,6 +103,11 @@ func main() {
 	}
 	if _, err := add.AddCommand("grpc", "scaffold a gRPC module",
 		"Generate a .proto contract + a gRPC handler adapting one entity's Core.", &addGRPCCommand{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if _, err := add.AddCommand("consumer", "scaffold a broker consumer",
+		"Generate a broker-agnostic message consumer (broker.Handler) for one event stream.", &addConsumerCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

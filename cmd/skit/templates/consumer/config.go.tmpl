@@ -1,0 +1,16 @@
+package config
+
+// ConsumerOpts is the transport-neutral configuration for one broker consumer.
+// Embed it in ServerOpts as a namespaced group per consumer, e.g.:
+//
+//	{{.Type}}Consumer ConsumerOpts `group:"{{.Pkg}}-consumer" namespace:"consumer-{{.Pkg}}" env-namespace:"CONSUMER_{{.UpperSnake}}"`
+//
+// which yields CONSUMER_{{.UpperSnake}}_TOPIC, CONSUMER_{{.UpperSnake}}_GROUP, etc.
+// The wiring maps it onto a broker.Subscription, so switching the underlying
+// transport (RabbitMQ/Kafka/NATS) needs no config change.
+type ConsumerOpts struct {
+	Topic       string   `long:"topic"       env:"TOPIC"       description:"logical source: RabbitMQ exchange, Kafka/NATS topic"`
+	Group       string   `long:"group"       env:"GROUP"       description:"durable subscription shared by replicas: RabbitMQ queue, Kafka/NATS consumer/queue group"`
+	Filters     []string `long:"filters"     env:"FILTERS"     env-delim:"," description:"message filters within the topic: RabbitMQ routing keys, NATS subject filters (ignored where unsupported)"`
+	Concurrency int      `long:"concurrency" env:"CONCURRENCY" default:"1" description:"number of handler goroutines"`
+}

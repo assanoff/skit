@@ -156,6 +156,53 @@ func TestAddRESTPluralOverride(t *testing.T) {
 	}
 }
 
+func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	var out bytes.Buffer
+	if err := addConsumer(&out, addRESTOpts{Dir: dir, Name: "order-refund"}); err != nil {
+		t.Fatalf("addConsumer: %v", err)
+	}
+
+	want := []string{
+		"internal/app/consumers/orderrefund/orderrefund.go",
+		"internal/app/consumers/orderrefund/orderrefund_test.go",
+		"internal/app/config/consumer.go",
+	}
+	fset := token.NewFileSet()
+	for _, rel := range want {
+		path := filepath.Join(dir, rel)
+		src := readFile(t, path)
+		if _, err := parser.ParseFile(fset, path, src, parser.AllErrors); err != nil {
+			t.Errorf("%s does not parse: %v", rel, err)
+		}
+	}
+
+	// The consumer handler is broker-agnostic: it depends on skit/broker and must
+	// NOT name a concrete transport (rabbitmq/kafka/nats) — that is a wiring choice.
+	handler := readFile(t, filepath.Join(dir, "internal/app/consumers/orderrefund/orderrefund.go"))
+	if !strings.Contains(handler, `"github.com/assanoff/skit/broker"`) {
+		t.Errorf("consumer should depend on skit/broker:\n%s", handler)
+	}
+	for _, transport := range []string{"rabbitmq", "kafka", "nats", "amqp"} {
+		if strings.Contains(handler, transport) {
+			t.Errorf("consumer must be transport-agnostic but mentions %q:\n%s", transport, handler)
+		}
+	}
+	if !strings.Contains(handler, "func (c *Consumer) Handle(ctx context.Context, m broker.Message) broker.Action") {
+		t.Errorf("consumer missing the broker.Handler method:\n%s", handler)
+	}
+
+	// The shared config type carries neutral field names (no exchange/routing-key).
+	cfg := readFile(t, filepath.Join(dir, "internal/app/config/consumer.go"))
+	for _, field := range []string{"Topic", "Group", "Filters", "Concurrency"} {
+		if !strings.Contains(cfg, field) {
+			t.Errorf("ConsumerOpts missing neutral field %q:\n%s", field, cfg)
+		}
+	}
+}
+
 // TestAddRESTIdempotent verifies re-running addREST does not error and does not
 // clobber existing files: a second run skips what is present. It also covers the
 // --no-tests-then-fill-in flow: the first run without tests, the second run adds

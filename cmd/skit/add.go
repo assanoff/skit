@@ -68,11 +68,12 @@ type addRESTOpts struct {
 
 // restData is the template payload shared by every generated REST file.
 type restData struct {
-	Module string // github.com/you/svc
-	Pkg    string // widget   — package name (lower, no separators)
-	Type   string // Widget   — exported Go type
-	Recv   string // w        — short local/var name (first letter of Pkg)
-	Plural string // widgets  — route path + table name
+	Module     string // github.com/you/svc
+	Pkg        string // widget      — package name (lower, no separators)
+	Type       string // Widget      — exported Go type
+	Recv       string // w           — short local/var name (first letter of Pkg)
+	Plural     string // widgets     — route path + table name
+	UpperSnake string // ORDER_LINE  — env-namespace fragment (consumer config)
 }
 
 var nameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
@@ -265,6 +266,114 @@ Scaffolded tests for %[1]q. Next:
    go test ./api/%[1]s/...   # API tests: mocked store, no docker
    go test ./tests/...       # integration (store + HTTP): needs docker, skipped under -short
 `, d.Pkg, d.Type)
+}
+
+// addConsumerCommand scaffolds a broker-agnostic message consumer: a
+// broker.Handler for one event stream plus the shared ConsumerOpts config.
+type addConsumerCommand struct {
+	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module  string `long:"module" description:"module path (default: read from go.mod)"`
+	NoTests bool   `long:"no-tests" description:"skip generating the handler test"`
+	Args    struct {
+		Name string `positional-arg-name:"name" description:"consumer name, e.g. order or order-refund"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addConsumerCommand) Execute([]string) error {
+	return addConsumer(os.Stdout, addRESTOpts{
+		Dir:     c.Dir,
+		Module:  c.Module,
+		Name:    c.Args.Name,
+		NoTests: c.NoTests,
+	})
+}
+
+// addConsumer generates a broker-agnostic consumer: a broker.Handler in
+// internal/app/consumers/<name> that depends only on skit/broker (so the
+// transport is a wiring choice), plus the shared config.ConsumerOpts.
+func addConsumer(out io.Writer, opts addRESTOpts) error {
+	if !nameRE.MatchString(opts.Name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	}
+
+	dir := opts.Dir
+	if dir == "" {
+		dir = "."
+	}
+
+	module := opts.Module
+	if module == "" {
+		m, err := moduleFromGoMod(dir)
+		if err != nil {
+			return err
+		}
+		module = m
+	}
+
+	words := splitWords(opts.Name)
+	pkg := strings.ToLower(strings.Join(words, ""))
+	data := restData{
+		Module:     module,
+		Pkg:        pkg,
+		Type:       pascal(words),
+		Recv:       pkg[:1],
+		UpperSnake: strings.ToUpper(strings.Join(words, "_")),
+	}
+
+	consumerDir := filepath.Join(dir, "internal", "app", "consumers", pkg)
+	files := []struct{ dest, tmpl string }{
+		{filepath.Join(consumerDir, pkg+".go"), "templates/consumer/consumer.go.tmpl"},
+		// Shared across consumers: generated once, skipped when it already exists.
+		{filepath.Join(dir, "internal", "app", "config", "consumer.go"), "templates/consumer/config.go.tmpl"},
+	}
+	if !opts.NoTests {
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(consumerDir, pkg+"_test.go"), "templates/consumer/consumer_test.go.tmpl",
+		})
+	}
+
+	for _, f := range files {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+
+	printConsumerNextSteps(out, data)
+	return nil
+}
+
+// printConsumerNextSteps prints the config group and broker wiring a developer
+// adds by hand — app-specific and not safe to generate blindly.
+func printConsumerNextSteps(out io.Writer, d restData) {
+	fmt.Fprintf(out, `
+Scaffolded the %[1]q consumer. It depends only on skit/broker, so the transport
+is chosen in the wiring below — swap the adapter (Kafka/NATS) without touching
+the handler. Next:
+
+1. go mod tidy   # pulls the test dep (matryer/is)
+
+2. Add a config group to ServerOpts (internal/app/config/opts.go):
+
+   %[2]sConsumer config.ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
+
+3. Wire it into brokerWorkers (internal/app/server/server.go). Build the neutral
+   broker.Subscription from config and pick the transport (RabbitMQ shown):
+
+   cons, err := rabbitmq.New(d.BrokerConn(ctx), d.Logger, broker.Subscription{
+       Name:        %[1]q + "-consumer",
+       Topic:       d.Opts.%[2]sConsumer.Topic,
+       Group:       d.Opts.%[2]sConsumer.Group,
+       Filters:     d.Opts.%[2]sConsumer.Filters,
+       Concurrency: d.Opts.%[2]sConsumer.Concurrency,
+   }, %[1]s.New(d.Logger).Handle)
+   if err != nil {
+       return nil, err   // brokerWorkers returns []worker.Runnable today — thread an error, or log.Fatal on init
+   }
+   runnables = append(runnables, cons)
+   // imports: %[1]s "%[4]s/internal/app/consumers/%[1]s", "github.com/assanoff/skit/broker", "github.com/assanoff/skit/broker/rabbitmq"
+
+4. go test ./internal/app/consumers/%[1]s/...
+`, d.Pkg, d.Type, d.UpperSnake, d.Module)
 }
 
 // addGRPCCommand scaffolds a gRPC module for one entity: a .proto contract plus

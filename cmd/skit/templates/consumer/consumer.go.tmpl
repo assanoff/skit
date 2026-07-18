@@ -1,0 +1,57 @@
+// Package {{.Pkg}} consumes {{.Pkg}} events off the message broker. It depends
+// only on the transport-neutral broker types (broker.Message / broker.Handler /
+// broker.Action), so the underlying transport — RabbitMQ today, Kafka or NATS
+// tomorrow — is chosen in the wiring, never here.
+package {{.Pkg}}
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/logger"
+)
+
+// Consumer handles inbound {{.Pkg}} events.
+type Consumer struct {
+	log *logger.Logger
+	// core *{{.Pkg}}core.Core // inject the domain core the handler drives
+}
+
+// New builds the {{.Pkg}} consumer.
+func New(log *logger.Logger) *Consumer {
+	return &Consumer{log: log}
+}
+
+// {{.Type}}Event is the business payload carried in the CloudEvent Data field.
+// Shape it to match the producer's contract.
+type {{.Type}}Event struct {
+	// TODO: event fields, e.g.
+	// ID string `json:"id"`
+}
+
+// Handle processes one delivered message and returns the broker's verdict. It is
+// a broker.Handler: transport-agnostic and safe for concurrent use when the
+// subscription runs with Concurrency > 1. The transport has already recovered
+// panics, decoded the CloudEvent envelope, and dropped malformed envelopes
+// before calling this — here we decode the business payload and act.
+//
+// Map outcomes to the Action the broker should take:
+//   - broker.Ack     — handled (or safely ignorable); drop it
+//   - broker.Requeue — transient failure (DB down, timeout); redeliver later
+//   - broker.Discard — permanent failure (bad payload); drop / dead-letter
+func (c *Consumer) Handle(ctx context.Context, m broker.Message) broker.Action {
+	var evt {{.Type}}Event
+	if err := json.Unmarshal(m.Data, &evt); err != nil {
+		c.log.Error(ctx, "decode {{.Pkg}} event", "type", m.Type, "id", m.ID, "err", err)
+		return broker.Discard // malformed payload: requeue would loop forever
+	}
+
+	// TODO: drive the domain and map the error, e.g.
+	//   if err := c.core.Do(ctx, evt); err != nil {
+	//   	if errs.IsTransient(err) { return broker.Requeue }
+	//   	return broker.Discard
+	//   }
+	c.log.Info(ctx, "handled {{.Pkg}} event", "type", m.Type, "id", m.ID)
+	return broker.Ack
+}

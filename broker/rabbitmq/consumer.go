@@ -44,6 +44,23 @@ type Consumer struct {
 	once    sync.Once
 }
 
+// New builds a Consumer from a transport-neutral broker.Subscription, mapping it
+// onto RabbitMQ concepts (Topic → exchange, Group → queue, RoutingKeys →
+// bindings). It is the pluggable entry point every transport adapter shares
+// (kafka.New, nats.New would have the same shape), so wiring code can depend on
+// broker.Subscription instead of the RabbitMQ-specific ConsumerConfig. Use
+// NewConsumer directly only when you need RabbitMQ-only options (e.g.
+// ExchangeKind).
+func New(conn *Conn, log *logger.Logger, sub broker.Subscription, h broker.Handler) (*Consumer, error) {
+	return NewConsumer(conn, log, ConsumerConfig{
+		Queue:       sub.Group,
+		Exchange:    sub.Topic,
+		RoutingKeys: sub.Filters,
+		Concurrency: sub.Concurrency,
+		Name:        sub.Name,
+	}, h)
+}
+
 // NewConsumer declares the topology and builds a Consumer. Register it on a
 // worker.Group like any other Runnable.
 func NewConsumer(conn *Conn, log *logger.Logger, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
