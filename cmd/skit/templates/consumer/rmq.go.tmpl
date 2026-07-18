@@ -1,24 +1,25 @@
 package {{.Pkg}}
 
 import (
-	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/worker"
 
 	"{{.Module}}/internal/app/config"
 )
 
-// Runnable builds the RabbitMQ-backed runnable for this consumer, mapping the
-// neutral ConsumerOpts onto a broker.Subscription and binding it to Handle. It
-// is the only transport-specific file in this package — the handler in
-// {{.Pkg}}.go stays broker-agnostic, so switching brokers means replacing this
-// file (e.g. a {{.Pkg}}_kafka.go with the same method), not touching Handle.
+// Runnable builds the RabbitMQ consumer for this handler. Every knob is spelled
+// out here (not hidden behind rabbitmq.New) so you can override it freely —
+// exchange kind, routing keys, concurrency, name — or drop rabbitmq.NewConsumer
+// entirely and build your own topology/loop over the AMQP client, still calling
+// c.Handle. The handler in {{.Pkg}}.go stays broker-agnostic; this file is the
+// only transport-specific one.
 func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (worker.Runnable, error) {
-	return rabbitmq.New(conn, c.log, broker.Subscription{
-		Name:        "{{.Pkg}}-consumer",
-		Topic:       opts.Topic,
-		Group:       opts.Group,
-		Filters:     opts.Filters,
+	return rabbitmq.NewConsumer(conn, c.log, rabbitmq.ConsumerConfig{
+		Queue:       opts.Group,
+		Exchange:    opts.Topic,
+		RoutingKeys: opts.Filters,
 		Concurrency: opts.Concurrency,
+		Name:        "{{.Pkg}}-consumer",
+		// ExchangeKind defaults to "topic"; set it for a direct/fanout exchange.
 	}, c.Handle)
 }

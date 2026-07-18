@@ -198,12 +198,11 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 	// The transport lives in its own file (rmq here) so a broker swap replaces one
 	// file; that file is where the concrete adapter is named.
 	rmq := readFile(t, filepath.Join(dir, "internal/app/consumers/orderrefund/orderrefund_rmq.go"))
-	if !strings.Contains(rmq, "rabbitmq.New(") || !strings.Contains(rmq, "broker.Subscription{") {
-		t.Errorf("rmq transport file missing rabbitmq.New/broker.Subscription:\n%s", rmq)
+	if !strings.Contains(rmq, "rabbitmq.NewConsumer(") || !strings.Contains(rmq, "rabbitmq.ConsumerConfig{") {
+		t.Errorf("rmq transport file should expose the editable rabbitmq.NewConsumer/ConsumerConfig:\n%s", rmq)
 	}
 
-	// --broker kafka has no SDK adapter yet: the handler is generated but no
-	// transport file is emitted.
+	// --broker kafka emits a Kafka transport file (and no rmq one).
 	kdir := t.TempDir()
 	writeGoMod(t, kdir, "github.com/me/svc")
 	if err := addConsumer(&bytes.Buffer{}, addRESTOpts{Dir: kdir, Name: "payment", Broker: "kafka"}); err != nil {
@@ -212,8 +211,24 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(kdir, "internal/app/consumers/payment/payment_rmq.go")); !os.IsNotExist(err) {
 		t.Errorf("kafka consumer must not emit an rmq transport file (stat err = %v)", err)
 	}
-	if _, err := os.Stat(filepath.Join(kdir, "internal/app/consumers/payment/payment.go")); err != nil {
-		t.Errorf("kafka consumer should still generate the agnostic handler: %v", err)
+	kfk := readFile(t, filepath.Join(kdir, "internal/app/consumers/payment/payment_kafka.go"))
+	if !strings.Contains(kfk, "kafka.NewConsumer(") || !strings.Contains(kfk, "kafka.ConsumerConfig{") {
+		t.Errorf("kafka transport file should expose the editable kafka.NewConsumer/ConsumerConfig:\n%s", kfk)
+	}
+
+	// --broker nats has no SDK adapter yet: handler generated, no transport file.
+	ndir := t.TempDir()
+	writeGoMod(t, ndir, "github.com/me/svc")
+	if err := addConsumer(&bytes.Buffer{}, addRESTOpts{Dir: ndir, Name: "ship", Broker: "nats"}); err != nil {
+		t.Fatalf("addConsumer nats: %v", err)
+	}
+	for _, f := range []string{"ship_rmq.go", "ship_kafka.go"} {
+		if _, err := os.Stat(filepath.Join(ndir, "internal/app/consumers/ship/"+f)); !os.IsNotExist(err) {
+			t.Errorf("nats consumer must not emit %s (no adapter yet)", f)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(ndir, "internal/app/consumers/ship/ship.go")); err != nil {
+		t.Errorf("nats consumer should still generate the agnostic handler: %v", err)
 	}
 
 	// The shared config type carries neutral field names (no exchange/routing-key).

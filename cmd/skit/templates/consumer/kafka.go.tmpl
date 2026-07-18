@@ -1,0 +1,24 @@
+package {{.Pkg}}
+
+import (
+	"github.com/assanoff/skit/broker/kafka"
+	"github.com/assanoff/skit/worker"
+
+	"{{.Module}}/internal/app/config"
+)
+
+// Runnable builds the Kafka consumer for this handler. Every knob is spelled out
+// here (not hidden behind kafka.New) so you can override it freely — concurrency,
+// retries, backoff, name — or drop kafka.NewConsumer entirely and build your own
+// loop over segmentio/kafka-go, still calling c.Handle. The handler in {{.Pkg}}.go
+// stays broker-agnostic; this file is the only transport-specific one.
+func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts) (worker.Runnable, error) {
+	return kafka.NewConsumer(kafka.ConsumerConfig{
+		Brokers:     cfg.Brokers,
+		Topic:       opts.Topic,
+		GroupID:     opts.Group,
+		Concurrency: opts.Concurrency,
+		Name:        "{{.Pkg}}-consumer",
+		// MaxRetries / RetryBackoff: leave zero for the SDK defaults, or set them.
+	}, c.log, c.Handle)
+}

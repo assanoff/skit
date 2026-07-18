@@ -275,7 +275,7 @@ Scaffolded tests for %[1]q. Next:
 type addConsumerCommand struct {
 	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
 	Module  string `long:"module" description:"module path (default: read from go.mod)"`
-	Broker  string `long:"broker" choice:"rmq" choice:"kafka" choice:"nats" default:"rmq" description:"transport for the generated wiring (only rmq has an SDK adapter today)"`
+	Broker  string `long:"broker" choice:"rmq" choice:"kafka" choice:"nats" default:"rmq" description:"transport for the generated wiring (rmq and kafka have SDK adapters; nats is handler-only for now)"`
 	NoTests bool   `long:"no-tests" description:"skip generating the handler test"`
 	Args    struct {
 		Name string `positional-arg-name:"name" description:"consumer name, e.g. order or order-refund"`
@@ -336,10 +336,16 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 		{filepath.Join(dir, "internal", "app", "config", "consumer.go"), "templates/consumer/config.go.tmpl"},
 	}
 	// The handler is broker-agnostic; the transport wiring is a separate file so a
-	// broker swap replaces one file. Only RabbitMQ has an SDK adapter today.
-	if transport == "rmq" {
+	// broker swap replaces one file. RabbitMQ and Kafka have SDK adapters; nats
+	// does not yet, so its transport is wired by hand.
+	switch transport {
+	case "rmq":
 		files = append(files, struct{ dest, tmpl string }{
 			filepath.Join(consumerDir, pkg+"_rmq.go"), "templates/consumer/rmq.go.tmpl",
+		})
+	case "kafka":
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(consumerDir, pkg+"_kafka.go"), "templates/consumer/kafka.go.tmpl",
 		})
 	}
 	if !opts.NoTests {
@@ -390,11 +396,38 @@ the transport lives in %[1]s_rmq.go. Next:
 		return
 	}
 
-	// kafka / nats: handler generated, but skit has no adapter yet.
+	if transport == "kafka" {
+		fmt.Fprintf(out, `
+Scaffolded the %[1]q consumer (Kafka). The handler (%[1]s.go) is broker-agnostic;
+the transport lives in %[1]s_kafka.go. Next:
+
+1. go mod tidy
+
+2. Add a config group to ServerOpts (internal/app/config/opts.go):
+
+   %[2]sConsumer config.ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
+
+3. Wire it into the worker group (internal/app/server/server.go). The generated
+   Runnable builds the Kafka consumer from config — supply the brokers (from your
+   own config/env):
+
+   cons, err := %[1]s.New(d.Logger).Runnable(kafka.Config{Brokers: d.Opts.Kafka.Brokers}, d.Opts.%[2]sConsumer)
+   if err != nil {
+       return nil, err
+   }
+   runnables = append(runnables, cons)
+   // imports: %[1]s "%[4]s/internal/app/consumers/%[1]s", "github.com/assanoff/skit/broker/kafka"
+
+4. go test ./internal/app/consumers/%[1]s/...
+`, d.Pkg, d.Type, d.UpperSnake, d.Module)
+		return
+	}
+
+	// nats (or any transport without an SDK adapter): handler generated, wire by hand.
 	fmt.Fprintf(out, `
 Scaffolded the %[1]q consumer handler (broker-agnostic). NOTE: skit has no %[5]s
-adapter yet — only rmq. The handler (%[1]s.go) and config are ready; wire the
-transport by hand once the adapter lands (mirror the rmq case: build a
+adapter yet — use rmq or kafka. The handler (%[1]s.go) and config are ready; wire
+the transport by hand once the adapter lands (mirror the rmq/kafka case: build a
 broker.Subscription from config and bind it to %[1]s.New(d.Logger).Handle).
 
 1. go mod tidy
