@@ -56,7 +56,7 @@ func testOpts(db dbx.Config) config.ServerOpts {
 			Schema:       db.Schema,
 			MaxIdleConns: 5,
 			MaxOpenConns: 20,
-			DisableTLS:   true,
+			// TLS left off (zero value): the testcontainers Postgres has no TLS.
 		},
 		Worker: config.Worker{Disabled: true},
 		Broker: config.Broker{Enabled: false},
