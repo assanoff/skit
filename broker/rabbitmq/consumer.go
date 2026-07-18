@@ -10,7 +10,6 @@ import (
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/logger"
-	"github.com/assanoff/skit/safetick"
 )
 
 // ConsumerConfig configures a Consumer.
@@ -142,31 +141,19 @@ func (c *Consumer) close() {
 // dispatch decodes one delivery into a broker.Message and runs the handler
 // under panic recovery, mapping the broker.Action back to an rmq.Action. A
 // malformed envelope is Ack'd (dropped) — requeuing it would loop forever.
-func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) (action rmq.Action) {
-	m, err := broker.UnmarshalCloudEvent(d.Body)
-	if err != nil {
-		c.log.Warn(ctx, "rabbitmq consumer: malformed message, dropping",
-			"consumer", c.cfg.Name, "err", err, "body_size", len(d.Body))
-		return rmq.Ack
-	}
-	m.Topic = d.Exchange
-	m.Key = d.RoutingKey
-	m.Headers = stringHeaders(d.Headers)
-
-	// A panicking handler must not crash the consumer goroutine; on panic we
-	// requeue so the message is retried elsewhere rather than silently lost.
-	action = rmq.NackRequeue
-	recovered := safetick.Guard(c.log.Slog(), c.cfg.Name, nil, func() {
-		action = toRMQAction(c.handler(ctx, m))
-	})
-	if recovered {
-		c.log.Error(ctx, "rabbitmq consumer: handler panicked, requeueing",
-			"consumer", c.cfg.Name, "message_id", m.ID)
-	}
-	return action
+func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
+	action := broker.Process(ctx, c.log.Slog(), c.cfg.Name, d.Body, func(m *broker.Message) {
+		m.Topic = d.Exchange
+		m.Key = d.RoutingKey
+		m.Headers = stringHeaders(d.Headers)
+	}, c.handler)
+	return ToAction(action)
 }
 
-func toRMQAction(a broker.Action) rmq.Action {
+// ToAction maps a broker.Action onto the go-rabbitmq delivery action, so a
+// hand-written or scaffolded consumer loop can reuse the same mapping skit's
+// Consumer uses.
+func ToAction(a broker.Action) rmq.Action {
 	switch a {
 	case broker.Requeue:
 		return rmq.NackRequeue

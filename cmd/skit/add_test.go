@@ -197,9 +197,13 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 
 	// The transport lives in its own file (rmq here) so a broker swap replaces one
 	// file; that file is where the concrete adapter is named.
+	// The transport file owns the full consume loop in the service, assembled from
+	// skit primitives (broker.Process + rabbitmq.ToAction) over the raw client.
 	rmq := readFile(t, filepath.Join(dir, "internal/app/consumers/orderrefund/orderrefund_rmq.go"))
-	if !strings.Contains(rmq, "rabbitmq.NewConsumer(") || !strings.Contains(rmq, "rabbitmq.ConsumerConfig{") {
-		t.Errorf("rmq transport file should expose the editable rabbitmq.NewConsumer/ConsumerConfig:\n%s", rmq)
+	for _, want := range []string{"broker.Process(", "rabbitmq.ToAction(", "rmq.NewConsumer(", "func (r *rmqRunnable) Start("} {
+		if !strings.Contains(rmq, want) {
+			t.Errorf("rmq transport file missing %q (expected a full in-service loop):\n%s", want, rmq)
+		}
 	}
 
 	// --broker kafka emits a Kafka transport file (and no rmq one).
@@ -212,8 +216,10 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 		t.Errorf("kafka consumer must not emit an rmq transport file (stat err = %v)", err)
 	}
 	kfk := readFile(t, filepath.Join(kdir, "internal/app/consumers/payment/payment_kafka.go"))
-	if !strings.Contains(kfk, "kafka.NewConsumer(") || !strings.Contains(kfk, "kafka.ConsumerConfig{") {
-		t.Errorf("kafka transport file should expose the editable kafka.NewConsumer/ConsumerConfig:\n%s", kfk)
+	for _, want := range []string{"broker.Process(", "kgo.NewReader(", "func (r *kafkaRunnable) Start("} {
+		if !strings.Contains(kfk, want) {
+			t.Errorf("kafka transport file missing %q (expected a full in-service loop):\n%s", want, kfk)
+		}
 	}
 
 	// --broker nats has no SDK adapter yet: handler generated, no transport file.

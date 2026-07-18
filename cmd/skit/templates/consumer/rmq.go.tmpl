@@ -1,25 +1,95 @@
 package {{.Pkg}}
 
 import (
+	"context"
+	"sync"
+
+	rmq "github.com/wagslane/go-rabbitmq"
+
+	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
+	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/worker"
 
 	"{{.Module}}/internal/app/config"
 )
 
-// Runnable builds the RabbitMQ consumer for this handler. Every knob is spelled
-// out here (not hidden behind rabbitmq.New) so you can override it freely —
-// exchange kind, routing keys, concurrency, name — or drop rabbitmq.NewConsumer
-// entirely and build your own topology/loop over the AMQP client, still calling
-// c.Handle. The handler in {{.Pkg}}.go stays broker-agnostic; this file is the
-// only transport-specific one.
-func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (worker.Runnable, error) {
-	return rabbitmq.NewConsumer(conn, c.log, rabbitmq.ConsumerConfig{
-		Queue:       opts.Group,
-		Exchange:    opts.Topic,
-		RoutingKeys: opts.Filters,
-		Concurrency: opts.Concurrency,
-		Name:        "{{.Pkg}}-consumer",
-		// ExchangeKind defaults to "topic"; set it for a direct/fanout exchange.
-	}, c.Handle)
+// rmqRunnable is the RabbitMQ consumer for this handler, generated into the
+// service so you own the topology and the consume loop. skit supplies only the
+// infrastructure: the managed connection (rabbitmq.Conn), the
+// decode+panic-guard+verdict primitive (broker.Process), and the verdict→AMQP
+// mapping (rabbitmq.ToAction). Edit the exchange kind, bindings, or concurrency
+// freely — or replace the loop wholesale; Handle in {{.Pkg}}.go stays untouched.
+type rmqRunnable struct {
+	log  *logger.Logger
+	rc   *rmq.Consumer
+	h    broker.Handler
+	name string
+	once sync.Once
 }
+
+// Runnable declares the queue/exchange/bindings from config and returns the
+// worker.Runnable to register on the worker group.
+func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (worker.Runnable, error) {
+	name := "{{.Pkg}}-consumer"
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	keys := opts.Filters
+	if len(keys) == 0 {
+		keys = []string{"#"} // bind to everything on the exchange by default
+	}
+
+	rmqOpts := []func(*rmq.ConsumerOptions){
+		rmq.WithConsumerOptionsConsumerName(name),
+		rmq.WithConsumerOptionsQueueDurable,
+		rmq.WithConsumerOptionsConcurrency(concurrency),
+		rmq.WithConsumerOptionsExchangeName(opts.Topic),
+		rmq.WithConsumerOptionsExchangeKind("topic"),
+		rmq.WithConsumerOptionsExchangeDeclare,
+		rmq.WithConsumerOptionsExchangeDurable,
+	}
+	for _, k := range keys {
+		rmqOpts = append(rmqOpts, rmq.WithConsumerOptionsRoutingKey(k))
+	}
+
+	rc, err := rmq.NewConsumer(conn.Conn, opts.Group, rmqOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return &rmqRunnable{log: c.log, rc: rc, h: c.Handle, name: name}, nil
+}
+
+// Name implements worker.Runnable.
+func (r *rmqRunnable) Name() string { return r.name }
+
+// Start consumes until ctx is canceled (or Stop closes the consumer). Run blocks
+// with automatic reconnection; a watcher goroutine closes it on cancel.
+func (r *rmqRunnable) Start(ctx context.Context) error {
+	go func() {
+		<-ctx.Done()
+		r.close()
+	}()
+
+	r.log.Info(ctx, "rabbitmq consumer started", "consumer", r.name)
+	err := r.rc.Run(func(d rmq.Delivery) rmq.Action {
+		action := broker.Process(ctx, r.log.Slog(), r.name, d.Body, func(m *broker.Message) {
+			m.Topic = d.Exchange
+			m.Key = d.RoutingKey
+		}, r.h)
+		return rabbitmq.ToAction(action)
+	})
+	if err != nil && ctx.Err() == nil {
+		return err // a context-driven shutdown is graceful, not an error
+	}
+	return nil
+}
+
+// Stop implements worker.Runnable.
+func (r *rmqRunnable) Stop(context.Context) error {
+	r.close()
+	return nil
+}
+
+func (r *rmqRunnable) close() { r.once.Do(func() { r.rc.Close() }) }

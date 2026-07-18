@@ -1,24 +1,151 @@
 package {{.Pkg}}
 
 import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	kgo "github.com/segmentio/kafka-go"
+
+	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/kafka"
+	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/worker"
 
 	"{{.Module}}/internal/app/config"
 )
 
-// Runnable builds the Kafka consumer for this handler. Every knob is spelled out
-// here (not hidden behind kafka.New) so you can override it freely — concurrency,
-// retries, backoff, name — or drop kafka.NewConsumer entirely and build your own
-// loop over segmentio/kafka-go, still calling c.Handle. The handler in {{.Pkg}}.go
-// stays broker-agnostic; this file is the only transport-specific one.
+// Retry budget for a broker.Requeue verdict — Kafka has no per-message nack, so a
+// requeued record is retried in place with a backoff, then committed (dropped)
+// to unblock the partition. Add a dead-letter topic for real poison handling.
+const (
+	maxRetries   = 5
+	retryBackoff = time.Second
+)
+
+// kafkaRunnable is the Kafka consumer for this handler, generated into the
+// service so you own the consume loop. skit supplies only the infrastructure:
+// the decode+panic-guard+verdict primitive (broker.Process). Edit the reader
+// config, retry policy, or commit strategy freely — or replace the loop
+// wholesale; Handle in {{.Pkg}}.go stays untouched.
+type kafkaRunnable struct {
+	log     *logger.Logger
+	brokers []string
+	topic   string
+	group   string
+	conc    int
+	h       broker.Handler
+	name    string
+
+	mu      sync.Mutex
+	readers []*kgo.Reader
+	once    sync.Once
+}
+
+// Runnable returns the worker.Runnable to register on the worker group.
 func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts) (worker.Runnable, error) {
-	return kafka.NewConsumer(kafka.ConsumerConfig{
-		Brokers:     cfg.Brokers,
-		Topic:       opts.Topic,
-		GroupID:     opts.Group,
-		Concurrency: opts.Concurrency,
-		Name:        "{{.Pkg}}-consumer",
-		// MaxRetries / RetryBackoff: leave zero for the SDK defaults, or set them.
-	}, c.log, c.Handle)
+	conc := opts.Concurrency
+	if conc <= 0 {
+		conc = 1
+	}
+	return &kafkaRunnable{
+		log:     c.log,
+		brokers: cfg.Brokers,
+		topic:   opts.Topic,
+		group:   opts.Group,
+		conc:    conc,
+		h:       c.Handle,
+		name:    "{{.Pkg}}-consumer",
+	}, nil
+}
+
+// Name implements worker.Runnable.
+func (r *kafkaRunnable) Name() string { return r.name }
+
+// Start runs conc readers in the consumer group until ctx is canceled.
+func (r *kafkaRunnable) Start(ctx context.Context) error {
+	var wg sync.WaitGroup
+	for i := 0; i < r.conc; i++ {
+		reader := kgo.NewReader(kgo.ReaderConfig{Brokers: r.brokers, GroupID: r.group, Topic: r.topic})
+		r.mu.Lock()
+		r.readers = append(r.readers, reader)
+		r.mu.Unlock()
+
+		wg.Add(1)
+		go func(rd *kgo.Reader) {
+			defer wg.Done()
+			r.consume(ctx, rd)
+		}(reader)
+	}
+
+	r.log.Info(ctx, "kafka consumer started", "consumer", r.name, "topic", r.topic, "group", r.group)
+	<-ctx.Done()
+	r.close()
+	wg.Wait()
+	return nil
+}
+
+// Stop implements worker.Runnable.
+func (r *kafkaRunnable) Stop(context.Context) error {
+	r.close()
+	return nil
+}
+
+// consume leases records one at a time (FetchMessage does not auto-commit) and
+// commits only after a terminal verdict — the at-least-once loop.
+func (r *kafkaRunnable) consume(ctx context.Context, rd *kgo.Reader) {
+	for {
+		msg, err := rd.FetchMessage(ctx)
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+				return
+			}
+			r.log.Error(ctx, "kafka fetch", "consumer", r.name, "err", err)
+			continue
+		}
+		r.handle(ctx, rd, msg)
+	}
+}
+
+func (r *kafkaRunnable) handle(ctx context.Context, rd *kgo.Reader, msg kgo.Message) {
+	route := func(m *broker.Message) {
+		m.Topic = msg.Topic
+		m.Key = string(msg.Key)
+	}
+	for attempt := 0; ; attempt++ {
+		switch broker.Process(ctx, r.log.Slog(), r.name, msg.Value, route, r.h) {
+		case broker.Requeue:
+			if attempt >= maxRetries {
+				r.log.Error(ctx, "kafka retries exhausted, dropping (add a dead-letter topic)",
+					"consumer", r.name, "offset", msg.Offset)
+				r.commit(ctx, rd, msg)
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return // leave uncommitted so it is redelivered
+			case <-time.After(retryBackoff):
+			}
+		default: // Ack or Discard: terminal
+			r.commit(ctx, rd, msg)
+			return
+		}
+	}
+}
+
+func (r *kafkaRunnable) commit(ctx context.Context, rd *kgo.Reader, msg kgo.Message) {
+	if err := rd.CommitMessages(ctx, msg); err != nil && ctx.Err() == nil {
+		r.log.Error(ctx, "kafka commit", "consumer", r.name, "offset", msg.Offset, "err", err)
+	}
+}
+
+func (r *kafkaRunnable) close() {
+	r.once.Do(func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for _, rd := range r.readers {
+			_ = rd.Close()
+		}
+	})
 }

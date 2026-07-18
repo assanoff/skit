@@ -11,7 +11,6 @@ import (
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/logger"
-	"github.com/assanoff/skit/safetick"
 )
 
 // DefaultMaxRetries bounds how many times a broker.Requeue verdict retries the
@@ -198,18 +197,10 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	}
 }
 
-// dispatch runs the handler under panic recovery, defaulting to Requeue when it
-// panics so the record is retried rather than silently dropped.
-func (c *Consumer) dispatch(ctx context.Context, m broker.Message) (action broker.Action) {
-	action = broker.Requeue
-	recovered := safetick.Guard(c.log.Slog(), c.cfg.Name, nil, func() {
-		action = c.handler(ctx, m)
-	})
-	if recovered {
-		c.log.Error(ctx, "kafka consumer: handler panicked, will retry",
-			"consumer", c.cfg.Name, "message_id", m.ID)
-	}
-	return action
+// dispatch runs the handler under panic recovery (via broker.Guard), defaulting
+// to Requeue on panic so the record is retried rather than silently dropped.
+func (c *Consumer) dispatch(ctx context.Context, m broker.Message) broker.Action {
+	return broker.Guard(ctx, c.log.Slog(), c.cfg.Name, m, c.handler)
 }
 
 func (c *Consumer) commit(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
