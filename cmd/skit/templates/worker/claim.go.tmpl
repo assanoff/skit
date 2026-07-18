@@ -1,0 +1,49 @@
+// Package {{.Pkg}} is a queue-backed worker: it defines a queue.JobFunc for its
+// task kind, driven by a worker.Processor (Claim → Handle → MarkDone/MarkFailed)
+// with lease-based, multi-replica-safe delivery. Producers enqueue work with
+// queue.Schedule(ScheduleParams{Kind: {{.Pkg}}.Kind, Payload: ...}).
+package {{.Pkg}}
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/queue"
+)
+
+// Kind routes queue tasks to this worker's handler (see queue.Mux).
+const Kind = "{{.Pkg}}"
+
+// Worker handles claimed {{.Pkg}} tasks.
+type Worker struct {
+	log *logger.Logger
+	// core *{{.Pkg}}core.Core // inject the domain core the handler drives
+}
+
+// New builds the {{.Pkg}} worker.
+func New(log *logger.Logger) *Worker {
+	return &Worker{log: log}
+}
+
+// {{.Type}}Task is the JSON payload carried in queue.Task.Payload.
+type {{.Type}}Task struct {
+	// TODO: task fields, e.g.
+	// ID string `json:"id"`
+}
+
+// Handle processes one claimed task; it is a queue.JobFunc. Returning nil marks
+// the task done; returning an error releases the lease so the queue retries it
+// (until the retry budget is exhausted, then the task is parked as a dead
+// letter). Wrap the handler in queue.Retry to classify terminal vs retryable.
+func (w *Worker) Handle(ctx context.Context, t queue.Task) error {
+	var payload {{.Type}}Task
+	if err := json.Unmarshal(t.Payload, &payload); err != nil {
+		return fmt.Errorf("decode {{.Pkg}} task %d: %w", t.ID, err)
+	}
+
+	// TODO: drive the domain, e.g. return w.core.Do(ctx, payload)
+	w.log.Info(ctx, "{{.Pkg}} task handled", "task", t.ID, "attempts", t.Attempts)
+	return nil
+}

@@ -1,0 +1,32 @@
+package {{.Pkg}}
+
+import (
+	"context"
+	"io"
+	"testing"
+
+	"github.com/matryer/is"
+
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/queue"
+)
+
+func newTestWorker() *Worker {
+	return New(logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError}))
+}
+
+func Test{{.Type}}WorkerHandleValid(t *testing.T) {
+	is := is.New(t)
+	w := newTestWorker()
+
+	err := w.Handle(context.Background(), queue.Task{ID: 1, Kind: Kind, Payload: []byte(`{}`)})
+	is.NoErr(err) // a well-formed task is processed
+}
+
+func Test{{.Type}}WorkerHandleMalformed(t *testing.T) {
+	is := is.New(t)
+	w := newTestWorker()
+
+	err := w.Handle(context.Background(), queue.Task{ID: 2, Kind: Kind, Payload: []byte(`{`)})
+	is.True(err != nil) // a malformed payload is an error (queue retries, then dead-letters)
+}

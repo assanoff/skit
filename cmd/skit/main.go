@@ -55,11 +55,12 @@ Then add modules to the service:
   skit add rest <name>          # REST CRUD (core + store + transport + tests)
   skit add grpc <name>          # gRPC module (.proto + handler)
   skit add consumer <name>      # broker-agnostic message consumer
+  skit add worker <name>        # background worker (--claim for queue-backed)
 
 Help:
 
   skit -h                       # top-level help and all commands
-  skit <command> -h             # help for a command (new, add rest, add grpc, add consumer, version)
+  skit <command> -h             # help for a command (new, add rest, add grpc, add consumer, add worker, version)
 `)
 }
 
@@ -108,6 +109,11 @@ func main() {
 	}
 	if _, err := add.AddCommand("consumer", "scaffold a broker consumer",
 		"Generate a broker-agnostic message consumer (broker.Handler) for one event stream.", &addConsumerCommand{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if _, err := add.AddCommand("worker", "scaffold a background worker",
+		"Generate a periodic tick worker (or, with --claim, a queue-backed processor).", &addWorkerCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

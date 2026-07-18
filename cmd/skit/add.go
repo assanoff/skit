@@ -64,6 +64,7 @@ type addRESTOpts struct {
 	Plural  string // override for routes/table; defaults to Pkg+"s"
 	Name    string // raw entity name
 	NoTests bool   // skip generating tests
+	Claim   bool   // worker: --claim (queue-backed) variant instead of periodic tick
 }
 
 // restData is the template payload shared by every generated REST file.
@@ -374,6 +375,133 @@ the handler. Next:
 
 4. go test ./internal/app/consumers/%[1]s/...
 `, d.Pkg, d.Type, d.UpperSnake, d.Module)
+}
+
+// addWorkerCommand scaffolds a background worker: a periodic tick loop by
+// default, or (with --claim) a queue-backed handler driven by a worker.Processor.
+type addWorkerCommand struct {
+	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module  string `long:"module" description:"module path (default: read from go.mod)"`
+	Claim   bool   `long:"claim" description:"queue-backed worker (SDK queue: claim/lease/retry) instead of a periodic tick"`
+	NoTests bool   `long:"no-tests" description:"skip generating the worker test"`
+	Args    struct {
+		Name string `positional-arg-name:"name" description:"worker name, e.g. sweeper or photo-import"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addWorkerCommand) Execute([]string) error {
+	return addWorker(os.Stdout, addRESTOpts{
+		Dir:     c.Dir,
+		Module:  c.Module,
+		Name:    c.Args.Name,
+		NoTests: c.NoTests,
+		Claim:   c.Claim,
+	})
+}
+
+// addWorker generates a background worker into internal/app/workers/<name>:
+// a periodic worker.Loop (Tick) by default, or a queue.JobFunc (Handle) driven
+// by a worker.Processor when opts.Claim is set.
+func addWorker(out io.Writer, opts addRESTOpts) error {
+	if !nameRE.MatchString(opts.Name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	}
+
+	dir := opts.Dir
+	if dir == "" {
+		dir = "."
+	}
+
+	module := opts.Module
+	if module == "" {
+		m, err := moduleFromGoMod(dir)
+		if err != nil {
+			return err
+		}
+		module = m
+	}
+
+	words := splitWords(opts.Name)
+	pkg := strings.ToLower(strings.Join(words, ""))
+	data := restData{
+		Module: module,
+		Pkg:    pkg,
+		Type:   pascal(words),
+		Recv:   pkg[:1],
+	}
+
+	mainTmpl := "templates/worker/tick.go.tmpl"
+	testTmpl := "templates/worker/tick_test.go.tmpl"
+	if opts.Claim {
+		mainTmpl = "templates/worker/claim.go.tmpl"
+		testTmpl = "templates/worker/claim_test.go.tmpl"
+	}
+
+	workerDir := filepath.Join(dir, "internal", "app", "workers", pkg)
+	files := []struct{ dest, tmpl string }{
+		{filepath.Join(workerDir, pkg+".go"), mainTmpl},
+	}
+	if !opts.NoTests {
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(workerDir, pkg+"_test.go"), testTmpl,
+		})
+	}
+
+	for _, f := range files {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+
+	printWorkerNextSteps(out, data, opts.Claim)
+	return nil
+}
+
+// printWorkerNextSteps prints the worker-group wiring a developer adds by hand,
+// branching on the worker kind (periodic tick vs queue-backed processor).
+func printWorkerNextSteps(out io.Writer, d restData, claim bool) {
+	if claim {
+		fmt.Fprintf(out, `
+Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
+
+1. go mod tidy   # test dep (matryer/is)
+
+2. Provision the queue table once — add queue.Schema() to a migration, or call
+   EnsureSchema at startup — and expose a queue.Queue in deps if absent:
+
+   q := queue.NewPG(d.Logger, d.DB(ctx), queue.Options{})
+   _ = q.EnsureSchema(ctx)
+
+3. Wire the processor into the worker group (internal/app/server/server.go), in
+   the "if !opts.Worker.Disabled" block:
+
+   mux := queue.NewMux()
+   _ = mux.Register(%[1]s.Kind, %[1]s.New(d.Logger).Handle)
+   proc := worker.NewProcessor[queue.Task](d.Logger.Slog(), q, mux, q, worker.ProcessorConfig{})
+   extra = append(extra, worker.NewPacedLoop(d.Logger.Slog(),
+       worker.LoopConfig{Name: %[1]q + "-worker", Interval: time.Second}, proc.PacedTick()))
+   // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue", "github.com/assanoff/skit/worker"
+
+4. Enqueue work: q.Schedule(ctx, queue.ScheduleParams{Kind: %[1]s.Kind, Payload: ...})
+
+5. go test ./internal/app/workers/%[1]s/...
+`, d.Pkg, d.Module)
+		return
+	}
+
+	fmt.Fprintf(out, `
+Scaffolded the %[1]q periodic worker. Next:
+
+1. go mod tidy   # test dep (matryer/is)
+
+2. Wire it into the worker group (internal/app/server/server.go), in the
+   "if !opts.Worker.Disabled" block:
+
+   extra = append(extra, %[1]s.New(d.Logger).Loop(d.Opts.Worker.Interval))
+   // import: %[1]s "%[2]s/internal/app/workers/%[1]s"
+
+3. go test ./internal/app/workers/%[1]s/...
+`, d.Pkg, d.Module)
 }
 
 // addGRPCCommand scaffolds a gRPC module for one entity: a .proto contract plus

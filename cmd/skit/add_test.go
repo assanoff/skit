@@ -203,6 +203,47 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 	}
 }
 
+func TestAddWorkerTickVariant(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addWorker(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "sweeper"}); err != nil {
+		t.Fatalf("addWorker: %v", err)
+	}
+
+	src := readFile(t, filepath.Join(dir, "internal/app/workers/sweeper/sweeper.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "sweeper.go", src, parser.AllErrors); err != nil {
+		t.Errorf("sweeper.go does not parse: %v", err)
+	}
+	for _, want := range []string{"func (w *Worker) Tick(", "func (w *Worker) Loop(", "worker.NewLoop("} {
+		if !strings.Contains(src, want) {
+			t.Errorf("tick worker missing %q:\n%s", want, src)
+		}
+	}
+	if strings.Contains(src, "queue.") {
+		t.Errorf("tick worker must not depend on queue:\n%s", src)
+	}
+}
+
+func TestAddWorkerClaimVariant(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addWorker(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "photo-import", Claim: true}); err != nil {
+		t.Fatalf("addWorker --claim: %v", err)
+	}
+
+	src := readFile(t, filepath.Join(dir, "internal/app/workers/photoimport/photoimport.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "photoimport.go", src, parser.AllErrors); err != nil {
+		t.Errorf("photoimport.go does not parse: %v", err)
+	}
+	for _, want := range []string{"const Kind =", "func (w *Worker) Handle(ctx context.Context, t queue.Task) error", "PhotoImportTask"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("claim worker missing %q:\n%s", want, src)
+		}
+	}
+}
+
 // TestAddRESTIdempotent verifies re-running addREST does not error and does not
 // clobber existing files: a second run skips what is present. It also covers the
 // --no-tests-then-fill-in flow: the first run without tests, the second run adds

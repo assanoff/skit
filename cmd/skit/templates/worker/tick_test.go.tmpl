@@ -1,0 +1,23 @@
+package {{.Pkg}}
+
+import (
+	"context"
+	"io"
+	"testing"
+
+	"github.com/matryer/is"
+
+	"github.com/assanoff/skit/logger"
+)
+
+func newTestWorker() *Worker {
+	return New(logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError}))
+}
+
+func Test{{.Type}}WorkerTick(t *testing.T) {
+	is := is.New(t)
+	w := newTestWorker()
+
+	err := w.Tick(context.Background())
+	is.NoErr(err) // the scaffolded tick is a no-op; fill it in and assert its effect
+}

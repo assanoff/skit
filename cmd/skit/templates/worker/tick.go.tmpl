@@ -1,0 +1,47 @@
+// Package {{.Pkg}} is a periodic background worker: worker.NewLoop calls Tick on
+// a fixed interval, each tick wrapped in panic recovery so one bad tick cannot
+// crash the process. Register Loop() on the service's worker.Group.
+package {{.Pkg}}
+
+import (
+	"context"
+	"time"
+
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/worker"
+)
+
+// DefaultInterval is the fallback tick interval when Loop gets a non-positive one.
+const DefaultInterval = time.Minute
+
+// Worker runs one unit of periodic work per tick.
+type Worker struct {
+	log *logger.Logger
+	// core *{{.Pkg}}core.Core // inject the domain core the tick drives
+}
+
+// New builds the {{.Pkg}} worker.
+func New(log *logger.Logger) *Worker {
+	return &Worker{log: log}
+}
+
+// Tick performs one unit of work. A returned error is logged by the loop but
+// does not stop it; the loop stops only when its context is canceled. Keep a
+// tick bounded and idempotent — it may run on every replica.
+func (w *Worker) Tick(ctx context.Context) error {
+	// TODO: one unit of periodic work, e.g. return w.core.Sweep(ctx)
+	w.log.Info(ctx, "{{.Pkg}} tick")
+	return nil
+}
+
+// Loop wraps Tick in a fixed-interval worker.Loop (a worker.Runnable); a
+// non-positive interval falls back to DefaultInterval.
+func (w *Worker) Loop(interval time.Duration) *worker.Loop {
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+	return worker.NewLoop(w.log.Slog(), worker.LoopConfig{
+		Name:     "{{.Pkg}}-worker",
+		Interval: interval,
+	}, w.Tick)
+}
