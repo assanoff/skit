@@ -160,9 +160,9 @@ func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}.QueryFilter, 
 		"limit": cur.Limit() + 1, // one extra row signals that a next page exists
 	}
 
-	// The keyset boundary is just one more predicate alongside filter's: build the
-	// filter conditions, then append the boundary, then write them as one WHERE.
-	wc := s.whereConditions(filter, data)
+	// The keyset boundary is just one more predicate alongside filter's: bind its
+	// params, then hand it to applyFilter as an extra so it lands in the same WHERE.
+	var extra []string
 	if key != "" {
 		ts, id, err := decodeCursor(key)
 		if err != nil {
@@ -174,11 +174,11 @@ func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}.QueryFilter, 
 		// the id tiebreaker makes the keyset total so paging never repeats a row.
 		// CAST(... AS uuid) — not ::uuid — so sqlx's named-param parser doesn't
 		// trip over the `::`.
-		wc = append(wc, "(created_at, id) < (:after_ts, CAST(:after_id AS uuid))")
+		extra = append(extra, "(created_at, id) < (:after_ts, CAST(:after_id AS uuid))")
 	}
 
 	buf := bytes.NewBufferString(`SELECT id, name, description, created_at, updated_at FROM {{.Plural}}`)
-	writeWhere(buf, wc)
+	s.applyFilter(filter, data, buf, extra...)
 	buf.WriteString(` ORDER BY created_at DESC, id DESC LIMIT :limit`)
 
 	var rows []db{{.Type}}
@@ -195,38 +195,9 @@ func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}.QueryFilter, 
 	return toCoreSlice(rows), next, nil
 }
 
-// whereConditions returns the SQL predicates for filter, binding each one's named
-// params into data — the db-layer filter convention: optional columns become
-// :name predicates joined later under one WHERE. Returning the slice (rather than
-// writing the clause itself) lets QueryByCursor append the keyset boundary before
-// the WHERE is assembled.
-func (s *Store) whereConditions(filter {{.Pkg}}.QueryFilter, data map[string]any) []string {
-	var wc []string
-
-	if filter.Name != nil {
-		data["name"] = "%" + *filter.Name + "%"
-		wc = append(wc, "name ILIKE :name")
-	}
-	if filter.Description != nil {
-		data["description"] = "%" + *filter.Description + "%"
-		wc = append(wc, "description ILIKE :description")
-	}
-	return wc
-}
-
-// applyFilter writes filter's WHERE clause into buf — the offset Query and Count
-// path, which have no keyset boundary to combine.
-func (s *Store) applyFilter(filter {{.Pkg}}.QueryFilter, data map[string]any, buf *bytes.Buffer) {
-	writeWhere(buf, s.whereConditions(filter, data))
-}
-
-// writeWhere appends a "WHERE a AND b AND …" clause to buf when wc is non-empty.
-func writeWhere(buf *bytes.Buffer, wc []string) {
-	if len(wc) > 0 {
-		buf.WriteString(" WHERE ")
-		buf.WriteString(strings.Join(wc, " AND "))
-	}
-}
+// The dynamic WHERE — applyFilter — lives in filter.go; keyset paging in
+// QueryByCursor passes its boundary predicate to applyFilter as an extra so it
+// is combined with the filter conditions under one WHERE.
 
 // encodeCursor packs a {{.Pkg}}'s sort key (created_at, id) into the plain string
 // that page.EncodeCursor turns into an opaque, URL-safe token.

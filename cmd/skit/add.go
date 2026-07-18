@@ -21,7 +21,7 @@ type addRestCommand struct {
 	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
 	Module  string `long:"module" description:"module path (default: read from go.mod)"`
 	Plural  string `long:"plural" description:"route/table plural (default: <name>+\"s\")"`
-	NoTests bool   `long:"no-tests" description:"skip the generated listing_test.go (add tests later with 'skit add rest-test')"`
+	NoTests bool   `long:"no-tests" description:"skip generating tests (add them later with 'skit add rest-test')"`
 	Args    struct {
 		Name string `positional-arg-name:"name" description:"entity name, e.g. widget or order-line"`
 	} `positional-args:"yes" required:"yes"`
@@ -63,7 +63,7 @@ type addRESTOpts struct {
 	Module  string // module path; resolved from go.mod when empty
 	Plural  string // override for routes/table; defaults to Pkg+"s"
 	Name    string // raw entity name
-	NoTests bool   // skip the generated listing_test.go
+	NoTests bool   // skip generating tests
 }
 
 // restData is the template payload shared by every generated REST file.
@@ -111,8 +111,8 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 		Plural: plural,
 	}
 
-	// dest path -> embedded template. Refuse if any target already exists so an
-	// existing module is never overwritten.
+	// dest path -> embedded template. Writing is idempotent: existing files are
+	// skipped (never overwritten), so re-running fills in only what is missing.
 	corePkgDir := filepath.Join(dir, "core", pkg)
 	dbPkgDir := filepath.Join(corePkgDir, pkg+"db")
 	apiPkgDir := filepath.Join(dir, "api", pkg)
@@ -122,7 +122,7 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 		{filepath.Join(dbPkgDir, pkg+"db.go"), "templates/rest/db.go.tmpl"},
 		{filepath.Join(dbPkgDir, "model.go"), "templates/rest/db_model.go.tmpl"},
 		{filepath.Join(dbPkgDir, "order.go"), "templates/rest/db_order.go.tmpl"},
-		{filepath.Join(dbPkgDir, "listing_test.go"), "templates/rest/listing_test.go.tmpl"},
+		{filepath.Join(dbPkgDir, "filter.go"), "templates/rest/db_filter.go.tmpl"},
 		{filepath.Join(apiPkgDir, pkg+".go"), "templates/rest/api.go.tmpl"},
 		{filepath.Join(apiPkgDir, "model.go"), "templates/rest/api_model.go.tmpl"},
 		// Declares the mocks package so its import resolves before the first
@@ -130,32 +130,18 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 		{filepath.Join(corePkgDir, "mocks", "doc.go"), "templates/rest/mocks_doc.go.tmpl"},
 	}
 
-	// --no-tests: drop the generated listing integration test (add it back later
-	// with `skit add rest-test`).
-	if opts.NoTests {
-		kept := make([]struct{ dest, tmpl string }, 0, len(files))
-		for _, f := range files {
-			if strings.HasSuffix(f.tmpl, "listing_test.go.tmpl") {
-				continue
-			}
-			kept = append(kept, f)
-		}
-		files = kept
-	}
-
 	for _, f := range files {
-		if _, err := os.Stat(f.dest); err == nil {
-			return fmt.Errorf("%s already exists — refusing to overwrite", f.dest)
-		} else if !os.IsNotExist(err) {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
 			return err
 		}
 	}
 
-	for _, f := range files {
-		if err := renderFile(f.dest, f.tmpl, data); err != nil {
+	// Tests are generated alongside the module (API + integration) unless opted
+	// out; --no-tests leaves them for a later `skit add rest-test`.
+	if !opts.NoTests {
+		if err := generateRESTTests(out, dir, data); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "  created %s\n", f.dest)
 	}
 
 	// Detect the full bootstrap (internal/app/deps present) so the next-step
@@ -209,43 +195,51 @@ func addRESTTest(out io.Writer, opts addRESTOpts) error {
 		return fmt.Errorf("no core/%s in %s — run `skit add rest %s` first", pkg, dir, opts.Name)
 	}
 
-	apiTest := filepath.Join(dir, "api", pkg, pkg+"_test.go")
-	intTest := filepath.Join(dir, "tests", pkg+"_test.go")
-
-	// Per-entity test files are never overwritten.
-	for _, dest := range []string{apiTest, intTest} {
-		if _, err := os.Stat(dest); err == nil {
-			return fmt.Errorf("%s already exists — refusing to overwrite", dest)
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-	}
-
-	if err := renderFile(apiTest, "templates/rest-test/api_test.go.tmpl", data); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "  created %s\n", apiTest)
-
-	if err := renderFile(intTest, "templates/rest-test/integration_test.go.tmpl", data); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "  created %s\n", intTest)
-
-	// The tests/ harness is shared across suites: create it once, skip if present.
-	harness := filepath.Join(dir, "tests", "harness_test.go")
-	switch _, err := os.Stat(harness); {
-	case os.IsNotExist(err):
-		if err := renderFile(harness, "templates/rest-test/harness_test.go.tmpl", data); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "  created %s\n", harness)
-	case err == nil:
-		fmt.Fprintf(out, "  skipped %s (already exists)\n", harness)
-	default:
+	if err := generateRESTTests(out, dir, data); err != nil {
 		return err
 	}
 
 	printRESTTestNextSteps(out, data)
+	return nil
+}
+
+// generateRESTTests writes the test suite for one entity, idempotently (existing
+// files are skipped, never overwritten). It is shared by `add rest` (which runs
+// it unless --no-tests) and `add rest-test`:
+//   - api/<pkg>/<pkg>_test.go   — fast API tests over a mocked Store (moq)
+//   - tests/<pkg>_store_test.go — store integration tests (testcontainers)
+//   - tests/<pkg>_test.go       — HTTP integration suite driving the real handler
+//   - tests/harness_test.go     — shared harness, created once and reused
+func generateRESTTests(out io.Writer, dir string, data restData) error {
+	files := []struct{ dest, tmpl string }{
+		{filepath.Join(dir, "api", data.Pkg, data.Pkg+"_test.go"), "templates/rest-test/api_test.go.tmpl"},
+		{filepath.Join(dir, "tests", data.Pkg+"_store_test.go"), "templates/rest-test/store_test.go.tmpl"},
+		{filepath.Join(dir, "tests", data.Pkg+"_test.go"), "templates/rest-test/integration_test.go.tmpl"},
+		{filepath.Join(dir, "tests", "harness_test.go"), "templates/rest-test/harness_test.go.tmpl"},
+	}
+	for _, f := range files {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeIfAbsent renders tmpl to dest unless dest already exists — the idempotent
+// write used across `add`: re-running fills in only what is missing and never
+// clobbers a file a developer may have edited.
+func writeIfAbsent(out io.Writer, dest, tmpl string, data any) error {
+	switch _, err := os.Stat(dest); {
+	case err == nil:
+		fmt.Fprintf(out, "  skipped %s (exists)\n", dest)
+		return nil
+	case !os.IsNotExist(err):
+		return err
+	}
+	if err := renderFile(dest, tmpl, data); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "  created %s\n", dest)
 	return nil
 }
 
@@ -264,8 +258,8 @@ Scaffolded tests for %[1]q. Next:
 
 3. Run them:
 
-   go test ./api/%[1]s/...              # API tests: mocked store, no docker
-   go test ./tests/ -run Test_%[2]s     # integration: needs docker, skipped under -short
+   go test ./api/%[1]s/...   # API tests: mocked store, no docker
+   go test ./tests/...       # integration (store + HTTP): needs docker, skipped under -short
 `, d.Pkg, d.Type)
 }
 
@@ -448,7 +442,7 @@ Scaffolded the %[1]q module. Next:
 3. go mod tidy && go build ./...
 `)
 
-	// Step 4 — the generated listing test, or a pointer to add tests when skipped.
+	// Step 4 — the generated tests, or a pointer to add them when skipped.
 	if noTests {
 		fmt.Fprintf(out, `
 4. Tests were skipped (--no-tests). Add API + integration tests with:
@@ -457,11 +451,12 @@ Scaffolded the %[1]q module. Next:
 `, d.Pkg)
 	} else {
 		fmt.Fprintf(out, `
-4. The generated %[1]sdb/listing_test.go covers the listing set (cursor, offset,
-   filter, ordering) against a real Postgres via testcontainers — it needs
-   Docker and is skipped under "go test -short":
+4. Tests were generated: api/%[1]s (mocked store, no docker) and tests/ (store +
+   HTTP integration against a real Postgres via testcontainers, skipped under
+   -short). After 'go mod tidy' and 'make generate' (for the moq mock):
 
-   go test ./core/%[1]s/...
+   go test ./api/%[1]s/...   # no docker
+   go test ./tests/...       # needs docker
 `, d.Pkg)
 	}
 }

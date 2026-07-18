@@ -1,0 +1,48 @@
+// Filtering for the {{.Pkg}}db store. The dynamic WHERE lives in its own file
+// (like order.go) so it is the obvious place to add a predicate when the model
+// grows: each optional column becomes a nil-checked field on QueryFilter that
+// binds a named param and appends one condition, all joined under a single WHERE.
+package {{.Pkg}}db
+
+import (
+	"bytes"
+	"strings"
+
+	"{{.Module}}/core/{{.Pkg}}"
+)
+
+// applyFilter writes filter's dynamic WHERE into buf, binding each predicate's
+// named params into data — the db-layer filter convention: optional columns
+// become :name predicates joined under one WHERE. extra holds caller-supplied
+// predicates already bound into data (QueryByCursor passes the keyset boundary
+// this way so it is combined with the filter under the same WHERE).
+//
+// Predicate style by field kind:
+//   - text  → case-insensitive substring: data["x"]="%"+*f.X+"%"; "x ILIKE :x"
+//   - exact → equality (ids, enums, bools, numbers): data["x"]=*f.X; "x = :x"
+//   - range → data["x_min"]/"x_max"; "x >= :x_min" / "x <= :x_max"
+func (s *Store) applyFilter(filter {{.Pkg}}.QueryFilter, data map[string]any, buf *bytes.Buffer, extra ...string) {
+	var wc []string
+
+	if filter.Name != nil {
+		data["name"] = "%" + *filter.Name + "%"
+		wc = append(wc, "name ILIKE :name")
+	}
+	if filter.Description != nil {
+		data["description"] = "%" + *filter.Description + "%"
+		wc = append(wc, "description ILIKE :description")
+	}
+
+	// Exact-match example (uncomment and add the field to QueryFilter):
+	// if filter.ID != nil {
+	// 	data["id"] = *filter.ID
+	// 	wc = append(wc, "id = :id")
+	// }
+
+	wc = append(wc, extra...)
+
+	if len(wc) > 0 {
+		buf.WriteString(" WHERE ")
+		buf.WriteString(strings.Join(wc, " AND "))
+	}
+}

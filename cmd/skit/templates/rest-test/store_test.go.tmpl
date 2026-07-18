@@ -1,4 +1,4 @@
-package {{.Pkg}}db_test
+package tests
 
 import (
 	"context"
@@ -18,11 +18,11 @@ import (
 	"{{.Module}}/core/{{.Pkg}}/{{.Pkg}}db"
 )
 
-// schema is the {{.Plural}} table the Store targets, created inline so this test
-// is self-contained — it does not depend on the service's migrations package.
-// Keep it in sync with the migration `skit add rest` printed, including the
-// keyset index that keeps QueryByCursor O(limit) at any depth.
-const schema = `
+// {{.Pkg}}Schema is the {{.Plural}} table the Store targets, created inline so this
+// store test is self-contained — it does not depend on the service's migrations
+// package. Keep it in sync with the migration `skit add rest` printed, including
+// the keyset index that keeps QueryByCursor O(limit) at any depth.
+const {{.Pkg}}Schema = `
 CREATE TABLE IF NOT EXISTS {{.Plural}} (
 	id          uuid PRIMARY KEY,
 	name        text NOT NULL,
@@ -32,13 +32,13 @@ CREATE TABLE IF NOT EXISTS {{.Plural}} (
 );
 CREATE INDEX IF NOT EXISTS {{.Plural}}_created_at_id_desc_idx ON {{.Plural}} (created_at DESC, id DESC);`
 
-// newStore starts a Postgres container, creates the {{.Plural}} table, and returns
-// a Store bound to it. Skipped under -short, as it needs Docker.
-func newStore(ctx context.Context, t *testing.T) *{{.Pkg}}db.Store {
+// new{{.Type}}Store starts a Postgres container, creates the {{.Plural}} table, and
+// returns a Store bound to it. Skipped under -short, as it needs Docker.
+func new{{.Type}}Store(ctx context.Context, t *testing.T) *{{.Pkg}}db.Store {
 	t.Helper()
 
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
-	if _, err := pg.DB.ExecContext(ctx, schema); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, {{.Pkg}}Schema); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
 
@@ -46,9 +46,10 @@ func newStore(ctx context.Context, t *testing.T) *{{.Pkg}}db.Store {
 	return {{.Pkg}}db.NewStore(log, pg.DB)
 }
 
-// seed inserts {{.Plural}} named by names with strictly increasing created_at, so
-// the default (created_at DESC) order is deterministic: the last name is newest.
-func seed(ctx context.Context, t *testing.T, s *{{.Pkg}}db.Store, names ...string) []{{.Pkg}}.{{.Type}} {
+// seed{{.Type}}Rows inserts {{.Plural}} named by names with strictly increasing
+// created_at, so the default (created_at DESC) order is deterministic: the last
+// name is newest.
+func seed{{.Type}}Rows(ctx context.Context, t *testing.T, s *{{.Pkg}}db.Store, names ...string) []{{.Pkg}}.{{.Type}} {
 	t.Helper()
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -80,9 +81,9 @@ func Test{{.Type}}StoreCursor(t *testing.T) {
 	is := is.New(t)
 
 	ctx := context.Background()
-	s := newStore(ctx, t)
+	s := new{{.Type}}Store(ctx, t)
 
-	created := seed(ctx, t, s, "a", "b", "c", "d", "e")
+	created := seed{{.Type}}Rows(ctx, t, s, "a", "b", "c", "d", "e")
 	want := map[uuid.UUID]bool{}
 	for _, v := range created {
 		want[v.ID] = true
@@ -125,8 +126,8 @@ func Test{{.Type}}StoreOffsetAndCount(t *testing.T) {
 	is := is.New(t)
 
 	ctx := context.Background()
-	s := newStore(ctx, t)
-	seed(ctx, t, s, "a", "b", "c", "d", "e")
+	s := new{{.Type}}Store(ctx, t)
+	seed{{.Type}}Rows(ctx, t, s, "a", "b", "c", "d", "e")
 
 	total, err := s.Count(ctx, {{.Pkg}}.QueryFilter{})
 	is.NoErr(err)
@@ -151,7 +152,7 @@ func Test{{.Type}}StoreFilter(t *testing.T) {
 	is := is.New(t)
 
 	ctx := context.Background()
-	s := newStore(ctx, t)
+	s := new{{.Type}}Store(ctx, t)
 
 	ptr := func(v string) *string {
 		return &v
@@ -202,11 +203,11 @@ func Test{{.Type}}StoreOrdering(t *testing.T) {
 	is := is.New(t)
 
 	ctx := context.Background()
-	s := newStore(ctx, t)
+	s := new{{.Type}}Store(ctx, t)
 
 	// Created oldest->newest: Banana, Apple, Cherry. So default (created_at DESC)
 	// is Cherry, Apple, Banana.
-	seed(ctx, t, s, "Banana", "Apple", "Cherry")
+	seed{{.Type}}Rows(ctx, t, s, "Banana", "Apple", "Cherry")
 
 	names := func(by order.By) []string {
 		items, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, by, page.New(1, 100))

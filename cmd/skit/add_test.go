@@ -36,9 +36,15 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 		"core/widget/widgetdb/widgetdb.go",
 		"core/widget/widgetdb/model.go",
 		"core/widget/widgetdb/order.go",
-		"core/widget/widgetdb/listing_test.go",
+		"core/widget/widgetdb/filter.go",
 		"api/widget/widget.go",
 		"api/widget/model.go",
+		// Tests are generated alongside the module (no --no-tests): the mocked
+		// API test lives with the code, the integration suites in tests/.
+		"api/widget/widget_test.go",
+		"tests/widget_store_test.go",
+		"tests/widget_test.go",
+		"tests/harness_test.go",
 	}
 	fset := token.NewFileSet()
 	for _, rel := range want {
@@ -71,11 +77,11 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 	if !strings.Contains(db, "func (s *Store) QueryByCursor(") {
 		t.Errorf("store missing QueryByCursor:\n%s", db)
 	}
-	// The generated store test is an external test package that exercises the
-	// listing set against a dbtest Postgres container.
-	listingTest := readFile(t, filepath.Join(dir, "core/widget/widgetdb/listing_test.go"))
-	if !strings.Contains(listingTest, "package widgetdb_test") {
-		t.Errorf("listing_test.go should be an external test package:\n%s", listingTest)
+	// The store integration test lives in tests/ (not beside the code) and
+	// exercises the listing set against a dbtest Postgres container.
+	storeTest := readFile(t, filepath.Join(dir, "tests/widget_store_test.go"))
+	if !strings.Contains(storeTest, "package tests") {
+		t.Errorf("store test should be in package tests:\n%s", storeTest)
 	}
 	for _, want := range []string{
 		"dbtest.NewPostgres",
@@ -83,8 +89,8 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 		"func TestWidgetStoreFilter(",
 		"func TestWidgetStoreOrdering(",
 	} {
-		if !strings.Contains(listingTest, want) {
-			t.Errorf("listing_test.go missing %q:\n%s", want, listingTest)
+		if !strings.Contains(storeTest, want) {
+			t.Errorf("store test missing %q:\n%s", want, storeTest)
 		}
 	}
 }
@@ -130,14 +136,39 @@ func TestAddRESTPluralOverride(t *testing.T) {
 	}
 }
 
-func TestAddRESTRefusesExistingFiles(t *testing.T) {
+// TestAddRESTIdempotent verifies re-running addREST does not error and does not
+// clobber existing files: a second run skips what is present. It also covers the
+// --no-tests-then-fill-in flow: the first run without tests, the second run adds
+// only the missing test files.
+func TestAddRESTIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")
-	if err := addREST(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err != nil {
+
+	// First run without tests: production code only.
+	if err := addREST(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget", NoTests: true}); err != nil {
 		t.Fatalf("first addREST: %v", err)
 	}
-	if err := addREST(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err == nil {
-		t.Fatal("expected addREST to refuse overwriting an existing module")
+	storeTest := filepath.Join(dir, "tests/widget_store_test.go")
+	if _, err := os.Stat(storeTest); !os.IsNotExist(err) {
+		t.Fatalf("expected no test file after --no-tests, stat err = %v", err)
+	}
+
+	// Mark a production file so we can prove the re-run does not overwrite it.
+	coreFile := filepath.Join(dir, "core/widget/widget.go")
+	if err := os.WriteFile(coreFile, []byte("// edited by hand\npackage widget\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second run with tests: must not error, must fill in the missing tests, and
+	// must leave the edited production file untouched.
+	if err := addREST(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err != nil {
+		t.Fatalf("second addREST: %v", err)
+	}
+	if _, err := os.Stat(storeTest); err != nil {
+		t.Errorf("expected the store test to be created on the second run: %v", err)
+	}
+	if got := readFile(t, coreFile); !strings.Contains(got, "edited by hand") {
+		t.Errorf("re-run overwrote an existing file:\n%s", got)
 	}
 }
 
