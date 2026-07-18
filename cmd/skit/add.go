@@ -18,20 +18,22 @@ type addCommand struct{}
 // addRestCommand scaffolds a REST CRUD module (core + Postgres store + transport)
 // for one entity into the current service, following the skit conventions.
 type addRestCommand struct {
-	Dir    string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
-	Module string `long:"module" description:"module path (default: read from go.mod)"`
-	Plural string `long:"plural" description:"route/table plural (default: <name>+\"s\")"`
-	Args   struct {
+	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module  string `long:"module" description:"module path (default: read from go.mod)"`
+	Plural  string `long:"plural" description:"route/table plural (default: <name>+\"s\")"`
+	NoTests bool   `long:"no-tests" description:"skip the generated listing_test.go (add tests later with 'skit add rest-test')"`
+	Args    struct {
 		Name string `positional-arg-name:"name" description:"entity name, e.g. widget or order-line"`
 	} `positional-args:"yes" required:"yes"`
 }
 
 func (c *addRestCommand) Execute([]string) error {
 	return addREST(os.Stdout, addRESTOpts{
-		Dir:    c.Dir,
-		Module: c.Module,
-		Plural: c.Plural,
-		Name:   c.Args.Name,
+		Dir:     c.Dir,
+		Module:  c.Module,
+		Plural:  c.Plural,
+		Name:    c.Args.Name,
+		NoTests: c.NoTests,
 	})
 }
 
@@ -57,10 +59,11 @@ func (c *addRestTestCommand) Execute([]string) error {
 }
 
 type addRESTOpts struct {
-	Dir    string // service root (holds go.mod)
-	Module string // module path; resolved from go.mod when empty
-	Plural string // override for routes/table; defaults to Pkg+"s"
-	Name   string // raw entity name
+	Dir     string // service root (holds go.mod)
+	Module  string // module path; resolved from go.mod when empty
+	Plural  string // override for routes/table; defaults to Pkg+"s"
+	Name    string // raw entity name
+	NoTests bool   // skip the generated listing_test.go
 }
 
 // restData is the template payload shared by every generated REST file.
@@ -126,6 +129,20 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 		// `make generate`; moq writes StoreMock alongside this file.
 		{filepath.Join(corePkgDir, "mocks", "doc.go"), "templates/rest/mocks_doc.go.tmpl"},
 	}
+
+	// --no-tests: drop the generated listing integration test (add it back later
+	// with `skit add rest-test`).
+	if opts.NoTests {
+		kept := make([]struct{ dest, tmpl string }, 0, len(files))
+		for _, f := range files {
+			if strings.HasSuffix(f.tmpl, "listing_test.go.tmpl") {
+				continue
+			}
+			kept = append(kept, f)
+		}
+		files = kept
+	}
+
 	for _, f := range files {
 		if _, err := os.Stat(f.dest); err == nil {
 			return fmt.Errorf("%s already exists — refusing to overwrite", f.dest)
@@ -146,7 +163,7 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 	_, err := os.Stat(filepath.Join(dir, "internal", "app", "deps"))
 	full := err == nil
 
-	printRESTNextSteps(out, data, full)
+	printRESTNextSteps(out, data, full, opts.NoTests)
 	return nil
 }
 
@@ -368,7 +385,7 @@ Scaffolded the %q gRPC module. The handler adapts %s.Core, so run `+"`skit add r
 // safe to generate blindly. The wiring hint (step 2) adapts to the project shape:
 // the full bootstrap wires through internal/app/deps + internal/app/server, the
 // minimal starter directly where the router is built.
-func printRESTNextSteps(out io.Writer, d restData, full bool) {
+func printRESTNextSteps(out io.Writer, d restData, full, noTests bool) {
 	// Step 1 — migration (same for both project shapes).
 	fmt.Fprintf(out, `
 Scaffolded the %[1]q module. Next:
@@ -426,16 +443,27 @@ Scaffolded the %[1]q module. Next:
 `, d.Pkg, d.Module)
 	}
 
-	// Steps 3–4 — tidy/build and the generated listing test (same for both).
+	// Step 3 — tidy/build (same for both).
 	fmt.Fprintf(out, `
 3. go mod tidy && go build ./...
+`)
 
+	// Step 4 — the generated listing test, or a pointer to add tests when skipped.
+	if noTests {
+		fmt.Fprintf(out, `
+4. Tests were skipped (--no-tests). Add API + integration tests with:
+
+   skit add rest-test %[1]s
+`, d.Pkg)
+	} else {
+		fmt.Fprintf(out, `
 4. The generated %[1]sdb/listing_test.go covers the listing set (cursor, offset,
    filter, ordering) against a real Postgres via testcontainers — it needs
    Docker and is skipped under "go test -short":
 
    go test ./core/%[1]s/...
 `, d.Pkg)
+	}
 }
 
 // moduleFromGoMod reads the module path from dir/go.mod.

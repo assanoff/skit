@@ -183,53 +183,35 @@ func Param(r *http.Request, key string) string {
 	return r.PathValue(key)
 }
 
-// Decoder is a request model that owns its own wire format. When the value
-// passed to Decode implements it, its Decode is used instead of the default
-// JSON unmarshal — so a model controls exactly how its bytes are parsed.
+// Decoder is a request model that decodes its own bytes — the model owns its
+// wire format. A model passed to Decode must implement it.
 type Decoder interface {
 	Decode(data []byte) error
 }
 
-// validator is a model that validates itself. When the value passed to Decode
-// implements it, Validate is called after decoding; its error should be an
-// *errs.Error (InvalidArgument) so it maps to HTTP 400.
+// validator is an optional interface a model may implement to validate itself.
+// When present, Decode calls Validate after decoding; its error should be an
+// *errs.Error (InvalidArgument) so it maps to HTTP 400. A model's Validate can
+// delegate to struct-tag validation (return errs.Check(m)) or run custom checks.
 type validator interface {
 	Validate() error
 }
 
-// Decode reads the request body into v and validates it:
-//
-//   - decode: if v implements Decoder, its Decode owns the wire format;
-//     otherwise the body is JSON-decoded (unknown fields rejected);
-//   - validate: if v implements Validate() error, it is called; otherwise
-//     struct-tag validation (errs.Check) is applied.
-//
-// This lets a scaffolded model define Decode/Validate methods while models that
-// rely on `validate:` struct tags keep working unchanged. Malformed input
-// yields an *errs.Error (InvalidArgument).
-func Decode(r *http.Request, v any) error {
-	if d, ok := v.(Decoder); ok {
-		var data []byte
-		if r.Body != nil {
-			b, err := io.ReadAll(r.Body)
-			if err != nil {
-				return errs.Newf(errs.InvalidArgument, "read request body: %s", err)
-			}
-			data = b
-		}
-		if err := d.Decode(data); err != nil {
-			return errs.Newf(errs.InvalidArgument, "decode request body: %s", err)
-		}
-	} else if r.Body != nil {
-		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(v); err != nil {
-			return errs.Newf(errs.InvalidArgument, "decode request body: %s", err)
-		}
+// Decode reads the request body, hands it to v.Decode, and — if v also
+// implements Validate() error — validates it. A read or decode failure yields an
+// *errs.Error (InvalidArgument), so malformed input maps to HTTP 400.
+func Decode(r *http.Request, v Decoder) error {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return errs.Newf(errs.InvalidArgument, "read request body: %s", err)
+	}
+
+	if err := v.Decode(data); err != nil {
+		return errs.Newf(errs.InvalidArgument, "decode request body: %s", err)
 	}
 
 	if vv, ok := v.(validator); ok {
 		return vv.Validate()
 	}
-	return errs.Check(v)
+	return nil
 }

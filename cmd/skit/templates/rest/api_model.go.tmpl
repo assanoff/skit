@@ -3,7 +3,6 @@ package {{.Pkg}}
 import (
 	"encoding/json"
 	"time"
-	"unicode/utf8"
 
 	"github.com/assanoff/skit/errs"
 
@@ -11,11 +10,10 @@ import (
 )
 
 // Create{{.Type}}Req is the request body for creating a single {{.Pkg}}. It owns
-// its wire format (Decode) and its own validation (Validate); rest.Decode calls
-// both. Adjust the rules in Validate to match your domain.
+// its wire format (Decode) and its validation (Validate); rest.Decode calls both.
 type Create{{.Type}}Req struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string `json:"name" validate:"required,max=100"`
+	Description string `json:"description" validate:"max=500"`
 }
 
 // Decode implements rest.Decoder.
@@ -23,25 +21,18 @@ func (req *Create{{.Type}}Req) Decode(data []byte) error {
 	return json.Unmarshal(data, req)
 }
 
-// Validate reports the first violated rule as an *errs.Error (InvalidArgument),
-// which rest maps to HTTP 400.
+// Validate validates the request. By default it checks the `validate:` struct
+// tags via errs.Check (returns an *errs.Error → HTTP 400). Replace the body with
+// custom checks, or combine both, as the rules grow.
 func (req Create{{.Type}}Req) Validate() error {
-	switch {
-	case req.Name == "":
-		return errs.Newf(errs.InvalidArgument, "name is required")
-	case utf8.RuneCountInString(req.Name) > 100:
-		return errs.Newf(errs.InvalidArgument, "name must be at most 100 characters")
-	case utf8.RuneCountInString(req.Description) > 500:
-		return errs.Newf(errs.InvalidArgument, "description must be at most 500 characters")
-	}
-	return nil
+	return errs.Check(req)
 }
 
 // Update{{.Type}}Req is the request body for a partial {{.Pkg}} update; nil fields
 // are left unchanged.
 type Update{{.Type}}Req struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
+	Name        *string `json:"name" validate:"omitempty,max=100"`
+	Description *string `json:"description" validate:"omitempty,max=500"`
 }
 
 // Decode implements rest.Decoder.
@@ -49,15 +40,9 @@ func (req *Update{{.Type}}Req) Decode(data []byte) error {
 	return json.Unmarshal(data, req)
 }
 
-// Validate checks only the fields that were provided (non-nil).
+// Validate checks the struct tags; extend with custom rules as needed.
 func (req Update{{.Type}}Req) Validate() error {
-	if req.Name != nil && utf8.RuneCountInString(*req.Name) > 100 {
-		return errs.Newf(errs.InvalidArgument, "name must be at most 100 characters")
-	}
-	if req.Description != nil && utf8.RuneCountInString(*req.Description) > 500 {
-		return errs.Newf(errs.InvalidArgument, "description must be at most 500 characters")
-	}
-	return nil
+	return errs.Check(req)
 }
 
 // Response is the REST representation of a {{.Pkg}}. It implements
