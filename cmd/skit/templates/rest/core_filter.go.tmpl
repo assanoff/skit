@@ -1,0 +1,21 @@
+package {{.Pkg}}
+
+import (
+	"github.com/assanoff/skit/errs"
+)
+
+// QueryFilter narrows a {{.Pkg}} listing. Nil fields are not applied, so the zero
+// value matches every {{.Pkg}}. It is honored by both list paths (offset Query
+// and cursor QueryByCursor) and by Count, so a filtered total stays consistent
+// with the filtered page.
+type QueryFilter struct {
+	Name        *string `validate:"omitempty,max=255"` // case-insensitive substring match on name
+	Description *string `validate:"omitempty,max=255"` // case-insensitive substring match on description
+}
+
+// Validate checks the filter's constraints. It defaults to tag validation via
+// errs.Check (omitempty so absent fields pass); replace the body with bespoke
+// checks (e.g. a date range where From must not be after To) when tags fall short.
+func (f QueryFilter) Validate() error {
+	return errs.Check(f)
+}

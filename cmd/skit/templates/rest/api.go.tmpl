@@ -6,9 +6,7 @@ package {{.Pkg}}
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -65,18 +63,24 @@ func (h *Handler) create(ctx context.Context, r *http.Request) rest.ResponseEnco
 
 // query lists one page of {{.Plural}} (?page, ?rows), optionally narrowed by the
 // filter params (?name, ?description) and ordered by ?order_by (e.g. "name,DESC";
-// default created_at DESC). Count uses the same filter so the total matches.
+// default created_at DESC). It reads the raw params once (parseQueryParams), then
+// turns them into typed values via page.Parse / parseFilter / order.Parse. Count
+// uses the same filter so the total matches.
 func (h *Handler) query(ctx context.Context, r *http.Request) rest.ResponseEncoder {
-	q := r.URL.Query()
-	pg, err := page.Parse(q.Get("page"), q.Get("rows"))
+	qp := parseQueryParams(r)
+
+	pg, err := page.Parse(qp.Page, qp.Rows)
 	if err != nil {
-		return errs.New(errs.InvalidArgument, err)
+		return errs.NewFieldErrors("page", errs.FieldError{Field: "page", Error: err.Error()})
 	}
-	by, err := order.Parse({{.Pkg}}core.SortableFields, q.Get("order_by"), {{.Pkg}}core.DefaultOrder)
+	filter, err := parseFilter(qp)
 	if err != nil {
-		return errs.New(errs.InvalidArgument, err)
+		return errs.From(err)
 	}
-	filter := parseFilter(q)
+	by, err := order.Parse(orderByFields, qp.OrderBy, {{.Pkg}}core.DefaultOrder)
+	if err != nil {
+		return errs.NewFieldErrors("order", errs.FieldError{Field: "order_by", Error: err.Error()})
+	}
 
 	{{.Recv}}s, err := h.core.Query(ctx, filter, by, pg)
 	if err != nil {
@@ -94,33 +98,23 @@ func (h *Handler) query(ctx context.Context, r *http.Request) rest.ResponseEncod
 // and the same ?name/?description filter. It returns a query.CursorResult with the
 // items and the next-page token. Forward-only — prev is not emitted.
 func (h *Handler) queryCursor(ctx context.Context, r *http.Request) rest.ResponseEncoder {
-	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit")) // 0/invalid -> NewCursor applies the default
-	cur := page.NewCursor(q.Get("cursor"), limit)
+	qp := parseQueryParams(r)
+
+	limit, _ := strconv.Atoi(qp.Limit) // 0/invalid -> NewCursor applies the default
+	cur := page.NewCursor(qp.Cursor, limit)
 	if _, err := cur.Key(); err != nil {
-		return errs.New(errs.InvalidArgument, err) // malformed cursor token -> 400
+		return errs.NewFieldErrors("cursor", errs.FieldError{Field: "cursor", Error: err.Error()}) // malformed token -> 400
 	}
-	filter := parseFilter(q)
+	filter, err := parseFilter(qp)
+	if err != nil {
+		return errs.From(err)
+	}
 
 	{{.Recv}}s, next, err := h.core.QueryByCursor(ctx, filter, cur)
 	if err != nil {
 		return errs.From(err)
 	}
 	return query.NewCursorResult(toResponseList({{.Recv}}s), next, "")
-}
-
-// parseFilter reads the optional listing filter from the query string: ?name and
-// ?description, each a case-insensitive substring. Absent params leave that field
-// nil (not applied).
-func parseFilter(q url.Values) {{.Pkg}}core.QueryFilter {
-	var f {{.Pkg}}core.QueryFilter
-	if name := strings.TrimSpace(q.Get("name")); name != "" {
-		f.Name = &name
-	}
-	if desc := strings.TrimSpace(q.Get("description")); desc != "" {
-		f.Description = &desc
-	}
-	return f
 }
 
 // queryByID returns one {{.Pkg}} by id.

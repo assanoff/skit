@@ -1,0 +1,16 @@
+package {{.Pkg}}
+
+import (
+	"github.com/assanoff/skit/order"
+)
+
+// Order-by field names the offset listing accepts (the cursor listing is fixed to
+// the keyset order). The api layer allowlists these for ?order_by (see
+// api/{{.Pkg}}/order.go) and the store maps them to columns (see {{.Pkg}}db/order.go).
+const (
+	OrderByCreatedAt = "created_at"
+	OrderByName      = "name"
+)
+
+// DefaultOrder is newest-first, applied when ?order_by is absent.
+var DefaultOrder = order.NewBy(OrderByCreatedAt, order.DESC)

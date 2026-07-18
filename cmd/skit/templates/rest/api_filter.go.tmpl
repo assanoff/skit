@@ -1,0 +1,75 @@
+package {{.Pkg}}
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/assanoff/skit/errs"
+
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
+)
+
+// queryParams holds the raw listing query-string values — paging, ordering and
+// the filter fields — read straight off the request. parseQueryParams fills it;
+// page.Parse, order.Parse and parseFilter then turn the strings into typed
+// values, so the handler stays a thin orchestration of those three steps.
+type queryParams struct {
+	Page        string
+	Rows        string
+	Cursor      string
+	Limit       string
+	OrderBy     string
+	Name        string
+	Description string
+}
+
+// parseQueryParams reads the listing params from the request query string. It
+// does no validation — that is page.Parse / order.Parse / parseFilter's job.
+func parseQueryParams(r *http.Request) queryParams {
+	v := r.URL.Query()
+	return queryParams{
+		Page:        v.Get("page"),
+		Rows:        v.Get("rows"),
+		Cursor:      v.Get("cursor"),
+		Limit:       v.Get("limit"),
+		OrderBy:     v.Get("order_by"),
+		Name:        v.Get("name"),
+		Description: v.Get("description"),
+	}
+}
+
+// parseFilter builds the core QueryFilter from qp, accumulating one field error
+// per malformed value so a client sees them all at once (returns *errs.Error with
+// code InvalidArgument). Text fields are case-insensitive substrings; an absent
+// param leaves that field nil (not applied).
+func parseFilter(qp queryParams) ({{.Pkg}}core.QueryFilter, error) {
+	var fieldErrs []errs.FieldError
+	var f {{.Pkg}}core.QueryFilter
+
+	if name := strings.TrimSpace(qp.Name); name != "" {
+		f.Name = &name
+	}
+	if desc := strings.TrimSpace(qp.Description); desc != "" {
+		f.Description = &desc
+	}
+
+	// Typed-field example — a param that must be parsed/validated adds a field
+	// error instead of a nil check (uncomment and add the field to QueryFilter):
+	// if qp.ID != "" {
+	// 	if id, err := uuid.Parse(qp.ID); err != nil {
+	// 		fieldErrs = append(fieldErrs, errs.FieldError{Field: "id", Error: err.Error()})
+	// 	} else {
+	// 		f.ID = &id
+	// 	}
+	// }
+
+	if len(fieldErrs) > 0 {
+		return {{.Pkg}}core.QueryFilter{}, errs.NewFieldErrors("invalid filter", fieldErrs...)
+	}
+
+	// Tag/constraint validation (lengths, ranges, ...) once the raw values parsed.
+	if err := f.Validate(); err != nil {
+		return {{.Pkg}}core.QueryFilter{}, err
+	}
+	return f, nil
+}

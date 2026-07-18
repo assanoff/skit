@@ -119,12 +119,16 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 	files := []struct{ dest, tmpl string }{
 		{filepath.Join(corePkgDir, pkg+".go"), "templates/rest/core.go.tmpl"},
 		{filepath.Join(corePkgDir, "model.go"), "templates/rest/core_model.go.tmpl"},
+		{filepath.Join(corePkgDir, "filter.go"), "templates/rest/core_filter.go.tmpl"},
+		{filepath.Join(corePkgDir, "order.go"), "templates/rest/core_order.go.tmpl"},
 		{filepath.Join(dbPkgDir, pkg+"db.go"), "templates/rest/db.go.tmpl"},
 		{filepath.Join(dbPkgDir, "model.go"), "templates/rest/db_model.go.tmpl"},
 		{filepath.Join(dbPkgDir, "order.go"), "templates/rest/db_order.go.tmpl"},
 		{filepath.Join(dbPkgDir, "filter.go"), "templates/rest/db_filter.go.tmpl"},
 		{filepath.Join(apiPkgDir, pkg+".go"), "templates/rest/api.go.tmpl"},
 		{filepath.Join(apiPkgDir, "model.go"), "templates/rest/api_model.go.tmpl"},
+		{filepath.Join(apiPkgDir, "order.go"), "templates/rest/api_order.go.tmpl"},
+		{filepath.Join(apiPkgDir, "filter.go"), "templates/rest/api_filter.go.tmpl"},
 		// Declares the mocks package so its import resolves before the first
 		// `make generate`; moq writes StoreMock alongside this file.
 		{filepath.Join(corePkgDir, "mocks", "doc.go"), "templates/rest/mocks_doc.go.tmpl"},

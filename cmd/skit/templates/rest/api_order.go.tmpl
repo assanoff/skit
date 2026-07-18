@@ -1,0 +1,14 @@
+package {{.Pkg}}
+
+import (
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
+)
+
+// orderByFields is the api-layer allowlist for ?order_by: it maps each accepted
+// client field name to the core order-by constant. order.Parse rejects a field
+// outside this map, so a client cannot order by an arbitrary column. The store
+// (see {{.Pkg}}db/order.go) maps the core constant on to the SQL column.
+var orderByFields = map[string]string{
+	{{.Pkg}}core.OrderByCreatedAt: {{.Pkg}}core.OrderByCreatedAt,
+	{{.Pkg}}core.OrderByName:      {{.Pkg}}core.OrderByName,
+}

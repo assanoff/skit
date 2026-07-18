@@ -33,12 +33,16 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 	want := []string{
 		"core/widget/widget.go",
 		"core/widget/model.go",
+		"core/widget/filter.go",
+		"core/widget/order.go",
 		"core/widget/widgetdb/widgetdb.go",
 		"core/widget/widgetdb/model.go",
 		"core/widget/widgetdb/order.go",
 		"core/widget/widgetdb/filter.go",
 		"api/widget/widget.go",
 		"api/widget/model.go",
+		"api/widget/order.go",
+		"api/widget/filter.go",
 		// Tests are generated alongside the module (no --no-tests): the mocked
 		// API test lives with the code, the integration suites in tests/.
 		"api/widget/widget_test.go",
@@ -67,11 +71,27 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 	if !strings.Contains(api, "GET /widgets/cursor") {
 		t.Errorf("expected scaffolded cursor route /widgets/cursor:\n%s", api)
 	}
-	// The core declares the filter and ordering allowlist; the store builds the
-	// keyset query.
-	model := readFile(t, filepath.Join(dir, "core/widget/model.go"))
-	if !strings.Contains(model, "type QueryFilter struct") || !strings.Contains(model, "SortableFields") {
-		t.Errorf("core model.go missing QueryFilter/SortableFields:\n%s", model)
+	// The core splits filter and ordering into their own files (symmetric with
+	// the api and db layers); the store builds the keyset query.
+	coreFilter := readFile(t, filepath.Join(dir, "core/widget/filter.go"))
+	if !strings.Contains(coreFilter, "type QueryFilter struct") || !strings.Contains(coreFilter, "func (f QueryFilter) Validate()") {
+		t.Errorf("core filter.go missing QueryFilter/Validate:\n%s", coreFilter)
+	}
+	coreOrder := readFile(t, filepath.Join(dir, "core/widget/order.go"))
+	if !strings.Contains(coreOrder, "DefaultOrder") || !strings.Contains(coreOrder, "OrderByName") {
+		t.Errorf("core order.go missing DefaultOrder/OrderByName:\n%s", coreOrder)
+	}
+	// The api layer owns the ?order_by allowlist (orderByFields) and parses the
+	// listing params into a queryParams struct.
+	apiOrder := readFile(t, filepath.Join(dir, "api/widget/order.go"))
+	if !strings.Contains(apiOrder, "var orderByFields = map[string]string{") {
+		t.Errorf("api order.go missing orderByFields allowlist:\n%s", apiOrder)
+	}
+	apiFilter := readFile(t, filepath.Join(dir, "api/widget/filter.go"))
+	for _, want := range []string{"type queryParams struct", "func parseQueryParams(", "func parseFilter("} {
+		if !strings.Contains(apiFilter, want) {
+			t.Errorf("api filter.go missing %q:\n%s", want, apiFilter)
+		}
 	}
 	db := readFile(t, filepath.Join(dir, "core/widget/widgetdb/widgetdb.go"))
 	if !strings.Contains(db, "func (s *Store) QueryByCursor(") {
