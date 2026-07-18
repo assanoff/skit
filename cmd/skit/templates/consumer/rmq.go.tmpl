@@ -1,0 +1,24 @@
+package {{.Pkg}}
+
+import (
+	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/rabbitmq"
+	"github.com/assanoff/skit/worker"
+
+	"{{.Module}}/internal/app/config"
+)
+
+// Runnable builds the RabbitMQ-backed runnable for this consumer, mapping the
+// neutral ConsumerOpts onto a broker.Subscription and binding it to Handle. It
+// is the only transport-specific file in this package — the handler in
+// {{.Pkg}}.go stays broker-agnostic, so switching brokers means replacing this
+// file (e.g. a {{.Pkg}}_kafka.go with the same method), not touching Handle.
+func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (worker.Runnable, error) {
+	return rabbitmq.New(conn, c.log, broker.Subscription{
+		Name:        "{{.Pkg}}-consumer",
+		Topic:       opts.Topic,
+		Group:       opts.Group,
+		Filters:     opts.Filters,
+		Concurrency: opts.Concurrency,
+	}, c.Handle)
+}

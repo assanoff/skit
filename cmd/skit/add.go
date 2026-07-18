@@ -65,6 +65,7 @@ type addRESTOpts struct {
 	Name    string // raw entity name
 	NoTests bool   // skip generating tests
 	Claim   bool   // worker: --claim (queue-backed) variant instead of periodic tick
+	Broker  string // consumer: transport for the generated wiring (rmq|kafka|nats)
 }
 
 // restData is the template payload shared by every generated REST file.
@@ -274,6 +275,7 @@ Scaffolded tests for %[1]q. Next:
 type addConsumerCommand struct {
 	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
 	Module  string `long:"module" description:"module path (default: read from go.mod)"`
+	Broker  string `long:"broker" choice:"rmq" choice:"kafka" choice:"nats" default:"rmq" description:"transport for the generated wiring (only rmq has an SDK adapter today)"`
 	NoTests bool   `long:"no-tests" description:"skip generating the handler test"`
 	Args    struct {
 		Name string `positional-arg-name:"name" description:"consumer name, e.g. order or order-refund"`
@@ -286,6 +288,7 @@ func (c *addConsumerCommand) Execute([]string) error {
 		Module:  c.Module,
 		Name:    c.Args.Name,
 		NoTests: c.NoTests,
+		Broker:  c.Broker,
 	})
 }
 
@@ -321,11 +324,23 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 		UpperSnake: strings.ToUpper(strings.Join(words, "_")),
 	}
 
+	transport := opts.Broker
+	if transport == "" {
+		transport = "rmq"
+	}
+
 	consumerDir := filepath.Join(dir, "internal", "app", "consumers", pkg)
 	files := []struct{ dest, tmpl string }{
 		{filepath.Join(consumerDir, pkg+".go"), "templates/consumer/consumer.go.tmpl"},
 		// Shared across consumers: generated once, skipped when it already exists.
 		{filepath.Join(dir, "internal", "app", "config", "consumer.go"), "templates/consumer/config.go.tmpl"},
+	}
+	// The handler is broker-agnostic; the transport wiring is a separate file so a
+	// broker swap replaces one file. Only RabbitMQ has an SDK adapter today.
+	if transport == "rmq" {
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(consumerDir, pkg+"_rmq.go"), "templates/consumer/rmq.go.tmpl",
+		})
 	}
 	if !opts.NoTests {
 		files = append(files, struct{ dest, tmpl string }{
@@ -339,17 +354,20 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 		}
 	}
 
-	printConsumerNextSteps(out, data)
+	printConsumerNextSteps(out, data, transport)
 	return nil
 }
 
 // printConsumerNextSteps prints the config group and broker wiring a developer
-// adds by hand — app-specific and not safe to generate blindly.
-func printConsumerNextSteps(out io.Writer, d restData) {
-	fmt.Fprintf(out, `
-Scaffolded the %[1]q consumer. It depends only on skit/broker, so the transport
-is chosen in the wiring below — swap the adapter (Kafka/NATS) without touching
-the handler. Next:
+// adds by hand — app-specific and not safe to generate blindly. For rmq the
+// transport file (<pkg>_rmq.go) is generated, so wiring is a single Runnable
+// call; kafka/nats have no SDK adapter yet, so the handler is generated but the
+// transport must be wired by hand.
+func printConsumerNextSteps(out io.Writer, d restData, transport string) {
+	if transport == "rmq" {
+		fmt.Fprintf(out, `
+Scaffolded the %[1]q consumer (RabbitMQ). The handler (%[1]s.go) is broker-agnostic;
+the transport lives in %[1]s_rmq.go. Next:
 
 1. go mod tidy   # pulls the test dep (matryer/is)
 
@@ -357,24 +375,36 @@ the handler. Next:
 
    %[2]sConsumer config.ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
 
-3. Wire it into brokerWorkers (internal/app/server/server.go). Build the neutral
-   broker.Subscription from config and pick the transport (RabbitMQ shown):
+3. Wire it into brokerWorkers (internal/app/server/server.go) — the generated
+   Runnable builds the RabbitMQ consumer from config:
 
-   cons, err := rabbitmq.New(d.BrokerConn(ctx), d.Logger, broker.Subscription{
-       Name:        %[1]q + "-consumer",
-       Topic:       d.Opts.%[2]sConsumer.Topic,
-       Group:       d.Opts.%[2]sConsumer.Group,
-       Filters:     d.Opts.%[2]sConsumer.Filters,
-       Concurrency: d.Opts.%[2]sConsumer.Concurrency,
-   }, %[1]s.New(d.Logger).Handle)
+   cons, err := %[1]s.New(d.Logger).Runnable(d.BrokerConn(ctx), d.Opts.%[2]sConsumer)
    if err != nil {
        return nil, err   // brokerWorkers returns []worker.Runnable today — thread an error, or log.Fatal on init
    }
    runnables = append(runnables, cons)
-   // imports: %[1]s "%[4]s/internal/app/consumers/%[1]s", "github.com/assanoff/skit/broker", "github.com/assanoff/skit/broker/rabbitmq"
+   // import: %[1]s "%[4]s/internal/app/consumers/%[1]s"
 
 4. go test ./internal/app/consumers/%[1]s/...
 `, d.Pkg, d.Type, d.UpperSnake, d.Module)
+		return
+	}
+
+	// kafka / nats: handler generated, but skit has no adapter yet.
+	fmt.Fprintf(out, `
+Scaffolded the %[1]q consumer handler (broker-agnostic). NOTE: skit has no %[5]s
+adapter yet — only rmq. The handler (%[1]s.go) and config are ready; wire the
+transport by hand once the adapter lands (mirror the rmq case: build a
+broker.Subscription from config and bind it to %[1]s.New(d.Logger).Handle).
+
+1. go mod tidy
+
+2. Add a config group to ServerOpts (internal/app/config/opts.go):
+
+   %[2]sConsumer config.ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
+
+3. go test ./internal/app/consumers/%[1]s/...
+`, d.Pkg, d.Type, d.UpperSnake, d.Module, transport)
 }
 
 // addWorkerCommand scaffolds a background worker: a periodic tick loop by

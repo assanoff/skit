@@ -167,6 +167,7 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 
 	want := []string{
 		"internal/app/consumers/orderrefund/orderrefund.go",
+		"internal/app/consumers/orderrefund/orderrefund_rmq.go", // default --broker rmq
 		"internal/app/consumers/orderrefund/orderrefund_test.go",
 		"internal/app/config/consumer.go",
 	}
@@ -192,6 +193,27 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 	}
 	if !strings.Contains(handler, "func (c *Consumer) Handle(ctx context.Context, m broker.Message) broker.Action") {
 		t.Errorf("consumer missing the broker.Handler method:\n%s", handler)
+	}
+
+	// The transport lives in its own file (rmq here) so a broker swap replaces one
+	// file; that file is where the concrete adapter is named.
+	rmq := readFile(t, filepath.Join(dir, "internal/app/consumers/orderrefund/orderrefund_rmq.go"))
+	if !strings.Contains(rmq, "rabbitmq.New(") || !strings.Contains(rmq, "broker.Subscription{") {
+		t.Errorf("rmq transport file missing rabbitmq.New/broker.Subscription:\n%s", rmq)
+	}
+
+	// --broker kafka has no SDK adapter yet: the handler is generated but no
+	// transport file is emitted.
+	kdir := t.TempDir()
+	writeGoMod(t, kdir, "github.com/me/svc")
+	if err := addConsumer(&bytes.Buffer{}, addRESTOpts{Dir: kdir, Name: "payment", Broker: "kafka"}); err != nil {
+		t.Fatalf("addConsumer kafka: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(kdir, "internal/app/consumers/payment/payment_rmq.go")); !os.IsNotExist(err) {
+		t.Errorf("kafka consumer must not emit an rmq transport file (stat err = %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(kdir, "internal/app/consumers/payment/payment.go")); err != nil {
+		t.Errorf("kafka consumer should still generate the agnostic handler: %v", err)
 	}
 
 	// The shared config type carries neutral field names (no exchange/routing-key).
