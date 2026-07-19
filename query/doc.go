@@ -34,8 +34,11 @@
 //   - CursorResult[T]: cursor (keyset) list envelope {error_code, data:{items,
 //     next?, prev?}}, paired with page.Cursor, for stable/efficient paging over
 //     large sets. next/prev are opaque tokens, omitted when there is no such page.
+//   - ResultJSONAPI[T]: JSON:API list document (application/vnd.api+json) with the
+//     pagination under meta.pagination {page, size, total_pages, total_results}.
+//     T is a pointer to a github.com/hashicorp/jsonapi-tagged DTO. Use this for a
+//     paginated JSON:API list; for a single JSON:API resource without pagination,
+//     use to.JSONAPI instead.
 //
-// All implement rest.ResponseEncoder. For a JSON:API list, tag the item DTO with
-// github.com/hashicorp/jsonapi tags and return to.JSONAPI(items) instead — the
-// jsonapi package assembles the document.
+// All implement rest.ResponseEncoder.
 package query
