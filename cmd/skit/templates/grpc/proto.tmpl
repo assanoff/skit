@@ -2,14 +2,18 @@ edition = "2023";
 
 package {{.Pkg}}.v1;
 
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/go_features.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "{{.Module}}/gen/{{.Pkg}}/v1;{{.Pkg}}v1";
 
-// Use Google's Opaque API for Go: monolithic generated code, lazy decoding,
-// fewer allocations (the official performance path that replaces vtprotobuf).
-option features.(pb.go).api_level = API_OPAQUE;
+// Hybrid API: the opaque accessors (getters/setters, Has*, the _builder types
+// the handler uses) PLUS the exported struct fields the generated gRPC-gateway
+// assigns directly (protoReq.Id = ...). Pure API_OPAQUE breaks the gateway
+// codegen; hybrid keeps the opaque ergonomics while staying gateway-compatible.
+option features.(pb.go).api_level = API_HYBRID;
 
 // Keep proto3-like semantics by default: singular fields have no presence.
 // Fields that need presence opt in with [features.field_presence = EXPLICIT].
@@ -25,15 +29,18 @@ message {{.Type}} {
 }
 
 message Create{{.Type}}Request {
-  string name = 1;
-  string description = 2;
+  // Field constraints are enforced at runtime by protovalidate (the server's
+  // validation interceptor), so the handler need not re-check them. Mirror the
+  // REST/domain limits here as you flesh out the model.
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  string description = 2 [(buf.validate.field).string.max_len = 1000];
 }
 message Create{{.Type}}Response {
   {{.Type}} {{.Snake}} = 1;
 }
 
 message Get{{.Type}}Request {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.uuid = true];
 }
 message Get{{.Type}}Response {
   {{.Type}} {{.Snake}} = 1;
@@ -44,14 +51,14 @@ message List{{.PluralType}}Request {
   // default page size. The REST list also exposes ?order_by and filters; add
   // matching fields here when the gRPC client needs them.
   int32 page = 1;
-  int32 page_size = 2;
+  int32 page_size = 2 [(buf.validate.field).int32 = {gte: 0, lte: 1000}];
 }
 message List{{.PluralType}}Response {
   repeated {{.Type}} {{.Plural}} = 1;
 }
 
 message Update{{.Type}}Request {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.uuid = true];
   // Explicit presence so the server can distinguish "unset" from "empty"
   // (partial update), the editions equivalent of proto3 `optional`.
   string name = 2 [features.field_presence = EXPLICIT];
@@ -62,15 +69,33 @@ message Update{{.Type}}Response {
 }
 
 message Delete{{.Type}}Request {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.uuid = true];
 }
 message Delete{{.Type}}Response {}
 
-// {{.Type}}Service is the gRPC counterpart of the REST {{.Pkg}} API.
+// {{.Type}}Service is the gRPC counterpart of the REST {{.Pkg}} API. Each RPC
+// carries a google.api.http rule so the generated gRPC-gateway exposes it as a
+// REST endpoint, and protoc-gen-openapiv2 documents it in the swagger spec.
 service {{.Type}}Service {
-  rpc Create{{.Type}}(Create{{.Type}}Request) returns (Create{{.Type}}Response);
-  rpc Get{{.Type}}(Get{{.Type}}Request) returns (Get{{.Type}}Response);
-  rpc List{{.PluralType}}(List{{.PluralType}}Request) returns (List{{.PluralType}}Response);
-  rpc Update{{.Type}}(Update{{.Type}}Request) returns (Update{{.Type}}Response);
-  rpc Delete{{.Type}}(Delete{{.Type}}Request) returns (Delete{{.Type}}Response);
+  rpc Create{{.Type}}(Create{{.Type}}Request) returns (Create{{.Type}}Response) {
+    option (google.api.http) = {
+      post: "/v1/{{.Plural}}"
+      body: "*"
+    };
+  }
+  rpc Get{{.Type}}(Get{{.Type}}Request) returns (Get{{.Type}}Response) {
+    option (google.api.http) = {get: "/v1/{{.Plural}}/{id}"};
+  }
+  rpc List{{.PluralType}}(List{{.PluralType}}Request) returns (List{{.PluralType}}Response) {
+    option (google.api.http) = {get: "/v1/{{.Plural}}"};
+  }
+  rpc Update{{.Type}}(Update{{.Type}}Request) returns (Update{{.Type}}Response) {
+    option (google.api.http) = {
+      patch: "/v1/{{.Plural}}/{id}"
+      body: "*"
+    };
+  }
+  rpc Delete{{.Type}}(Delete{{.Type}}Request) returns (Delete{{.Type}}Response) {
+    option (google.api.http) = {delete: "/v1/{{.Plural}}/{id}"};
+  }
 }

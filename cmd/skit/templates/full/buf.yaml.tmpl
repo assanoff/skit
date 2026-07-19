@@ -1,6 +1,12 @@
 version: v2
 modules:
   - path: proto
+# Hosted dependencies resolved from the BSR (buf dep update writes buf.lock).
+# googleapis: google.api.http annotations for the gRPC-gateway REST mapping.
+# protovalidate: buf.validate field constraints enforced at runtime.
+deps:
+  - buf.build/googleapis/googleapis
+  - buf.build/bufbuild/protovalidate
 lint:
   use:
     - STANDARD

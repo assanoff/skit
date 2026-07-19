@@ -21,7 +21,8 @@ tidy: ## go mod tidy
 generate: ## Generate code: mocks (moq) via //go:generate directives
 	$(GO) generate ./...
 
-proto: ## Lint protos and generate gRPC code into gen/ (needs `buf`; skit add grpc creates proto/)
+proto: ## Lint protos and generate gRPC + gateway + swagger into gen/ (needs `buf`; skit add grpc creates proto/)
+	buf dep update
 	buf lint proto
 	buf generate proto
 
