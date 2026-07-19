@@ -323,6 +323,48 @@ func TestAddRESTIdempotent(t *testing.T) {
 	}
 }
 
+func TestAddMigrationNumbersAndSlugs(t *testing.T) {
+	dir := t.TempDir()
+	migDir := filepath.Join(dir, "internal/migrations")
+	if err := os.MkdirAll(migDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed two existing migrations so the next sequence is 0003.
+	for _, n := range []string{"0001_init.sql", "0002_adverts.sql"} {
+		if err := os.WriteFile(filepath.Join(migDir, n), []byte("SELECT 1;"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := addMigration(&bytes.Buffer{}, dir, "add-photos"); err != nil {
+		t.Fatalf("addMigration: %v", err)
+	}
+
+	dest := filepath.Join(migDir, "0003_add_photos.sql") // sequence bumped, kebab -> snake
+	src := readFile(t, dest)
+	for _, want := range []string{"-- +goose Up", "-- +goose Down", "add_photos"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("migration missing %q:\n%s", want, src)
+		}
+	}
+}
+
+func TestAddMigrationFirstWhenNoDir(t *testing.T) {
+	dir := t.TempDir() // no internal/migrations yet
+	if err := addMigration(&bytes.Buffer{}, dir, "create-adverts"); err != nil {
+		t.Fatalf("addMigration: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal/migrations/0001_create_adverts.sql")); err != nil {
+		t.Errorf("expected 0001 migration to be created: %v", err)
+	}
+}
+
+func TestAddMigrationRejectsBadName(t *testing.T) {
+	if err := addMigration(&bytes.Buffer{}, t.TempDir(), "1bad"); err == nil {
+		t.Fatal("expected rejection of a name starting with a digit")
+	}
+}
+
 func TestAddRESTRejectsBadName(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")

@@ -1,0 +1,19 @@
+-- {{.Name}}
+-- goose migration. Statements between StatementBegin/End are sent as one block
+-- (needed for functions, DO blocks, or anything containing ';'). Applied in file
+-- order; Down is the inverse of Up.
+-- +goose Up
+-- +goose StatementBegin
+-- TODO: write the schema change, e.g.
+-- CREATE TABLE IF NOT EXISTS {{.Name}} (
+--     id uuid PRIMARY KEY,
+--     created_at timestamptz NOT NULL DEFAULT now()
+-- );
+SELECT 1;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+-- TODO: undo the Up change, e.g. DROP TABLE IF EXISTS {{.Name}};
+SELECT 1;
+-- +goose StatementEnd

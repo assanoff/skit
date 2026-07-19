@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -56,6 +57,90 @@ func (c *addRestTestCommand) Execute([]string) error {
 		Plural: c.Plural,
 		Name:   c.Args.Name,
 	})
+}
+
+// addMigrationCommand scaffolds the next numbered goose migration into
+// internal/migrations. The sequence number is derived by scanning existing
+// NNNN_*.sql files, so migrations stay ordered and never collide.
+type addMigrationCommand struct {
+	Dir  string `long:"dir" default:"." description:"service root containing internal/migrations (default: current directory)"`
+	Args struct {
+		Name string `positional-arg-name:"name" description:"migration name, e.g. add-photos or create-adverts"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addMigrationCommand) Execute([]string) error {
+	return addMigration(os.Stdout, c.Dir, c.Args.Name)
+}
+
+// migrationsSubdir is where the full scaffold keeps goose SQL migrations.
+const migrationsSubdir = "internal/migrations"
+
+// seqRE matches the leading zero-padded sequence on a migration filename, e.g.
+// "0007_add_photos.sql" -> "0007".
+var seqRE = regexp.MustCompile(`^(\d+)_`)
+
+// addMigration writes internal/migrations/NNNN_<slug>.sql, where NNNN is one
+// past the highest existing sequence (0001 when none exist) and <slug> is name
+// in lower_snake_case. The migrations directory is created if absent.
+func addMigration(out io.Writer, dir, name string) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	}
+	if dir == "" {
+		dir = "."
+	}
+
+	migDir := filepath.Join(dir, filepath.FromSlash(migrationsSubdir))
+	seq, err := nextMigrationSeq(migDir)
+	if err != nil {
+		return err
+	}
+
+	slug := strings.ToLower(strings.Join(splitWords(name), "_"))
+	dest := filepath.Join(migDir, fmt.Sprintf("%04d_%s.sql", seq, slug))
+
+	if err := writeIfAbsent(out, dest, "templates/migration/migration.sql.tmpl", struct{ Name string }{Name: slug}); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, `
+Scaffolded migration %s. Next:
+
+1. Edit the file — replace the SELECT 1 placeholders with your Up/Down SQL.
+2. Apply it with your migrate command (e.g. go run ./cmd/<svc> migrate).
+`, dest)
+	return nil
+}
+
+// nextMigrationSeq returns one past the highest NNNN_ prefix among the .sql
+// files in dir, or 1 when dir is absent or holds no numbered migrations.
+func nextMigrationSeq(dir string) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 1, nil
+		}
+		return 0, err
+	}
+	max := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		m := seqRE.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max + 1, nil
 }
 
 type addRESTOpts struct {

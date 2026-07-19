@@ -56,11 +56,12 @@ Then add modules to the service:
   skit add grpc <name>          # gRPC module (.proto + handler)
   skit add consumer <name>      # broker-agnostic message consumer
   skit add worker <name>        # background worker (--claim for queue-backed)
+  skit add migration <name>     # next numbered goose migration (NNNN_<name>.sql)
 
 Help:
 
   skit -h                       # top-level help and all commands
-  skit <command> -h             # help for a command (new, add rest, add grpc, add consumer, add worker, version)
+  skit <command> -h             # help for a command (new, add rest, add grpc, add consumer, add worker, add migration, version)
 `)
 }
 
@@ -114,6 +115,11 @@ func main() {
 	}
 	if _, err := add.AddCommand("worker", "scaffold a background worker",
 		"Generate a periodic tick worker (or, with --claim, a queue-backed processor).", &addWorkerCommand{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if _, err := add.AddCommand("migration", "scaffold the next goose migration",
+		"Generate internal/migrations/NNNN_<name>.sql with the next sequence number.", &addMigrationCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
