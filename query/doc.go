@@ -1,7 +1,12 @@
-// Package query provides the response envelope for paginated list endpoints:
-// Result[T] carries the page's items plus the total count, the page/rows echoed
-// back, and the derived TotalPages and Prev/Next page numbers. It implements
-// rest.ResponseEncoder, so a handler returns it directly.
+// Package query provides the response envelopes for list and single-object
+// endpoints. Every envelope shares the house shape — an "error_code" and a
+// "data" object — so clients parse one structure across all endpoints:
+//
+//	list:   {"error_code":"ok","data":{"items":[...],"pagination":{"total_pages":..,"current_page":..,"limit":..,"total_items":..}}}
+//	single: {"error_code":"ok","data":{...}}
+//
+// Result[T] (list) and ResultItem[T]/CursorResult[T] all implement
+// rest.ResponseEncoder, so a handler returns them directly.
 //
 // # Usage
 //
@@ -12,7 +17,10 @@
 //	items, err := core.Query(ctx, pg)   // one page
 //	total, err := core.Count(ctx)        // full count
 //	return query.NewResult(toDTOs(items), total, pg)
-//	// -> {items,total,page,rowsPerPage,totalPages,prev?,next?}
+//	// -> {error_code, data:{items, pagination}}
+//
+//	one, err := core.QueryByID(ctx, id)
+//	return query.NewResultItem(toDTO(one)) // -> {error_code, data:{...}}
 //
 // When the items must also be localized by the translation middleware, embed
 // Result in a type that implements translation.TranslatableList over its Items
@@ -20,13 +28,14 @@
 //
 // # Variants
 //
-//   - Result[T]: plain JSON envelope
-//     {items,total,page,rowsPerPage,totalPages,prev?,next?} (offset). prev/next
-//     are page numbers, omitted when there is no previous/next page.
-//   - CursorResult[T]: cursor (keyset) variant {items,next,prev}, paired with
-//     page.Cursor, for stable/efficient paging over large sets.
+//   - Result[T]: offset list envelope {error_code, data:{items, pagination}},
+//     where pagination is {total_pages, current_page, limit, total_items}.
+//   - ResultItem[T]: single-object envelope {error_code, data:{...}}.
+//   - CursorResult[T]: cursor (keyset) list envelope {error_code, data:{items,
+//     next?, prev?}}, paired with page.Cursor, for stable/efficient paging over
+//     large sets. next/prev are opaque tokens, omitted when there is no such page.
 //
-// Both implement rest.ResponseEncoder. For a JSON:API list, tag the item DTO with
+// All implement rest.ResponseEncoder. For a JSON:API list, tag the item DTO with
 // github.com/hashicorp/jsonapi tags and return to.JSONAPI(items) instead — the
 // jsonapi package assembles the document.
 package query

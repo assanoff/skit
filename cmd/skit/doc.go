@@ -32,8 +32,8 @@
 // Store (core/<name>/<name>db/), and a REST transport with create/list/get/
 // update/delete handlers (api/<name>/). The list endpoint ships the full
 // skit listing set out of the box: offset pagination (?page/?rows ->
-// query.Result with total/totalPages/prev/next), keyset cursor pagination
-// (GET /<plural>/cursor -> query.CursorResult), a QueryFilter (?name/?description,
+// query.Result, the {error_code, data:{items, pagination}} envelope), keyset
+// cursor pagination (GET /<plural>/cursor -> query.CursorResult), a QueryFilter (?name/?description,
 // honored by Query and Count), and allowlisted ORDER BY (?order_by, via the
 // generated <name>db/order.go). It also generates a store-level integration test
 // (<name>db/listing_test.go) that exercises the listing set — cursor, offset,

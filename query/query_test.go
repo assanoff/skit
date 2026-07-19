@@ -15,13 +15,12 @@ func TestNewResultAndEncode(t *testing.T) {
 	pg := page.New(2, 25)
 	r := NewResult([]string{"a", "b"}, 57, pg)
 
-	is.Equal(r.Total, 57)       // total echoed
-	is.Equal(r.Page, 2)         // page echoed
-	is.Equal(r.RowsPerPage, 25) // rows echoed
-	is.Equal(len(r.Items), 2)   // items carried
-	is.Equal(r.TotalPages, 3)   // ceil(57/25)
-	is.Equal(r.Prev, 1)         // page 2 -> prev 1
-	is.Equal(r.Next, 3)         // page 2 -> next 3 (last)
+	is.Equal(r.ErrorCode, "ok")                // ok code
+	is.Equal(len(r.Data.Items), 2)             // items carried
+	is.Equal(r.Data.Pagination.TotalItems, 57) // total echoed
+	is.Equal(r.Data.Pagination.CurrentPage, 2) // page echoed
+	is.Equal(r.Data.Pagination.Limit, 25)      // rows echoed
+	is.Equal(r.Data.Pagination.TotalPages, 3)  // ceil(57/25)
 
 	data, ct, err := r.Encode()
 	is.NoErr(err)                    // encodes
@@ -29,26 +28,36 @@ func TestNewResultAndEncode(t *testing.T) {
 
 	var got map[string]any
 	is.NoErr(json.Unmarshal(data, &got)) // round-trips
-	for _, k := range []string{"items", "total", "page", "rowsPerPage", "totalPages", "prev", "next"} {
-		_, ok := got[k]
-		is.True(ok) // present in encoded JSON
+	is.Equal(got["error_code"], "ok")    // top-level error_code
+
+	d, ok := got["data"].(map[string]any)
+	is.True(ok) // data object present
+	_, hasItems := d["items"]
+	is.True(hasItems) // items under data
+
+	pag, ok := d["pagination"].(map[string]any)
+	is.True(ok) // pagination under data
+	for _, k := range []string{"total_pages", "current_page", "limit", "total_items"} {
+		_, present := pag[k]
+		is.True(present) // snake_case pagination key present
 	}
 }
 
-// TestResultPaginationMath covers the derived TotalPages/Prev/Next across the
-// edges: first page, last page, exact multiple, and an empty result.
+// TestResultPaginationMath covers the derived total_pages across the edges, and
+// the empty case where current_page/limit collapse to zero.
 func TestResultPaginationMath(t *testing.T) {
 	tests := []struct {
-		name                string
-		page, rows, total   int
-		wantPages, wantPrev int
-		wantNext            int
+		name              string
+		page, rows, total int
+		wantPages         int
+		wantCurrent       int
+		wantLimit         int
 	}{
-		{"first page", 1, 10, 35, 4, 0, 2},
-		{"middle page", 2, 10, 35, 4, 1, 3},
-		{"last page", 4, 10, 35, 4, 3, 0},
-		{"exact multiple last", 3, 10, 30, 3, 2, 0},
-		{"single page", 1, 10, 7, 1, 0, 0},
+		{"first page", 1, 10, 35, 4, 1, 10},
+		{"middle page", 2, 10, 35, 4, 2, 10},
+		{"last page", 4, 10, 35, 4, 4, 10},
+		{"exact multiple last", 3, 10, 30, 3, 3, 10},
+		{"single page", 1, 10, 7, 1, 1, 10},
 		{"empty", 1, 10, 0, 0, 0, 0},
 	}
 
@@ -57,26 +66,51 @@ func TestResultPaginationMath(t *testing.T) {
 			is := is.New(t)
 
 			r := NewResult([]int(nil), tc.total, page.New(tc.page, tc.rows))
-			is.Equal(r.TotalPages, tc.wantPages) // total pages
-			is.Equal(r.Prev, tc.wantPrev)        // prev page (0 = none)
-			is.Equal(r.Next, tc.wantNext)        // next page (0 = none)
+			is.Equal(r.Data.Pagination.TotalPages, tc.wantPages)    // total pages
+			is.Equal(r.Data.Pagination.CurrentPage, tc.wantCurrent) // current page
+			is.Equal(r.Data.Pagination.Limit, tc.wantLimit)         // limit
 		})
 	}
 }
 
-// TestResultPrevNextOmitted verifies prev/next are dropped from the JSON when
-// zero (no such page), so the envelope stays clean on the first/last page.
-func TestResultPrevNextOmitted(t *testing.T) {
+func TestNewResultItemAndEncode(t *testing.T) {
 	is := is.New(t)
 
-	r := NewResult([]int{1}, 5, page.New(1, 10)) // single page: no prev, no next
+	type dto struct {
+		ID string `json:"id"`
+	}
+	r := NewResultItem(dto{ID: "abc"})
+	is.Equal(r.ErrorCode, "ok") // ok code
+	is.Equal(r.Data.ID, "abc")  // object carried
+
+	data, ct, err := r.Encode()
+	is.NoErr(err)
+	is.Equal(ct, "application/json")
+
+	var got map[string]any
+	is.NoErr(json.Unmarshal(data, &got))
+	is.Equal(got["error_code"], "ok")
+	d, ok := got["data"].(map[string]any)
+	is.True(ok)              // data object present
+	is.Equal(d["id"], "abc") // object fields under data
+}
+
+func TestNewCursorResultAndEncode(t *testing.T) {
+	is := is.New(t)
+
+	r := NewCursorResult([]string{"a"}, "next-token", "")
+	is.Equal(r.ErrorCode, "ok")
+	is.Equal(len(r.Data.Items), 1)
+	is.Equal(r.Data.Next, "next-token")
+
 	data, _, err := r.Encode()
 	is.NoErr(err)
 
 	var got map[string]any
 	is.NoErr(json.Unmarshal(data, &got))
-	_, hasPrev := got["prev"]
-	_, hasNext := got["next"]
-	is.True(!hasPrev) // prev omitted when zero
-	is.True(!hasNext) // next omitted when zero
+	is.Equal(got["error_code"], "ok")
+	d := got["data"].(map[string]any)
+	is.Equal(d["next"], "next-token")
+	_, hasPrev := d["prev"]
+	is.True(!hasPrev) // prev omitted when empty
 }

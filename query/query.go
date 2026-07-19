@@ -3,39 +3,57 @@ package query
 import (
 	"encoding/json"
 
+	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/page"
 )
 
-// Result is the response envelope for a paginated list query. It implements the
-// rest.ResponseEncoder interface (Encode), so a handler can return it directly. T is the
-// item DTO type.
-//
-// TotalPages is the number of pages the total spans at this page size (zero when
-// there are no rows). Prev/Next are the adjacent page numbers, each zero (and
-// omitted from JSON) when there is no such page — so a client can render
-// previous/next links without recomputing the page math.
-type Result[T any] struct {
-	Items       []T `json:"items"`
-	Total       int `json:"total"`
-	Page        int `json:"page"`
-	RowsPerPage int `json:"rowsPerPage"`
-	TotalPages  int `json:"totalPages"`
-	Prev        int `json:"prev,omitempty"`
-	Next        int `json:"next,omitempty"`
+const contentTypeJSON = "application/json"
+
+// Pagination is the offset-paging metadata embedded in a list envelope.
+type Pagination struct {
+	TotalPages  int `json:"total_pages"`
+	CurrentPage int `json:"current_page"`
+	Limit       int `json:"limit"`
+	TotalItems  int `json:"total_items"`
 }
 
-// NewResult builds a Result from the page's items, the total row count, and the
-// page request that produced them.
+// Data is the payload of a paginated list envelope: the page's items and their
+// pagination metadata.
+type Data[T any] struct {
+	Items      []T        `json:"items"`
+	Pagination Pagination `json:"pagination"`
+}
+
+// Result is the response envelope for a paginated list query: an error_code and a
+// data object holding the items and their pagination. It implements the
+// rest.ResponseEncoder interface (Encode), so a handler can return it directly. T
+// is the item DTO type. The shape mirrors the house convention:
+//
+//	{"error_code":"ok","data":{"items":[...],"pagination":{"total_pages":..,"current_page":..,"limit":..,"total_items":..}}}
+type Result[T any] struct {
+	ErrorCode string  `json:"error_code"`
+	Data      Data[T] `json:"data"`
+}
+
+// NewResult builds a list envelope from the page's items, the total row count, and
+// the page request that produced them. When the total spans no pages (empty
+// result) the pagination reports zeros for current_page and limit.
 func NewResult[T any](items []T, total int, pg page.Page) Result[T] {
 	totalPages := numPages(total, pg.RowsPerPage())
+	if totalPages == 0 {
+		pg = page.Page{}
+	}
 	return Result[T]{
-		Items:       items,
-		Total:       total,
-		Page:        pg.Number(),
-		RowsPerPage: pg.RowsPerPage(),
-		TotalPages:  totalPages,
-		Prev:        prevPage(pg.Number()),
-		Next:        nextPage(pg.Number(), totalPages),
+		ErrorCode: errs.OK.String(),
+		Data: Data[T]{
+			Items: items,
+			Pagination: Pagination{
+				TotalPages:  totalPages,
+				CurrentPage: pg.Number(),
+				Limit:       pg.RowsPerPage(),
+				TotalItems:  total,
+			},
+		},
 	}
 }
 
@@ -49,48 +67,62 @@ func numPages(total, rowsPerPage int) int {
 	return (total + rowsPerPage - 1) / rowsPerPage
 }
 
-// prevPage returns the page before number, or zero when number is the first
-// page.
-func prevPage(number int) int {
-	if number <= 1 {
-		return 0
-	}
-	return number - 1
-}
-
-// nextPage returns the page after number, or zero when number is the last page
-// (or beyond it).
-func nextPage(number, totalPages int) int {
-	if number >= totalPages {
-		return 0
-	}
-	return number + 1
-}
-
 // Encode implements the rest.ResponseEncoder interface (data, contentType, error).
 func (r Result[T]) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(r)
-	return data, "application/json", err
+	return data, contentTypeJSON, err
 }
 
-// CursorResult is the cursor-paginated counterpart of Result: the page's items
-// plus opaque cursors (page.EncodeCursor) for the next and previous pages, empty
-// when there is no such page. It implements rest.ResponseEncoder. Use it with
-// page.Cursor when offset paging is too costly or unstable under inserts.
-type CursorResult[T any] struct {
+// ResultItem is the response envelope for a single-object query: an error_code and
+// the object as data. It implements rest.ResponseEncoder (Encode). The shape is
+// {"error_code":"ok","data":{...}}.
+type ResultItem[T any] struct {
+	ErrorCode string `json:"error_code"`
+	Data      T      `json:"data"`
+}
+
+// NewResultItem wraps a single object in a data envelope with an ok error_code.
+// Return it from get/create/update handlers so every endpoint shares the
+// {error_code, data} shape.
+func NewResultItem[T any](data T) ResultItem[T] {
+	return ResultItem[T]{ErrorCode: errs.OK.String(), Data: data}
+}
+
+// Encode implements the rest.ResponseEncoder interface.
+func (r ResultItem[T]) Encode() ([]byte, string, error) {
+	data, err := json.Marshal(r)
+	return data, contentTypeJSON, err
+}
+
+// CursorData is the payload of a cursor-paginated list envelope: the page's items
+// plus opaque next/prev cursors (empty when there is no such page).
+type CursorData[T any] struct {
 	Items []T    `json:"items"`
 	Next  string `json:"next,omitempty"`
 	Prev  string `json:"prev,omitempty"`
 }
 
-// NewCursorResult builds a cursor result. next/prev are opaque tokens from
+// CursorResult is the cursor-paginated counterpart of Result: the same
+// {error_code, data} envelope, with data carrying the items and opaque cursors
+// (page.EncodeCursor) for the next and previous pages. It implements
+// rest.ResponseEncoder. Use it with page.Cursor when offset paging is too costly
+// or unstable under inserts.
+type CursorResult[T any] struct {
+	ErrorCode string        `json:"error_code"`
+	Data      CursorData[T] `json:"data"`
+}
+
+// NewCursorResult builds a cursor envelope. next/prev are opaque tokens from
 // page.EncodeCursor (pass "" when there is no next/previous page).
 func NewCursorResult[T any](items []T, next, prev string) CursorResult[T] {
-	return CursorResult[T]{Items: items, Next: next, Prev: prev}
+	return CursorResult[T]{
+		ErrorCode: errs.OK.String(),
+		Data:      CursorData[T]{Items: items, Next: next, Prev: prev},
+	}
 }
 
 // Encode implements the rest.ResponseEncoder interface.
 func (r CursorResult[T]) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(r)
-	return data, "application/json", err
+	return data, contentTypeJSON, err
 }

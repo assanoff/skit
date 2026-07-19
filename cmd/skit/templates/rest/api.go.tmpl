@@ -58,7 +58,8 @@ func (h *Handler) create(ctx context.Context, r *http.Request) rest.ResponseEnco
 	if err != nil {
 		return errs.From(err)
 	}
-	return rest.JSONStatus(toResponse({{.Recv}}), http.StatusCreated)
+	// {error_code, data:{...}} at 201, sharing the house envelope with reads.
+	return rest.JSONStatus(query.NewResultItem(toResponse({{.Recv}})), http.StatusCreated)
 }
 
 // query lists one page of {{.Plural}} (?page, ?rows), optionally narrowed by the
@@ -128,7 +129,7 @@ func (h *Handler) queryByID(ctx context.Context, r *http.Request) rest.ResponseE
 	if err != nil {
 		return errs.From(err)
 	}
-	return toResponse({{.Recv}}) // Response implements rest.ResponseEncoder
+	return query.NewResultItem(toResponse({{.Recv}})) // {error_code, data:{...}}
 }
 
 // update applies a partial update to a {{.Pkg}}.
@@ -147,7 +148,7 @@ func (h *Handler) update(ctx context.Context, r *http.Request) rest.ResponseEnco
 	if err != nil {
 		return errs.From(err)
 	}
-	return toResponse({{.Recv}}) // Response implements rest.ResponseEncoder
+	return query.NewResultItem(toResponse({{.Recv}})) // {error_code, data:{...}}
 }
 
 // delete removes a {{.Pkg}}.
