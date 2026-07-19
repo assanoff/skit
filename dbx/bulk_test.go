@@ -14,20 +14,20 @@ func TestBuildInsertQuery(t *testing.T) {
 			name:    "single row two cols",
 			columns: []string{"id", "name"},
 			nValues: 2,
-			want:    "INSERT INTO t (id, name) VALUES ($1, $2)",
+			want:    "INSERT INTO t (id, name) VALUES (?, ?)",
 		},
 		{
 			name:    "three rows two cols",
 			columns: []string{"id", "name"},
 			nValues: 6,
-			want:    "INSERT INTO t (id, name) VALUES ($1, $2), ($3, $4), ($5, $6)",
+			want:    "INSERT INTO t (id, name) VALUES (?, ?), (?, ?), (?, ?)",
 		},
 		{
 			name:           "with conflict action",
 			columns:        []string{"id"},
 			nValues:        2,
 			conflictAction: "ON CONFLICT DO NOTHING",
-			want:           "INSERT INTO t (id) VALUES ($1), ($2) ON CONFLICT DO NOTHING",
+			want:           "INSERT INTO t (id) VALUES (?), (?) ON CONFLICT DO NOTHING",
 		},
 	}
 

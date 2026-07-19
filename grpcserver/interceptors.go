@@ -100,6 +100,86 @@ func toStatus(err error) error {
 	return status.Error(codes.Internal, "internal error")
 }
 
+// --- stream interceptors (symmetric to the unary chain above) ---
+
+// wrappedStream lets a stream interceptor replace the context seen by the handler
+// (grpc.ServerStream.Context is read-only otherwise).
+type wrappedStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedStream) Context() context.Context { return w.ctx }
+
+// recoveryStream turns a panic in a streaming handler into an Internal status
+// instead of crashing the server.
+func recoveryStream(log *logger.Logger) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				if log != nil {
+					log.Error(ss.Context(), "grpc stream handler panic recovered",
+						"method", info.FullMethod, "panic", r, "stack", string(debug.Stack()))
+				}
+				err = status.Errorf(codes.Internal, "internal error")
+			}
+		}()
+		return handler(srv, ss)
+	}
+}
+
+// traceStream extracts inbound trace context from gRPC metadata and ensures a
+// trace id is present in the stream's context so logs can carry it.
+func traceStream(tracer trace.Tracer) grpc.StreamServerInterceptor {
+	prop := propagation.TraceContext{}
+	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		ctx := ss.Context()
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			ctx = prop.Extract(ctx, metadataCarrier(md))
+		}
+		ctx = skotel.InjectTracing(ctx, tracer)
+		return handler(srv, &wrappedStream{ServerStream: ss, ctx: ctx})
+	}
+}
+
+// loggingStream logs one structured line per stream RPC (the already-mapped
+// status code, duration and trace_id).
+func loggingStream(log *logger.Logger) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		start := time.Now()
+		err := handler(srv, ss)
+		if log != nil {
+			log.Info(ss.Context(), "grpc.stream",
+				"rpc.method", info.FullMethod,
+				"rpc.grpc.status_code", status.Code(err).String(),
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
+		}
+		return err
+	}
+}
+
+// metricsStream records count and latency per method and status code.
+func metricsStream(m *rpcMetrics) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		start := time.Now()
+		err := handler(srv, ss)
+		m.observe(info.FullMethod, status.Code(err).String(), float64(time.Since(start).Milliseconds()))
+		return err
+	}
+}
+
+// errorMapStream converts a returned error into a gRPC status, mirroring
+// errorMapUnary.
+func errorMapStream() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if err := handler(srv, ss); err != nil {
+			return toStatus(err)
+		}
+		return nil
+	}
+}
+
 // metadataCarrier adapts gRPC metadata to a propagation.TextMapCarrier.
 type metadataCarrier metadata.MD
 

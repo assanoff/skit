@@ -18,9 +18,14 @@ const maxParameters = 1000
 // BulkInsert inserts len(values)/len(columns) rows into table in batches, each
 // batch a single multi-row INSERT. conflictAction, if non-empty, is appended
 // verbatim (e.g. "ON CONFLICT DO NOTHING"). values are laid out row-major:
-// [r0c0, r0c1, r1c0, r1c1, ...].
+// [r0c0, r0c1, r1c0, r1c1, ...]. d selects the engine (placeholder style);
+// dialect.Postgres{} and dialect.SQLite{} are both supported.
 //
 // For upserts prefer BulkUpsert, which builds the conflict clause for you.
+//
+// The query is built with "?" markers and rebound to the driver's bind style via
+// db.Rebind (sqlx), so it is engine-portable: Postgres gets "$1,$2,…", SQLite/
+// MySQL keep "?". No per-dialect placeholder handling is needed.
 func BulkInsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("dbx: bulk insert into %s: no columns", table)
@@ -41,7 +46,7 @@ func BulkInsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, tab
 	for left := 0; left < len(values); left += stride {
 		right := min(left+stride, len(values))
 		batch := values[left:right]
-		query := buildInsertQuery(table, columns, len(batch), conflictAction)
+		query := db.Rebind(buildInsertQuery(table, columns, len(batch), conflictAction))
 		if log != nil {
 			log.Debug(ctx, "dbx.bulk_insert", "table", table, "rows", len(batch)/len(columns))
 		}
@@ -53,18 +58,21 @@ func BulkInsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, tab
 }
 
 // BulkUpsert inserts rows and, on conflict over conflictColumns, updates every
-// non-conflict column from the proposed row.
+// non-conflict column from the proposed row. The ON CONFLICT … DO UPDATE SET …
+// = excluded.… form is understood by both Postgres and SQLite (3.24+); the query
+// is rebound to the driver's placeholder style by BulkInsert.
 func BulkUpsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictColumns []string) error {
 	return BulkInsert(ctx, log, db, table, columns, values, buildUpsertConflictAction(columns, conflictColumns))
 }
 
+// buildInsertQuery renders a multi-row INSERT with "?" placeholders; callers
+// rebind it to the driver's bind style (db.Rebind).
 func buildInsertQuery(table string, columns []string, nValues int, conflictAction string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "INSERT INTO %s (%s) VALUES ", table, strings.Join(columns, ", "))
 
 	nCols := len(columns)
 	nRows := nValues / nCols
-	param := 0
 	for row := range nRows {
 		if row > 0 {
 			b.WriteString(", ")
@@ -74,8 +82,7 @@ func buildInsertQuery(table string, columns []string, nValues int, conflictActio
 			if col > 0 {
 				b.WriteString(", ")
 			}
-			param++
-			fmt.Fprintf(&b, "$%d", param)
+			b.WriteString("?")
 		}
 		b.WriteString(")")
 	}

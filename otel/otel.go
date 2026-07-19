@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -80,6 +81,25 @@ func AddSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (con
 	if len(attrs) > 0 {
 		span.SetAttributes(attrs...)
 	}
+	return ctx, span
+}
+
+// AddSpanAt starts AND ends a span with explicit start/end timestamps — a
+// BACKDATED span — for reconstructing already-finished operations whose real
+// times are known (e.g. replaying techlog/audit records into a trace). It returns
+// the child context, so nested backdated spans can be parented to it, and the
+// (already ended) span. With no tracer in ctx it is a no-op returning ctx and the
+// current span, so callers never need a nil check.
+func AddSpanAt(ctx context.Context, name string, start, end time.Time, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	tracer := tracerFrom(ctx)
+	if tracer == nil {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+	ctx, span := tracer.Start(ctx, name, trace.WithTimestamp(start))
+	if len(attrs) > 0 {
+		span.SetAttributes(attrs...)
+	}
+	span.End(trace.WithTimestamp(end))
 	return ctx, span
 }
 

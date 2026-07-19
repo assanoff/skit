@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -72,6 +73,73 @@ func Open(cfg Config) (*sqlx.DB, error) {
 	db.SetMaxOpenConns(cfg.MaxOpenConns)
 
 	return db, nil
+}
+
+// SQLiteConfig configures a SQLite database opened by OpenSQLite.
+type SQLiteConfig struct {
+	// Path is the database file (or ":memory:").
+	Path string
+	// Driver is the registered database/sql driver name; empty defaults to
+	// "sqlite" (modernc.org/sqlite, pure Go). The caller blank-imports the driver
+	// — dbx adds no SQLite driver dependency of its own.
+	Driver string
+	// Pragmas applied via the modernc DSN (_pragma=…); ignored when DSN is set.
+	JournalMode string        // e.g. "WAL"; empty keeps the engine default
+	BusyTimeout time.Duration // busy_timeout; zero keeps the engine default
+	ForeignKeys bool          // foreign_keys(1)
+	// DSN, when set, is used verbatim as the driver DSN — for drivers whose DSN
+	// syntax differs from modernc (e.g. mattn/go-sqlite3).
+	DSN          string
+	MaxOpenConns int
+	MaxIdleConns int
+}
+
+// DefaultSQLiteDriver is the driver name OpenSQLite uses when Config.Driver is
+// empty — modernc.org/sqlite, the pure-Go driver (no cgo).
+const DefaultSQLiteDriver = "sqlite"
+
+// OpenSQLite opens a sqlx.DB for SQLite using a caller-registered driver (default
+// "sqlite" = modernc.org/sqlite). It does not verify connectivity; call
+// StatusCheck for that. All the dbx query helpers work against the returned
+// handle unchanged — BulkInsert/BulkUpsert rebind placeholders to the SQLite bind
+// style via db.Rebind.
+func OpenSQLite(cfg SQLiteConfig) (*sqlx.DB, error) {
+	driver := cfg.Driver
+	if driver == "" {
+		driver = DefaultSQLiteDriver
+	}
+	db, err := sqlx.Open(driver, cfg.dsn())
+	if err != nil {
+		return nil, fmt.Errorf("dbx: open sqlite: %w", err)
+	}
+	if cfg.MaxOpenConns > 0 {
+		db.SetMaxOpenConns(cfg.MaxOpenConns)
+	}
+	db.SetMaxIdleConns(cfg.MaxIdleConns)
+	return db, nil
+}
+
+// dsn returns cfg.DSN verbatim when set, else builds a modernc.org/sqlite DSN
+// (file:<path>?_pragma=…) from Path and the pragma fields.
+func (cfg SQLiteConfig) dsn() string {
+	if cfg.DSN != "" {
+		return cfg.DSN
+	}
+	var pragmas []string
+	if cfg.BusyTimeout > 0 {
+		pragmas = append(pragmas, fmt.Sprintf("_pragma=busy_timeout(%d)", cfg.BusyTimeout.Milliseconds()))
+	}
+	if cfg.JournalMode != "" {
+		pragmas = append(pragmas, "_pragma=journal_mode("+cfg.JournalMode+")")
+	}
+	if cfg.ForeignKeys {
+		pragmas = append(pragmas, "_pragma=foreign_keys(1)")
+	}
+	dsn := "file:" + cfg.Path
+	if len(pragmas) > 0 {
+		dsn += "?" + strings.Join(pragmas, "&")
+	}
+	return dsn
 }
 
 // DefaultStatusCheckTimeout bounds StatusCheck when it is called with a context

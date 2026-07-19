@@ -63,9 +63,10 @@ type Server struct {
 }
 
 type options struct {
-	tracer     trace.Tracer
-	registry   prometheus.Registerer
-	unaryExtra []grpc.UnaryServerInterceptor
+	tracer      trace.Tracer
+	registry    prometheus.Registerer
+	unaryExtra  []grpc.UnaryServerInterceptor
+	streamExtra []grpc.StreamServerInterceptor
 }
 
 // Option customizes the server.
@@ -85,6 +86,12 @@ func WithMetrics(reg prometheus.Registerer) Option {
 // built-in ones (closest to the handler).
 func WithUnaryInterceptors(in ...grpc.UnaryServerInterceptor) Option {
 	return func(o *options) { o.unaryExtra = append(o.unaryExtra, in...) }
+}
+
+// WithStreamInterceptors appends application STREAM interceptors, applied after
+// the built-in ones (closest to the handler) — symmetric to WithUnaryInterceptors.
+func WithStreamInterceptors(in ...grpc.StreamServerInterceptor) Option {
+	return func(o *options) { o.streamExtra = append(o.streamExtra, in...) }
 }
 
 // New builds a Server. Register services via ServiceRegistrar before Start.
@@ -116,7 +123,23 @@ func New(log *logger.Logger, cfg Config, opts ...Option) *Server {
 	chain = append(chain, errorMapUnary())
 	chain = append(chain, o.unaryExtra...)
 
-	serverOpts := []grpc.ServerOption{grpc.ChainUnaryInterceptor(chain...)}
+	// Same order for streams: recovery -> trace -> logging -> metrics -> errormap
+	// (innermost) -> app interceptors -> handler.
+	schain := []grpc.StreamServerInterceptor{
+		recoveryStream(log),
+		traceStream(o.tracer),
+		loggingStream(log),
+	}
+	if m != nil {
+		schain = append(schain, metricsStream(m))
+	}
+	schain = append(schain, errorMapStream())
+	schain = append(schain, o.streamExtra...)
+
+	serverOpts := []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(chain...),
+		grpc.ChainStreamInterceptor(schain...),
+	}
 	serverOpts = append(serverOpts, buildTuningOptions(cfg)...)
 
 	gs := grpc.NewServer(serverOpts...)
