@@ -1,0 +1,40 @@
+package {{.Pkg}}
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/matryer/is"
+)
+
+// TestGet{{.Type}} drives the example method against an httptest upstream{{if .OAuth}} and a
+// fake OAuth2 token endpoint{{end}}, verifying the request/response round-trip through
+// the configured transport. Adapt it as you replace the example method.
+func TestGet{{.Type}}(t *testing.T) {
+	is := is.New(t)
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		is.Equal(r.URL.Path, "/{{.Pkg}}/42") // baseURL + path assembled correctly
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"42","name":"answer"}`))
+	}))
+	defer api.Close()
+{{if .OAuth}}
+	token := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer token.Close()
+
+	c, err := New(Config{BaseURL: api.URL, TokenURL: token.URL, ClientID: "id", ClientSecret: "secret"})
+{{else}}
+	c, err := New(Config{BaseURL: api.URL})
+{{end}}	is.NoErr(err)
+
+	got, err := c.Get{{.Type}}(context.Background(), "42")
+	is.NoErr(err)
+	is.Equal(got.ID, "42")       // decoded id
+	is.Equal(got.Name, "answer") // decoded name
+}

@@ -1121,6 +1121,115 @@ Scaffolded gRPC tests for %[1]q. Next:
 	return nil
 }
 
+// httpClientData is the template payload for a generated upstream HTTP client.
+type httpClientData struct {
+	Module string
+	Pkg    string
+	Type   string
+	Recv   string
+	OAuth  bool // --oauth: scaffold the OAuth2 client_credentials transport
+}
+
+// addHTTPClientCommand scaffolds a typed client for an upstream HTTP service:
+// the transport (retry, optionally OAuth2) plus an example method, into
+// internal/clients/<name>. The business methods and the consumer-side interface
+// are the developer's to add.
+type addHTTPClientCommand struct {
+	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module  string `long:"module" description:"module path (default: read from go.mod)"`
+	OAuth   bool   `long:"oauth" description:"scaffold an OAuth2 client_credentials transport (token URL + client id/secret + scopes)"`
+	NoTests bool   `long:"no-tests" description:"skip generating the client test"`
+	Args    struct {
+		Name string `positional-arg-name:"name" description:"client name, e.g. indrive or payments"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addHTTPClientCommand) Execute([]string) error {
+	return addHTTPClient(os.Stdout, c.Dir, c.Module, c.Args.Name, c.OAuth, c.NoTests)
+}
+
+// addHTTPClient generates an upstream HTTP client into internal/clients/<name>:
+// a Config + New that builds the skit/httpclient transport (retry, optionally
+// OAuth2) and an example typed method. Idempotent (existing files skipped).
+func addHTTPClient(out io.Writer, dir, module, name string, oauth, noTests bool) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	}
+	if dir == "" {
+		dir = "."
+	}
+	if module == "" {
+		m, err := moduleFromGoMod(dir)
+		if err != nil {
+			return err
+		}
+		module = m
+	}
+
+	words := splitWords(name)
+	pkg := strings.ToLower(strings.Join(words, ""))
+	data := httpClientData{
+		Module: module,
+		Pkg:    pkg,
+		Type:   pascal(words),
+		Recv:   pkg[:1],
+		OAuth:  oauth,
+	}
+
+	clientDir := filepath.Join(dir, "internal", "clients", pkg)
+	files := []struct{ dest, tmpl string }{
+		{filepath.Join(clientDir, pkg+".go"), "templates/http-client/client.go.tmpl"},
+	}
+	if !noTests {
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(clientDir, pkg+"_test.go"), "templates/http-client/client_test.go.tmpl",
+		})
+	}
+	for _, f := range files {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+
+	kind := "plain"
+	if oauth {
+		kind = "OAuth2 client_credentials"
+	}
+	fmt.Fprintf(out, `
+Scaffolded the %[1]q upstream client (%[2]s transport). Next:
+
+1. go mod tidy   # deps: skit/httpclient%[3]s, matryer/is
+
+2. Replace the example Get%[4]s with your real endpoints (typed req/resp,
+   httpclient.DoJSON handles 2xx-decode and non-2xx -> *httpclient.StatusError).
+
+3. Depend on it from the consumer side — declare a narrow interface in the core
+   that uses it and inject *%[1]s.Client:
+
+   type %[4]sGateway interface { Get%[4]s(ctx context.Context, id string) (%[1]s.%[4]sItem, error) }
+   // build it in deps/wiring: %[1]s.New(%[1]s.Config{BaseURL: ...%[5]s})
+
+4. go test ./internal/clients/%[1]s/...
+`, data.Pkg, kind, oauthDep(oauth), data.Type, oauthConfigHint(oauth))
+	return nil
+}
+
+// oauthDep names the extra dependency line fragment when OAuth2 is scaffolded.
+func oauthDep(oauth bool) string {
+	if oauth {
+		return " (golang.org/x/oauth2)"
+	}
+	return ""
+}
+
+// oauthConfigHint adds the OAuth2 config fields to the wiring hint.
+func oauthConfigHint(oauth bool) string {
+	if oauth {
+		return ", TokenURL: ..., ClientID: ..., ClientSecret: ..."
+	}
+	return ""
+}
+
 // printRESTNextSteps prints the migration and wiring a developer must add by
 // hand — they are app-specific (migration numbering, the deps container) and not
 // safe to generate blindly. The wiring hint (step 2) adapts to the project shape:

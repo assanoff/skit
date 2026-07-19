@@ -60,11 +60,12 @@ Then add modules to the service:
   skit add event <name>         # domain event + outbox route (--with-relay for the relay)
   skit add cron <name>          # scheduled job (--schedule, --lock postgres|redis)
   skit add grpc-test <name>     # unit + bufconn tests for a gRPC module
+  skit add http-client <name>   # typed upstream client (--oauth for OAuth2)
 
 Help:
 
   skit -h                       # top-level help and all commands
-  skit <command> -h             # help for a command (new, add rest, add grpc, add grpc-test, add consumer, add worker, add migration, add event, add cron, version)
+  skit <command> -h             # help for a command (new, add rest, add grpc, add grpc-test, add consumer, add worker, add migration, add event, add cron, add http-client, version)
 `)
 }
 
@@ -138,6 +139,11 @@ func main() {
 	}
 	if _, err := add.AddCommand("cron", "scaffold a scheduled job",
 		"Generate a cron-scheduled job (--schedule), optionally fleet-locked (--lock postgres|redis).", &addCronCommand{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if _, err := add.AddCommand("http-client", "scaffold an upstream HTTP client",
+		"Generate a typed client for an upstream service (retry; --oauth for OAuth2 client_credentials).", &addHTTPClientCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -1,0 +1,102 @@
+// Package {{.Pkg}} is a typed client for the {{.Pkg}} upstream service.
+//
+// The transport (timeout, retry on 5xx/429{{if .OAuth}}, OAuth2 client_credentials{{end}}) is built once
+// from skit/httpclient in New; the methods below assemble requests and decode
+// responses via httpclient.DoJSON, so callers get ready-to-use typed data and
+// never touch *http.Response.
+//
+// Depend on it from the consumer side: the business/core package that uses this
+// client declares the narrow interface it needs and mocks that (Go's "accept
+// interfaces, return structs"), e.g.
+//
+//	type {{.Type}}Gateway interface {
+//		Get{{.Type}}(ctx context.Context, id string) ({{.Pkg}}.{{.Type}}Item, error)
+//	}
+//
+// *{{.Pkg}}.Client satisfies it; tests inject a fake.
+package {{.Pkg}}
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/assanoff/skit/httpclient"
+	"github.com/assanoff/skit/httpmw"
+	"github.com/assanoff/skit/retry"
+)
+
+// Config configures the client. BaseURL is required.
+type Config struct {
+	// BaseURL is the upstream root, e.g. "https://api.example.com".
+	BaseURL string
+	// Timeout is the per-request timeout, retries included (default 30s).
+	Timeout time.Duration
+{{if .OAuth}}
+	// OAuth2 client_credentials — all three required.
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	// Scopes requested with the token (may be empty).
+	Scopes []string
+{{end}}}
+
+// Client calls the {{.Pkg}} upstream over an HTTP transport with retry{{if .OAuth}} and OAuth2{{end}}.
+type Client struct {
+	http    *http.Client
+	baseURL string
+}
+
+// New builds a Client from cfg. It returns an error if the transport cannot be
+// constructed{{if .OAuth}} (e.g. missing OAuth2 credentials){{end}}.
+func New(cfg Config) (*Client, error) {
+	hc, err := httpclient.New(httpclient.Config{
+		Timeout:   cfg.Timeout,
+		UserAgent: "{{.Pkg}}-client",
+		Retry: &httpmw.RetryConfig{
+			Backoff: retry.Backoff{
+				Base: 100 * time.Millisecond, Max: 3 * time.Second, MaxAttempts: 3, Jitter: 0.2,
+			},
+			Statuses: []int{
+				http.StatusTooManyRequests, http.StatusInternalServerError,
+				http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout,
+			},
+		},
+{{if .OAuth}}		OAuth2: &httpclient.OAuth2Config{
+			TokenURL:     cfg.TokenURL,
+			ClientID:     cfg.ClientID,
+			ClientSecret: cfg.ClientSecret,
+			Scopes:       cfg.Scopes,
+		},
+{{end}}	})
+	if err != nil {
+		return nil, err
+	}
+	return &Client{http: hc, baseURL: strings.TrimRight(cfg.BaseURL, "/")}, nil
+}
+
+// --- API methods: replace the example below with the endpoints you need ---
+
+// {{.Type}}Item is an example response shape. Replace it with the real contract.
+type {{.Type}}Item struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// Get{{.Type}} shows the method pattern: build a request against baseURL, then
+// decode the 2xx JSON body with httpclient.DoJSON (a non-2xx becomes a
+// *httpclient.StatusError the caller can branch on). Replace it with real calls.
+func ({{.Recv}} *Client) Get{{.Type}}(ctx context.Context, id string) ({{.Type}}Item, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, {{.Recv}}.baseURL+"/{{.Pkg}}/"+id, nil)
+	if err != nil {
+		return {{.Type}}Item{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	var out {{.Type}}Item
+	if err := httpclient.DoJSON({{.Recv}}.http, req, &out); err != nil {
+		return {{.Type}}Item{}, err
+	}
+	return out, nil
+}

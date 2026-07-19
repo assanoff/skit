@@ -420,6 +420,47 @@ func TestAddEventWithRelayIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAddHTTPClientPlain(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addHTTPClient(&bytes.Buffer{}, dir, "", "payments", false, false); err != nil {
+		t.Fatalf("addHTTPClient: %v", err)
+	}
+
+	src := readFile(t, filepath.Join(dir, "internal/clients/payments/payments.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "payments.go", src, parser.AllErrors); err != nil {
+		t.Errorf("client does not parse: %v", err)
+	}
+	for _, want := range []string{"package payments", "httpclient.New(", "httpmw.RetryConfig", "func (p *Client) GetPayments("} {
+		if !strings.Contains(src, want) {
+			t.Errorf("plain client missing %q:\n%s", want, src)
+		}
+	}
+	// Plain variant must not scaffold any OAuth2 fields.
+	if strings.Contains(src, "OAuth2") || strings.Contains(src, "ClientSecret") {
+		t.Errorf("plain client must not include OAuth2 wiring:\n%s", src)
+	}
+}
+
+func TestAddHTTPClientOAuth(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addHTTPClient(&bytes.Buffer{}, dir, "", "indrive", true, false); err != nil {
+		t.Fatalf("addHTTPClient: %v", err)
+	}
+	src := readFile(t, filepath.Join(dir, "internal/clients/indrive/indrive.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "indrive.go", src, parser.AllErrors); err != nil {
+		t.Errorf("oauth client does not parse: %v", err)
+	}
+	for _, want := range []string{"httpclient.OAuth2Config", "TokenURL", "ClientSecret", "Scopes"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("oauth client missing %q:\n%s", want, src)
+		}
+	}
+}
+
 func TestAddGRPCTestGeneratesParsableTest(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")
