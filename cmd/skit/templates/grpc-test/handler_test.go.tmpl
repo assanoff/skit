@@ -1,0 +1,109 @@
+package {{.Pkg}}grpc
+
+import (
+	"context"
+	"io"
+	"testing"
+
+	"github.com/brianvoe/gofakeit/v7"
+	"github.com/google/uuid"
+	"github.com/matryer/is"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/grpcserver"
+	"github.com/assanoff/skit/grpctest"
+	"github.com/assanoff/skit/logger"
+
+	"{{.Module}}/core/{{.Pkg}}"
+	"{{.Module}}/core/{{.Pkg}}/mocks"
+	{{.Pkg}}v1 "{{.Module}}/gen/{{.Pkg}}/v1"
+)
+
+// gRPC transport tests come in two layers:
+//
+//   - Unit: call the handler method directly over a mocked Store. Fast, no
+//     server. A returned error is the raw *errs.Error (the errormap interceptor
+//     has not run), so assert its presence, not a gRPC status code.
+//   - Integration: drive a real client stub over an in-memory bufconn server
+//     (grpctest) that runs the full skit interceptor chain, so errs.Error is
+//     converted to a real gRPC status — assert status.Code here.
+//
+// Assertions use matryer/is; input uses gofakeit; one test function per case.
+
+func testLogger() *logger.Logger {
+	return logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+}
+
+// newTestHandler builds the handler over a mocked Store for direct (unit) calls.
+func newTestHandler(store *mocks.StoreMock) *Handler {
+	return New({{.Pkg}}.NewCore(testLogger(), store))
+}
+
+// newTestClient starts an in-memory server (real interceptors) over a mocked
+// Store and returns a client stub.
+func newTestClient(t *testing.T, store *mocks.StoreMock) {{.Pkg}}v1.{{.Type}}ServiceClient {
+	h := New({{.Pkg}}.NewCore(testLogger(), store))
+	srv := grpctest.New(t, []grpcserver.Service{h})
+	return {{.Pkg}}v1.New{{.Type}}ServiceClient(srv.Conn)
+}
+
+// --- unit (direct handler, mocked Store) ---
+
+func TestGRPC_Create{{.Type}}_Unit(t *testing.T) {
+	is := is.New(t)
+
+	name := gofakeit.Name()
+	store := &mocks.StoreMock{
+		CreateFunc: func(ctx context.Context, {{.Recv}} {{.Pkg}}.{{.Type}}) error {
+			is.Equal({{.Recv}}.Name, name) // handler forwarded the field to the core
+			return nil
+		},
+	}
+	h := newTestHandler(store)
+
+	resp, err := h.Create{{.Type}}(context.Background(),
+		{{.Pkg}}v1.Create{{.Type}}Request_builder{Name: name, Description: gofakeit.Sentence(4)}.Build())
+	is.NoErr(err)
+	is.True(resp.Get{{.Type}}() != nil)   // response carries the created entity
+	is.Equal(len(store.CreateCalls()), 1) // Create invoked exactly once
+}
+
+func TestGRPC_Get{{.Type}}_BadID_Unit(t *testing.T) {
+	is := is.New(t)
+	h := newTestHandler(&mocks.StoreMock{})
+
+	_, err := h.Get{{.Type}}(context.Background(), {{.Pkg}}v1.Get{{.Type}}Request_builder{Id: "not-a-uuid"}.Build())
+	is.True(err != nil) // invalid id rejected before touching the store
+}
+
+// --- integration (bufconn client, real interceptors -> gRPC status) ---
+
+func TestGRPC_Get{{.Type}}_NotFound_Integration(t *testing.T) {
+	is := is.New(t)
+
+	store := &mocks.StoreMock{
+		QueryByIDFunc: func(ctx context.Context, id uuid.UUID) ({{.Pkg}}.{{.Type}}, error) {
+			return {{.Pkg}}.{{.Type}}{}, dbx.ErrDBNotFound
+		},
+	}
+	client := newTestClient(t, store)
+
+	_, err := client.Get{{.Type}}(context.Background(), {{.Pkg}}v1.Get{{.Type}}Request_builder{Id: uuid.NewString()}.Build())
+	is.Equal(status.Code(err), codes.NotFound) // errs.NotFound mapped to a gRPC status
+}
+
+func TestGRPC_Create{{.Type}}_Integration(t *testing.T) {
+	is := is.New(t)
+
+	store := &mocks.StoreMock{
+		CreateFunc: func(ctx context.Context, {{.Recv}} {{.Pkg}}.{{.Type}}) error { return nil },
+	}
+	client := newTestClient(t, store)
+
+	resp, err := client.Create{{.Type}}(context.Background(),
+		{{.Pkg}}v1.Create{{.Type}}Request_builder{Name: gofakeit.Name()}.Build())
+	is.NoErr(err)
+	is.True(resp.Get{{.Type}}() != nil) // round-trip through the wire returns the entity
+}

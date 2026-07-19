@@ -1041,6 +1041,86 @@ Scaffolded the %q gRPC module. The handler adapts %s.Core, so run `+"`skit add r
 `, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Module, d.Pkg)
 }
 
+// addGRPCTestCommand scaffolds tests for an existing gRPC module: fast unit
+// tests over a mocked Store plus bufconn integration tests through the real
+// client + interceptor chain. Separate from `add grpc` because the tests import
+// the generated proto package, which only exists after codegen (make proto).
+type addGRPCTestCommand struct {
+	Dir    string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module string `long:"module" description:"module path (default: read from go.mod)"`
+	Plural string `long:"plural" description:"List RPC / list-field plural (default: <name>+\"s\")"`
+	Args   struct {
+		Name string `positional-arg-name:"name" description:"entity name, e.g. widget or order-line"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addGRPCTestCommand) Execute([]string) error {
+	return addGRPCTest(os.Stdout, addRESTOpts{
+		Dir:    c.Dir,
+		Module: c.Module,
+		Plural: c.Plural,
+		Name:   c.Args.Name,
+	})
+}
+
+// addGRPCTest generates unit + bufconn integration tests for a gRPC module next
+// to its handler (internal/app/handlers/<pkg>grpc/<pkg>grpc_test.go). Idempotent:
+// an existing test file is skipped.
+func addGRPCTest(out io.Writer, opts addRESTOpts) error {
+	if !nameRE.MatchString(opts.Name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	}
+
+	dir := opts.Dir
+	if dir == "" {
+		dir = "."
+	}
+	module := opts.Module
+	if module == "" {
+		m, err := moduleFromGoMod(dir)
+		if err != nil {
+			return err
+		}
+		module = m
+	}
+
+	words := splitWords(opts.Name)
+	pkg := strings.ToLower(strings.Join(words, ""))
+	plural := opts.Plural
+	if plural == "" {
+		plural = pkg + "s"
+	}
+	data := grpcData{
+		Module:     module,
+		Pkg:        pkg,
+		Type:       pascal(words),
+		Recv:       pkg[:1],
+		Snake:      strings.ToLower(strings.Join(words, "_")),
+		Plural:     plural,
+		PluralType: pascal(splitWords(plural)),
+	}
+
+	dest := filepath.Join(dir, "internal", "app", "handlers", pkg+"grpc", pkg+"grpc_test.go")
+	if err := writeIfAbsent(out, dest, "templates/grpc-test/handler_test.go.tmpl", data); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, `
+Scaffolded gRPC tests for %[1]q. Next:
+
+1. Ensure the proto code is generated (the tests import gen/%[1]s/v1):
+
+   make proto
+
+2. Ensure the Store mock exists (the tests use core/%[1]s/mocks):
+
+   make generate
+
+3. go test ./internal/app/handlers/%[1]sgrpc/...
+`, data.Pkg)
+	return nil
+}
+
 // printRESTNextSteps prints the migration and wiring a developer must add by
 // hand — they are app-specific (migration numbering, the deps container) and not
 // safe to generate blindly. The wiring hint (step 2) adapts to the project shape:

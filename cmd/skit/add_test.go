@@ -420,6 +420,50 @@ func TestAddEventWithRelayIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAddGRPCTestGeneratesParsableTest(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addGRPCTest(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err != nil {
+		t.Fatalf("addGRPCTest: %v", err)
+	}
+
+	src := readFile(t, filepath.Join(dir, "internal/app/handlers/widgetgrpc/widgetgrpc_test.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "widgetgrpc_test.go", src, parser.AllErrors); err != nil {
+		t.Errorf("grpc test does not parse: %v", err)
+	}
+	for _, want := range []string{
+		"package widgetgrpc",
+		"grpctest.New(t,",                               // bufconn integration harness
+		"status.Code(err), codes.NotFound",              // real gRPC status asserted
+		"func TestGRPC_CreateWidget_Unit(",              // unit layer
+		"func TestGRPC_GetWidget_NotFound_Integration(", // integration layer
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("grpc test missing %q:\n%s", want, src)
+		}
+	}
+}
+
+func TestAddGRPCTestIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+	dest := filepath.Join(dir, "internal/app/handlers/widgetgrpc/widgetgrpc_test.go")
+
+	if err := addGRPCTest(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err != nil {
+		t.Fatalf("first addGRPCTest: %v", err)
+	}
+	if err := os.WriteFile(dest, []byte("package widgetgrpc\n// edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := addGRPCTest(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err != nil {
+		t.Fatalf("second addGRPCTest: %v", err)
+	}
+	if got := readFile(t, dest); !strings.Contains(got, "edited") {
+		t.Errorf("re-run overwrote the existing test file:\n%s", got)
+	}
+}
+
 func TestAddCronNoLockVariant(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")
