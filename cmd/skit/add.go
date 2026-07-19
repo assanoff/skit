@@ -1028,7 +1028,7 @@ func printGRPCNextSteps(out io.Writer, d grpcData) {
 	fmt.Fprintf(out, `
 Scaffolded the %q gRPC module. The handler adapts %s.Core, so run `+"`skit add rest %s`"+` first if that module does not exist yet. Next:
 
-1. Generate the protobuf + gRPC code (commits to gen/%s/v1/):
+1. Generate the protobuf + gRPC code into gen/%s/v1/ (needs buf; buf.yaml/buf.gen.yaml ship with the --full scaffold). Run this BEFORE "go mod tidy" — the handler imports the generated package:
 
    make proto      # buf lint proto && buf generate proto
 
@@ -1037,7 +1037,7 @@ Scaffolded the %q gRPC module. The handler adapts %s.Core, so run `+"`skit add r
    gs.Install(%sgrpc.New(core))   // the handler's Register owns the generated %sv1 call
    // import: %sgrpc "%s/internal/app/handlers/%sgrpc"
 
-3. go build ./...
+3. go mod tidy && go build ./...
 `, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Module, d.Pkg)
 }
 

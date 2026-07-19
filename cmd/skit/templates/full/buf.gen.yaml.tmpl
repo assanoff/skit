@@ -1,0 +1,14 @@
+# Codegen config for `buf generate proto`. Uses buf's hosted (BSR) plugins so a
+# fresh checkout needs only `buf` — no protoc, no local plugin installs, and no
+# go.mod/go.sum bootstrap cycle (the generated gen/ code exists before the first
+# `go mod tidy`). go_package is set explicitly in each .proto, so managed mode
+# stays off. Pin a plugin version (e.g. buf.build/protocolbuffers/go:v1.36.6) if
+# you need fully reproducible output.
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go
+    out: gen
+    opt: paths=source_relative
