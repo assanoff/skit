@@ -614,12 +614,29 @@ func TestAddGRPCGeneratesProtoAndParsableHandler(t *testing.T) {
 		"package widget.v1;",
 		`option go_package = "github.com/me/svc/gen/widget/v1;widgetv1";`,
 		"service WidgetService {",
-		"rpc CreateWidget(CreateWidgetRequest) returns (CreateWidgetResponse);",
-		"rpc ListWidgets(ListWidgetsRequest) returns (ListWidgetsResponse);",
+		"rpc CreateWidget(CreateWidgetRequest) returns (CreateWidgetResponse) {",
+		"rpc ListWidgets(ListWidgetsRequest) returns (ListWidgetsResponse) {",
 		"repeated Widget widgets = 1;",
+		// gRPC-gateway REST mapping + protovalidate field constraints.
+		`import "google/api/annotations.proto";`,
+		`import "buf/validate/validate.proto";`,
+		`post: "/v1/widgets"`,
+		`get: "/v1/widgets/{id}"`,
+		"(buf.validate.field).string.uuid = true",
 	} {
 		if !strings.Contains(proto, want) {
 			t.Errorf("proto missing %q:\n%s", want, proto)
+		}
+	}
+
+	// The entity-agnostic bootstrap (server grpc wiring + docs package) is
+	// generated alongside the module.
+	for _, f := range []string{
+		"internal/app/server/grpc.go",
+		"internal/app/docs/docs.go",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("bootstrap file %s not generated: %v", f, err)
 		}
 	}
 }

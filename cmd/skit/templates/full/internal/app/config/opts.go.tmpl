@@ -20,6 +20,7 @@ type ServerOpts struct {
 	LogLevel string `long:"log-level"    env:"LOG_LEVEL"    default:"info"               description:"log level: debug|info|warn|error"`
 
 	HTTP   HTTP   `group:"http" namespace:"http" env-namespace:"HTTP"`
+	GRPC   GRPC   `group:"grpc" namespace:"grpc" env-namespace:"GRPC"`
 	Debug  Debug  `group:"debug" namespace:"debug" env-namespace:"DEBUG"`
 	DB     DB     `group:"postgres" namespace:"db" env-namespace:"DB"`
 	OTEL   OTEL   `group:"otel" namespace:"otel" env-namespace:"OTEL"`
@@ -48,6 +49,18 @@ type HTTP struct {
 	RequestTimeout    time.Duration `long:"request-timeout"     env:"REQUEST_TIMEOUT"     default:"30s"     description:"per-request timeout"`
 	ShutdownTimeout   time.Duration `long:"shutdown-timeout"    env:"SHUTDOWN_TIMEOUT"    default:"10s"     description:"graceful shutdown timeout"`
 	BodySizeLimit     int64         `long:"body-size-limit"     env:"BODY_SIZE_LIMIT"     default:"1048576" description:"max request body size in bytes"`
+}
+
+// GRPC holds the gRPC server + gateway settings. Off by default (empty Addr):
+// `skit add grpc` scaffolds the server/gateway/swagger and its next-steps tell
+// you to set GRPC_ADDR (e.g. :9090). The gRPC server starts iff Addr is
+// non-empty; Gateway mounts the generated REST<->gRPC proxy (/v1/...) on the
+// HTTP server; Docs serves the OpenAPI (swagger) UI at /docs.
+type GRPC struct {
+	Addr       string `long:"addr"       env:"ADDR"       description:"gRPC listen address, e.g. :9090 (empty disables the gRPC server)"`
+	Reflection bool   `long:"reflection" env:"REFLECTION" description:"enable gRPC server reflection (grpcurl/Postman)"`
+	Gateway    bool   `long:"gateway"    env:"GATEWAY"    description:"mount the gRPC-gateway REST proxy on the HTTP server"`
+	Docs       bool   `long:"docs"       env:"DOCS"       description:"serve the OpenAPI (swagger) UI at /docs"`
 }
 
 // Debug serves the status endpoints (pprof + metrics + health) on their own

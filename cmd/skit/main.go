@@ -53,7 +53,7 @@ Get started — scaffold a full HTTP service (config, deps, server, migrations, 
 Then add modules to the service:
 
   skit add rest <name>          # REST CRUD (core + store + transport + tests)
-  skit add grpc <name>          # gRPC module (.proto + handler)
+  skit add grpc <name>          # gRPC stack: .proto + handler + gateway (REST) + swagger + validation
   skit add consumer <name>      # broker-agnostic message consumer
   skit add worker <name>        # background worker (--claim for queue-backed)
   skit add migration <name>     # next numbered goose migration (NNNN_<name>.sql)
@@ -107,8 +107,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if _, err := add.AddCommand("grpc", "scaffold a gRPC module",
-		"Generate a .proto contract + a gRPC handler adapting one entity's Core.", &addGRPCCommand{}); err != nil {
+	if _, err := add.AddCommand("grpc", "scaffold a gRPC stack",
+		"Generate a .proto contract + gRPC handler + gRPC-gateway (REST) + OpenAPI/swagger + protovalidate for one entity.", &addGRPCCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

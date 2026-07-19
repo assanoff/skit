@@ -1018,6 +1018,19 @@ func addGRPC(out io.Writer, opts addRESTOpts) error {
 		fmt.Fprintf(out, "  created %s\n", f.dest)
 	}
 
+	// Entity-agnostic bootstrap: the gRPC server + gateway wiring and the docs
+	// package. Generated once (idempotent) — the first `add grpc` creates them,
+	// later entities reuse them and only wire their service into the seams.
+	bootstrap := []struct{ dest, tmpl string }{
+		{filepath.Join(dir, "internal", "app", "server", "grpc.go"), "templates/grpc/grpc_bootstrap.go.tmpl"},
+		{filepath.Join(dir, "internal", "app", "docs", "docs.go"), "templates/grpc/docs.go.tmpl"},
+	}
+	for _, f := range bootstrap {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+
 	printGRPCNextSteps(out, data)
 	return nil
 }
@@ -1026,19 +1039,35 @@ func addGRPC(out io.Writer, opts addRESTOpts) error {
 // the generated gen/ code and the server registration are app-specific.
 func printGRPCNextSteps(out io.Writer, d grpcData) {
 	fmt.Fprintf(out, `
-Scaffolded the %q gRPC module. The handler adapts %s.Core, so run `+"`skit add rest %s`"+` first if that module does not exist yet. Next:
+Scaffolded the %[1]q gRPC stack (service + gateway + swagger + protovalidate). The handler adapts %[1]s.Core, so run "skit add rest %[1]s" first if that module does not exist yet. Also generated once (idempotent): internal/app/server/grpc.go and internal/app/docs/docs.go. Next:
 
-1. Generate the protobuf + gRPC code into gen/%s/v1/ (needs buf; buf.yaml/buf.gen.yaml ship with the --full scaffold). Run this BEFORE "go mod tidy" — the handler imports the generated package:
+1. Generate proto -> gRPC + gateway + swagger (needs buf). Run this BEFORE "go mod tidy" — the handler and docs package import the generated code:
 
-   make proto      # buf lint proto && buf generate proto
+   make proto      # buf dep update && buf lint proto && buf generate proto
 
-2. Register the service where you build the gRPC server (e.g. app/server):
+2. Wire the %[1]s service into the two seams in internal/app/server/grpc.go:
+   - installGRPC:      gs.Install(%[1]sgrpc.New(d.%[2]sCore(ctx)))
+     import %[1]sgrpc "%[3]s/internal/app/handlers/%[1]sgrpc"  (build the Core the same way the REST wiring does)
+   - gatewayRegistrars: %[1]sv1.Register%[2]sServiceHandler,
+     import %[1]sv1 "%[3]s/gen/%[1]s/v1"
 
-   gs.Install(%sgrpc.New(core))   // the handler's Register owns the generated %sv1 call
-   // import: %sgrpc "%s/internal/app/handlers/%sgrpc"
+3. Wire the bootstrap into the app (once):
+   - internal/app/server/server.go, in New (near the HTTP transport):
+       if opts.GRPC.Addr != "" {
+           runnables = append(runnables, buildGRPCServer(ctx, d, m, log))
+       }
+   - internal/app/server/routes.go, at the end of Install:
+       mountGRPCGateway(ctx, r, d)
 
-3. go mod tidy && go build ./...
-`, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Pkg, d.Module, d.Pkg)
+4. go mod tidy && go build ./...
+
+5. Enable at runtime (off by default) and try it:
+   GRPC_ADDR=:9090 GRPC_GATEWAY=true GRPC_DOCS=true GRPC_REFLECTION=true go run . serve
+   curl -s localhost:8080/v1/%[4]s      # REST via the gateway -> gRPC
+   open http://localhost:8080/docs       # Swagger UI
+
+Add tests for the gRPC handler with:  skit add grpc-test %[1]s
+`, d.Pkg, d.Type, d.Module, d.Plural)
 }
 
 // addGRPCTestCommand scaffolds tests for an existing gRPC module: fast unit

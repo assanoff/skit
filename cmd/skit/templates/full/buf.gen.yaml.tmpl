@@ -17,9 +17,10 @@ plugins:
   - remote: buf.build/grpc-ecosystem/gateway
     out: gen
     opt: paths=source_relative
-  # OpenAPI v2 (swagger) doc — merged into a single gen/apidocs.swagger.json.
+  # OpenAPI v2 (swagger) doc — merged into a single apidocs.swagger.json written
+  # into internal/app/docs, where the docs package embeds and serves it.
   - remote: buf.build/grpc-ecosystem/openapiv2
-    out: gen
+    out: internal/app/docs
     opt:
       - allow_merge=true
       - merge_file_name=apidocs
