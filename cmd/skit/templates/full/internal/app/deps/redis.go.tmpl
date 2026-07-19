@@ -1,0 +1,24 @@
+package deps
+
+import (
+	"github.com/assanoff/skit/dim"
+	"github.com/assanoff/skit/provider"
+)
+
+// initRedis assigns the Redis client provider when Redis is enabled, using the
+// SDK's ready-made Redis provider (it PINGs on first use) and registering its
+// cleanup with the global closer. When Redis is disabled this is a no-op and the
+// provider stays nil — enable it (REDIS_ENABLED=true) for features that need it,
+// e.g. a distributed cron lock.
+var initRedis = func(c *Deps) (cleanup dim.CleanupFunc, err error) {
+	if !c.Opts.Redis.Enabled {
+		return nil, nil
+	}
+
+	c.Redis, cleanup = dim.NewResource("Redis", provider.Redis(provider.RedisConfig{
+		Addr:     c.Opts.Redis.Addr,
+		Password: c.Opts.Redis.Password,
+		DB:       c.Opts.Redis.DB,
+	}))
+	return cleanup, nil
+}

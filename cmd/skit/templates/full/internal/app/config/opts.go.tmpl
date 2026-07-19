@@ -25,6 +25,7 @@ type ServerOpts struct {
 	OTEL   OTEL   `group:"otel" namespace:"otel" env-namespace:"OTEL"`
 	Worker Worker `group:"worker" namespace:"worker" env-namespace:"WORKER"`
 	Broker Broker `group:"broker" namespace:"broker" env-namespace:"BROKER"`
+	Redis  Redis  `group:"redis" namespace:"redis" env-namespace:"REDIS"`
 }
 
 // Validate rejects configurations that are unsafe for the running environment.
@@ -93,4 +94,15 @@ type Broker struct {
 	Port     string `long:"port"     env:"PORT"     default:"5672"              description:"rabbitmq port"`
 	Source   string `long:"source"   env:"SOURCE"   default:"{{.Name}}"         description:"CloudEvents source"`
 	Exchange string `long:"exchange" env:"EXCHANGE" default:"{{.Snake}}.events" description:"events exchange"`
+}
+
+// Redis holds Redis connection settings. OFF by default (needs external infra).
+// Enable it (REDIS_ENABLED=true) when a feature needs it — e.g. a distributed
+// cron lock (`skit add cron --lock redis`). When disabled the client provider
+// stays nil.
+type Redis struct {
+	Enabled  bool   `long:"enabled"  env:"ENABLED"  description:"enable the Redis client"`
+	Addr     string `long:"addr"     env:"ADDR"     default:"localhost:6379" description:"redis host:port"`
+	Password string `long:"password" env:"PASSWORD"                          description:"redis password (empty for none)" json:"-"`
+	DB       int    `long:"db"       env:"DB"       default:"0"              description:"redis database index"`
 }

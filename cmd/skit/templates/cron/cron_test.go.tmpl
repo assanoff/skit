@@ -1,0 +1,46 @@
+package {{.Pkg}}
+
+import (
+	"context"
+	"io"
+	"testing"
+	{{if .Locked}}"time"
+{{end}}
+	"github.com/matryer/is"
+
+	{{if .Locked}}"github.com/assanoff/skit/lock"
+{{end}}	"github.com/assanoff/skit/logger"
+)
+
+func newTestCron() *Cron {
+	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	return New(log{{if .Locked}}, stubLocker{ok: true}{{end}})
+}
+
+func TestRun(t *testing.T) {
+	is := is.New(t)
+	is.NoErr(newTestCron().run(context.Background())) // one invocation succeeds
+}
+
+func TestSchedulerBuilds(t *testing.T) {
+	is := is.New(t)
+	s, err := newTestCron().Scheduler()
+	is.NoErr(err)          // schedule spec is valid
+	is.Equal(s.Name(), Name)
+}
+{{if .Locked}}
+// stubLocker is a lock.Locker double: ok controls whether the lock is granted.
+type stubLocker struct{ ok bool }
+
+func (s stubLocker) TryLock(context.Context, string, time.Duration) (lock.Release, bool, error) {
+	return func() {}, s.ok, nil
+}
+
+func TestGuardedSkipsWhenLockHeld(t *testing.T) {
+	is := is.New(t)
+	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+
+	c := New(log, stubLocker{ok: false})      // lock always held elsewhere
+	is.NoErr(c.guarded(context.Background()))  // skips cleanly, no error
+}
+{{end}}

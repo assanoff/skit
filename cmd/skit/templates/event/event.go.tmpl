@@ -1,0 +1,44 @@
+// Package {{.Pkg}} defines the {{.Type}} domain event and registers its outbox
+// route. A producer publishes {{.Type}} through an outbox.Publisher inside its
+// transaction (outbox.WithinTran); the relay then delivers it to the broker.
+// A consumer decodes the CloudEvents envelope on the other side (see
+// `skit add consumer`).
+package {{.Pkg}}
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/assanoff/skit/outbox"
+)
+
+// EventType is the CloudEvents `type` for this event — the stable name other
+// services filter and route on. Namespaced by the aggregate.
+const EventType = "{{.Plural}}.created" // TODO: name the real event, e.g. "{{.Plural}}.updated"
+
+// Topic is the transport destination the relay publishes this event to.
+const Topic = "{{.Plural}}"
+
+// {{.Type}} is the event payload, serialized into the CloudEvents `data`. Treat
+// it as a published contract: additive changes only, no field reuse.
+type {{.Type}} struct {
+	ID uuid.UUID `json:"id"`
+	// TODO: add the fields consumers need (keep them minimal and stable).
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// Register maps {{.Type}} to its CloudEvents type and topic on reg. Call it once
+// at startup, before the relay starts, so the outbox knows how to route the
+// event. Marshaling defaults to JSON; override per route with outbox options.
+//
+// Publish it transactionally from your core:
+//
+//	err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
+//	    // ... domain writes on tx ...
+//	    return pub.Publish(ctx, {{.Pkg}}.{{.Type}}{ID: id, OccurredAt: now},
+//	        outbox.WithRouteKey(id.String())) // key = aggregate id for ordering
+//	})
+func Register(reg *outbox.Registry) error {
+	return outbox.Register[{{.Type}}](reg, EventType, Topic)
+}

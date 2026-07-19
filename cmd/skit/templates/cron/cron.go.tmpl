@@ -1,0 +1,72 @@
+// Package {{.Pkg}} is a scheduled job: it runs {{.Recv}}.run on a wall-clock
+// schedule via a cron.Scheduler (a supervised worker.Runnable).
+{{if .Locked}}//
+// It is lock-guarded, so across a fleet the job fires on at most one replica per
+// tick: each tick tries a lock.Locker and skips if another replica holds it.
+{{end}}package {{.Pkg}}
+
+import (
+	"context"
+	{{if .Locked}}"time"
+{{end}}
+	"github.com/assanoff/skit/cron"
+	{{if .Locked}}"github.com/assanoff/skit/lock"
+{{end}}	"github.com/assanoff/skit/logger"
+)
+
+// Schedule is the cron spec this job runs on: standard 5-field cron
+// (min hour dom month dow) or an @-descriptor (@hourly, @daily, @every 1h30m).
+const Schedule = "{{.Schedule}}"
+
+// Name identifies the job in logs{{if .Locked}} and is the lock key{{end}}.
+const Name = "{{.Pkg}}"
+
+// Cron holds the job's dependencies. Add the collaborators run needs (stores,
+// clients, cores) as fields and set them in New.
+type Cron struct {
+	log *logger.Logger
+{{if .Locked}}	locker  lock.Locker
+	lockTTL time.Duration
+{{end}}}
+
+// New builds the job.
+func New(log *logger.Logger{{if .Locked}}, locker lock.Locker{{end}}) *Cron {
+	return &Cron{
+		log: log,
+{{if .Locked}}		locker:  locker,
+		lockTTL: time.Minute, // bounds how long a crashed holder blocks others (redis); ignored by the pg backend
+{{end}}	}
+}
+
+// run performs one invocation of the scheduled work.
+func ({{.Recv}} *Cron) run(ctx context.Context) error {
+	// TODO: the scheduled work goes here.
+	{{.Recv}}.log.Info(ctx, "cron tick", "job", Name)
+	return nil
+}
+{{if .Locked}}
+// guarded runs the job only if this replica wins the lock, so it fires on at
+// most one replica per tick. A tick that misses the lock is skipped (the job is
+// periodic — the next holder runs it next tick).
+func ({{.Recv}} *Cron) guarded(ctx context.Context) error {
+	release, ok, err := {{.Recv}}.locker.TryLock(ctx, Name, {{.Recv}}.lockTTL)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		{{.Recv}}.log.Debug(ctx, "cron tick skipped: lock held elsewhere", "job", Name)
+		return nil
+	}
+	defer release()
+	return {{.Recv}}.run(ctx)
+}
+{{end}}
+// Scheduler builds the cron scheduler Runnable for this job. Add the returned
+// value to the service's worker group.
+func ({{.Recv}} *Cron) Scheduler() (*cron.Scheduler, error) {
+	sched := cron.New({{.Recv}}.log.Slog(), Name)
+	if err := sched.Add(Schedule, Name, {{.Recv}}.{{if .Locked}}guarded{{else}}run{{end}}); err != nil {
+		return nil, err
+	}
+	return sched, nil
+}

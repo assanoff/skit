@@ -1,0 +1,55 @@
+// Package events wires the transactional outbox for this service: the Store
+// (the outbox table), the Registry (event routes), and the Relay loop that
+// delivers stored events to the broker.
+//
+// This file is service-wide — there is one outbox per service, not one per
+// event — and it is event-agnostic: it never imports the individual event
+// packages. Register each event's route on the Registry from your app wiring
+// (see NewRegistry), so adding an event never touches this file.
+package events
+
+import (
+	"context"
+
+	"github.com/jmoiron/sqlx"
+
+	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/worker"
+)
+
+// NewStore builds the outbox Store and provisions its table if absent (advisory
+// -lock guarded, so replicas booting together do not race). Call once at
+// startup.
+func NewStore(ctx context.Context, log *logger.Logger, db *sqlx.DB) (*outbox.PG, error) {
+	s := outbox.NewPG(log, db, outbox.Options{})
+	if err := s.EnsureSchema(ctx); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// NewRegistry builds the outbox Registry and registers every event's route.
+// Add a line per event package here — this is the one place that knows the full
+// set of published events:
+//
+//	reg := events.NewRegistry()
+//	// inside NewRegistry, register each event:
+//	//   if err := advertcreated.Register(reg); err != nil { return nil, err }
+func NewRegistry() (*outbox.Registry, error) {
+	reg := outbox.NewRegistry()
+	// TODO: register each event's route, e.g.
+	//   if err := advertcreated.Register(reg); err != nil {
+	//       return nil, err
+	//   }
+	return reg, nil
+}
+
+// NewRelay builds the background relay loop that delivers stored events to pub.
+// Add the returned *worker.Loop to the service's runnable group. pub is the
+// transport publisher (rabbitmq.NewPublisher / kafka.NewPublisher) — passed in
+// from wiring so this file stays transport-agnostic.
+func NewRelay(log *logger.Logger, store outbox.Store, pub broker.Publisher) *worker.Loop {
+	return outbox.NewRelay(log, store, pub, outbox.RelayConfig{})
+}

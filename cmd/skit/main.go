@@ -57,11 +57,13 @@ Then add modules to the service:
   skit add consumer <name>      # broker-agnostic message consumer
   skit add worker <name>        # background worker (--claim for queue-backed)
   skit add migration <name>     # next numbered goose migration (NNNN_<name>.sql)
+  skit add event <name>         # domain event + outbox route (--with-relay for the relay)
+  skit add cron <name>          # scheduled job (--schedule, --lock postgres|redis)
 
 Help:
 
   skit -h                       # top-level help and all commands
-  skit <command> -h             # help for a command (new, add rest, add grpc, add consumer, add worker, add migration, version)
+  skit <command> -h             # help for a command (new, add rest, add grpc, add consumer, add worker, add migration, add event, add cron, version)
 `)
 }
 
@@ -120,6 +122,16 @@ func main() {
 	}
 	if _, err := add.AddCommand("migration", "scaffold the next goose migration",
 		"Generate internal/migrations/NNNN_<name>.sql with the next sequence number.", &addMigrationCommand{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if _, err := add.AddCommand("event", "scaffold a domain event",
+		"Generate a typed event payload + its outbox route (--with-relay adds the outbox relay bootstrap).", &addEventCommand{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if _, err := add.AddCommand("cron", "scaffold a scheduled job",
+		"Generate a cron-scheduled job (--schedule), optionally fleet-locked (--lock postgres|redis).", &addCronCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

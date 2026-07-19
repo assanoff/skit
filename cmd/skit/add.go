@@ -144,13 +144,14 @@ func nextMigrationSeq(dir string) (int, error) {
 }
 
 type addRESTOpts struct {
-	Dir     string // service root (holds go.mod)
-	Module  string // module path; resolved from go.mod when empty
-	Plural  string // override for routes/table; defaults to Pkg+"s"
-	Name    string // raw entity name
-	NoTests bool   // skip generating tests
-	Claim   bool   // worker: --claim (queue-backed) variant instead of periodic tick
-	Broker  string // consumer: transport for the generated wiring (rmq|kafka|nats)
+	Dir       string // service root (holds go.mod)
+	Module    string // module path; resolved from go.mod when empty
+	Plural    string // override for routes/table; defaults to Pkg+"s"
+	Name      string // raw entity name
+	NoTests   bool   // skip generating tests
+	Claim     bool   // worker: --claim (queue-backed) variant instead of periodic tick
+	Broker    string // consumer: transport for the generated wiring (rmq|kafka|nats)
+	WithRelay bool   // event: also scaffold the service-wide outbox relay bootstrap
 }
 
 // restData is the template payload shared by every generated REST file.
@@ -650,6 +651,283 @@ Scaffolded the %[1]q periodic worker. Next:
 
 3. go test ./internal/app/workers/%[1]s/...
 `, d.Pkg, d.Module)
+}
+
+// cronData is the template payload for a scheduled job.
+type cronData struct {
+	Module   string
+	Pkg      string
+	Type     string
+	Recv     string
+	Schedule string // cron spec, e.g. "@every 1m" or "0 3 * * *"
+	Locked   bool   // true when --lock != none: gate each tick on a lock.Locker
+	Backend  string // lock backend: "postgres" | "redis" | "" (none)
+}
+
+// addCronCommand scaffolds a scheduled job into internal/app/crons/<name>: a
+// cron.Scheduler-driven job, optionally gated by a distributed lock so it fires
+// on at most one replica per tick.
+type addCronCommand struct {
+	Dir      string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module   string `long:"module" description:"module path (default: read from go.mod)"`
+	Schedule string `long:"schedule" default:"@every 1m" description:"cron spec: 5-field cron (min hour dom month dow) or an @-descriptor (@hourly, @every 1h30m)"`
+	Lock     string `long:"lock" choice:"none" choice:"postgres" choice:"redis" default:"none" description:"distributed lock so the job runs on one replica per tick: none | postgres (advisory lock) | redis (SET NX)"`
+	NoTests  bool   `long:"no-tests" description:"skip generating the cron test"`
+	Args     struct {
+		Name string `positional-arg-name:"name" description:"cron name, e.g. cleanup or daily-report"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addCronCommand) Execute([]string) error {
+	return addCron(os.Stdout, c.Dir, c.Module, c.Args.Name, c.Schedule, c.Lock, c.NoTests)
+}
+
+// addCron generates a scheduled job into internal/app/crons/<name>. The job runs
+// on schedule via a cron.Scheduler; with lockBackend != "none" each tick is
+// gated on a lock.Locker so the job fires on one replica at a time.
+func addCron(out io.Writer, dir, module, name, schedule, lockBackend string, noTests bool) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	}
+	if dir == "" {
+		dir = "."
+	}
+	if module == "" {
+		m, err := moduleFromGoMod(dir)
+		if err != nil {
+			return err
+		}
+		module = m
+	}
+
+	words := splitWords(name)
+	pkg := strings.ToLower(strings.Join(words, ""))
+	data := cronData{
+		Module:   module,
+		Pkg:      pkg,
+		Type:     pascal(words),
+		Recv:     pkg[:1],
+		Schedule: schedule,
+		Locked:   lockBackend != "none",
+		Backend:  lockBackend,
+	}
+	if !data.Locked {
+		data.Backend = ""
+	}
+
+	cronDir := filepath.Join(dir, "internal", "app", "crons", pkg)
+	files := []struct{ dest, tmpl string }{
+		{filepath.Join(cronDir, pkg+".go"), "templates/cron/cron.go.tmpl"},
+	}
+	if !noTests {
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(cronDir, pkg+"_test.go"), "templates/cron/cron_test.go.tmpl",
+		})
+	}
+
+	for _, f := range files {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+
+	printCronNextSteps(out, data)
+	return nil
+}
+
+// printCronNextSteps prints the worker-group wiring, branching on the lock
+// backend (none / postgres / redis) since each builds its Locker differently.
+func printCronNextSteps(out io.Writer, d cronData) {
+	fmt.Fprintf(out, `
+Scaffolded the %[1]q cron (schedule %[2]q). Next:
+
+1. go mod tidy   # deps: robfig/cron, matryer/is
+`, d.Pkg, d.Schedule)
+
+	switch d.Backend {
+	case "postgres":
+		fmt.Fprintf(out, `
+2. Wire it into the worker group (internal/app/server/server.go), building a
+   Postgres advisory-lock Locker:
+
+   locker := lock.NewPG(d.DB(ctx), d.Logger.Slog())
+   sched, err := %[1]s.New(d.Logger, locker).Scheduler()
+   if err != nil { return err }
+   extra = append(extra, sched)
+   // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
+
+3. go test ./internal/app/crons/%[1]s/...
+`, d.Pkg, d.Module)
+	case "redis":
+		fmt.Fprintf(out, `
+2. Enable Redis (REDIS_ENABLED=true) and wire it into the worker group
+   (internal/app/server/server.go), building a Redis Locker:
+
+   locker := lock.NewRedis(d.Redis(ctx), d.Logger.Slog())
+   sched, err := %[1]s.New(d.Logger, locker).Scheduler()
+   if err != nil { return err }
+   extra = append(extra, sched)
+   // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
+
+3. go test ./internal/app/crons/%[1]s/...
+`, d.Pkg, d.Module)
+	default:
+		fmt.Fprintf(out, `
+2. Wire it into the worker group (internal/app/server/server.go):
+
+   sched, err := %[1]s.New(d.Logger).Scheduler()
+   if err != nil { return err }
+   extra = append(extra, sched)
+   // import: %[1]s "%[2]s/internal/app/crons/%[1]s"
+
+   Note: without a lock this fires on EVERY replica. Use --lock postgres|redis
+   to run it on one replica per tick.
+
+3. go test ./internal/app/crons/%[1]s/...
+`, d.Pkg, d.Module)
+	}
+}
+
+// addEventCommand scaffolds a domain event: a typed payload plus its outbox
+// route registration — the producing side that complements `add consumer`.
+type addEventCommand struct {
+	Dir       string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module    string `long:"module" description:"module path (default: read from go.mod)"`
+	Plural    string `long:"plural" description:"event/topic plural (default: <name>+\"s\")"`
+	WithRelay bool   `long:"with-relay" description:"also scaffold the service-wide outbox relay bootstrap (Store + Registry + Relay); created once, skipped if present"`
+	NoTests   bool   `long:"no-tests" description:"skip generating the event test"`
+	Args      struct {
+		Name string `positional-arg-name:"name" description:"event name, e.g. advert-created or order-paid"`
+	} `positional-args:"yes" required:"yes"`
+}
+
+func (c *addEventCommand) Execute([]string) error {
+	return addEvent(os.Stdout, addRESTOpts{
+		Dir:       c.Dir,
+		Module:    c.Module,
+		Plural:    c.Plural,
+		Name:      c.Args.Name,
+		NoTests:   c.NoTests,
+		WithRelay: c.WithRelay,
+	})
+}
+
+// addEvent generates a domain event into internal/app/events/<name>: a typed
+// payload + Register (its outbox route). With opts.WithRelay it also writes the
+// service-wide, event-agnostic relay bootstrap (internal/app/events/relay.go),
+// created once and skipped on re-run.
+func addEvent(out io.Writer, opts addRESTOpts) error {
+	if !nameRE.MatchString(opts.Name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	}
+
+	dir := opts.Dir
+	if dir == "" {
+		dir = "."
+	}
+
+	module := opts.Module
+	if module == "" {
+		m, err := moduleFromGoMod(dir)
+		if err != nil {
+			return err
+		}
+		module = m
+	}
+
+	words := splitWords(opts.Name)
+	pkg := strings.ToLower(strings.Join(words, ""))
+	plural := opts.Plural
+	if plural == "" {
+		plural = pkg + "s"
+	}
+	data := restData{
+		Module: module,
+		Pkg:    pkg,
+		Type:   pascal(words),
+		Recv:   pkg[:1],
+		Plural: plural,
+	}
+
+	eventsDir := filepath.Join(dir, "internal", "app", "events")
+	pkgDir := filepath.Join(eventsDir, pkg)
+	files := []struct{ dest, tmpl string }{
+		{filepath.Join(pkgDir, pkg+".go"), "templates/event/event.go.tmpl"},
+	}
+	if !opts.NoTests {
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(pkgDir, pkg+"_test.go"), "templates/event/event_test.go.tmpl",
+		})
+	}
+	if opts.WithRelay {
+		// Service-wide, event-agnostic: one relay per service. writeIfAbsent keeps
+		// it idempotent — created on the first --with-relay, skipped thereafter.
+		files = append(files, struct{ dest, tmpl string }{
+			filepath.Join(eventsDir, "relay.go"), "templates/event/relay.go.tmpl",
+		})
+	}
+
+	for _, f := range files {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+
+	printEventNextSteps(out, data, opts.WithRelay)
+	return nil
+}
+
+// printEventNextSteps prints the outbox wiring a developer adds by hand:
+// register the route, run the relay, and publish transactionally.
+func printEventNextSteps(out io.Writer, d restData, withRelay bool) {
+	fmt.Fprintf(out, `
+Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic). Next:
+
+1. go mod tidy   # test dep (matryer/is)
+`, d.Pkg)
+
+	if withRelay {
+		fmt.Fprintf(out, `
+2. Register the route in internal/app/events/relay.go (NewRegistry):
+
+   if err := %[1]s.Register(reg); err != nil { return nil, err }
+   // import: %[1]s "%[2]s/internal/app/events/%[1]s"
+
+3. Wire the outbox at startup (deps/server), passing your broker publisher:
+
+   store, err := events.NewStore(ctx, d.Logger, d.DB(ctx))
+   reg, err  := events.NewRegistry()
+   extra = append(extra, events.NewRelay(d.Logger, store, pub)) // pub = rabbitmq/kafka NewPublisher
+   // import: "%[2]s/internal/app/events"
+
+4. Publish transactionally from your core (atomic with the domain write):
+
+   outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
+       // ... domain writes on tx ...
+       return pub.Publish(ctx, %[1]s.%[3]s{ID: id}, outbox.WithRouteKey(id.String()))
+   })
+
+5. go test ./internal/app/events/%[1]s/...
+`, d.Pkg, d.Module, d.Type)
+		return
+	}
+
+	fmt.Fprintf(out, `
+2. Build the outbox once at startup (or generate it with --with-relay):
+
+   store := outbox.NewPG(d.Logger, d.DB(ctx), outbox.Options{}); _ = store.EnsureSchema(ctx)
+   reg := outbox.NewRegistry(); _ = %[1]s.Register(reg)
+   extra = append(extra, outbox.NewRelay(d.Logger, store, pub, outbox.RelayConfig{})) // pub = broker publisher
+
+3. Publish transactionally from your core (atomic with the domain write):
+
+   outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
+       // ... domain writes on tx ...
+       return pub.Publish(ctx, %[1]s.%[3]s{ID: id}, outbox.WithRouteKey(id.String()))
+   })
+
+4. go test ./internal/app/events/%[1]s/...
+`, d.Pkg, d.Module, d.Type)
 }
 
 // addGRPCCommand scaffolds a gRPC module for one entity: a .proto contract plus

@@ -365,6 +365,119 @@ func TestAddMigrationRejectsBadName(t *testing.T) {
 	}
 }
 
+func TestAddEventGeneratesParsableEvent(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "advert-created"}); err != nil {
+		t.Fatalf("addEvent: %v", err)
+	}
+
+	src := readFile(t, filepath.Join(dir, "internal/app/events/advertcreated/advertcreated.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "advertcreated.go", src, parser.AllErrors); err != nil {
+		t.Errorf("event does not parse: %v", err)
+	}
+	for _, want := range []string{"type AdvertCreated struct", "func Register(", "const EventType", "outbox.Register[AdvertCreated]"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("event missing %q:\n%s", want, src)
+		}
+	}
+	// Without --with-relay the relay bootstrap must not exist.
+	if _, err := os.Stat(filepath.Join(dir, "internal/app/events/relay.go")); !os.IsNotExist(err) {
+		t.Errorf("relay.go should not be generated without --with-relay, stat err = %v", err)
+	}
+}
+
+func TestAddEventWithRelayIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "advert-created", WithRelay: true}); err != nil {
+		t.Fatalf("first addEvent: %v", err)
+	}
+	relay := filepath.Join(dir, "internal/app/events/relay.go")
+	src := readFile(t, relay)
+	if _, err := parser.ParseFile(token.NewFileSet(), "relay.go", src, parser.AllErrors); err != nil {
+		t.Errorf("relay.go does not parse: %v", err)
+	}
+	if !strings.Contains(src, "func NewRelay(") || !strings.Contains(src, "package events") {
+		t.Errorf("relay.go missing expected wiring:\n%s", src)
+	}
+
+	// Mark the shared relay file, then add a SECOND event with --with-relay: the
+	// relay is a singleton and must be skipped (not overwritten).
+	if err := os.WriteFile(relay, []byte(src+"\n// edited by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "order-paid", WithRelay: true}); err != nil {
+		t.Fatalf("second addEvent: %v", err)
+	}
+	if got := readFile(t, relay); !strings.Contains(got, "edited by hand") {
+		t.Errorf("re-run overwrote the shared relay.go:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal/app/events/orderpaid/orderpaid.go")); err != nil {
+		t.Errorf("second event package not created: %v", err)
+	}
+}
+
+func TestAddCronNoLockVariant(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addCron(&bytes.Buffer{}, dir, "", "cleanup", "@every 5m", "none", false); err != nil {
+		t.Fatalf("addCron: %v", err)
+	}
+
+	src := readFile(t, filepath.Join(dir, "internal/app/crons/cleanup/cleanup.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "cleanup.go", src, parser.AllErrors); err != nil {
+		t.Errorf("cron does not parse: %v", err)
+	}
+	for _, want := range []string{"const Schedule = \"@every 5m\"", "func (c *Cron) run(", "cron.New(", "func (c *Cron) Scheduler("} {
+		if !strings.Contains(src, want) {
+			t.Errorf("cron missing %q:\n%s", want, src)
+		}
+	}
+	// No-lock variant must not reference the lock package or a guarded tick.
+	if strings.Contains(src, "lock.") || strings.Contains(src, "guarded") {
+		t.Errorf("no-lock cron must not use lock/guarded:\n%s", src)
+	}
+}
+
+func TestAddCronPostgresLockVariant(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addCron(&bytes.Buffer{}, dir, "", "daily-report", "0 3 * * *", "postgres", false); err != nil {
+		t.Fatalf("addCron: %v", err)
+	}
+
+	src := readFile(t, filepath.Join(dir, "internal/app/crons/dailyreport/dailyreport.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "dailyreport.go", src, parser.AllErrors); err != nil {
+		t.Errorf("locked cron does not parse: %v", err)
+	}
+	for _, want := range []string{"lock.Locker", "func (d *Cron) guarded(", "TryLock(", "0 3 * * *"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("postgres-lock cron missing %q:\n%s", want, src)
+		}
+	}
+}
+
+func TestAddCronRedisLockVariant(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	if err := addCron(&bytes.Buffer{}, dir, "", "sync-cache", "@hourly", "redis", false); err != nil {
+		t.Fatalf("addCron: %v", err)
+	}
+	src := readFile(t, filepath.Join(dir, "internal/app/crons/synccache/synccache.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "synccache.go", src, parser.AllErrors); err != nil {
+		t.Errorf("redis-lock cron does not parse: %v", err)
+	}
+	if !strings.Contains(src, "lock.Locker") || !strings.Contains(src, "guarded") {
+		t.Errorf("redis-lock cron missing lock wiring:\n%s", src)
+	}
+}
+
 func TestAddRESTRejectsBadName(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")
