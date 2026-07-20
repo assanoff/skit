@@ -21,13 +21,13 @@ func newRPCMetrics(namespace string, reg prometheus.Registerer) *rpcMetrics {
 	}
 	total := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
-		Name:      "grpc_requests_total",
+		Name:      "requests_total",
 		Help:      "Total number of gRPC requests.",
 	}, []string{"method", "code"})
 
 	millis := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace,
-		Name:      "grpc_request_duration_ms",
+		Name:      "request_duration_ms",
 		Help:      "gRPC request latency in milliseconds.",
 		Buckets:   []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500},
 	}, []string{"method", "code"})

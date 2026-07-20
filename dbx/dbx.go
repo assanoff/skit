@@ -210,9 +210,8 @@ func NamedExecContextRowsAffected(ctx context.Context, log *logger.Logger, db sq
 }
 
 func namedExec(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any) (sql.Result, error) {
-	q := queryString(query, data)
 	if log != nil {
-		log.Debug(ctx, "dbx.exec", "query", q)
+		log.Debug(ctx, "dbx.exec", "query", queryString(query, data))
 	}
 
 	res, err := sqlx.NamedExecContext(ctx, db, query, data)
@@ -230,9 +229,8 @@ func QueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, qu
 
 // NamedQueryStruct runs a named query expected to return exactly one row.
 func NamedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data, dest any) error {
-	q := queryString(query, data)
 	if log != nil {
-		log.Debug(ctx, "dbx.query", "query", q)
+		log.Debug(ctx, "dbx.query", "query", queryString(query, data))
 	}
 
 	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
@@ -257,9 +255,8 @@ func QuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.ExtConte
 
 // NamedQuerySlice runs a named query and scans all rows into *[]T.
 func NamedQuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest *[]T) error {
-	q := queryString(query, data)
 	if log != nil {
-		log.Debug(ctx, "dbx.query", "query", q)
+		log.Debug(ctx, "dbx.query", "query", queryString(query, data))
 	}
 
 	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)

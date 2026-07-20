@@ -21,8 +21,10 @@ type Group struct {
 	shutdownTimeout time.Duration
 }
 
-// NewGroup builds a Group. shutdownTimeout bounds how long Run waits for all
-// Runnables to Stop (0 means no bound). log may be nil.
+// NewGroup builds a Group. shutdownTimeout bounds the graceful-shutdown phase:
+// it caps both each Runnable's Stop call and the subsequent wait for every Start
+// goroutine to return, so a Runnable whose Start ignores ctx cannot hang Run
+// forever (0 means no bound — wait indefinitely). log may be nil.
 func NewGroup(log *slog.Logger, shutdownTimeout time.Duration) *Group {
 	return &Group{log: log, shutdownTimeout: shutdownTimeout}
 }
@@ -72,8 +74,33 @@ func (g *Group) Run(ctx context.Context) error {
 
 	g.stopAll()
 
-	wg.Wait()
+	if !g.waitForStop(&wg) {
+		g.logf("worker: shutdown timed out waiting for Runnables to stop")
+	}
 	return trigger
+}
+
+// waitForStop waits for every Start goroutine to return, bounded by
+// shutdownTimeout. It reports true if they all drained, or false if the timeout
+// elapsed first. A non-positive shutdownTimeout waits indefinitely.
+func (g *Group) waitForStop(wg *sync.WaitGroup) bool {
+	if g.shutdownTimeout <= 0 {
+		wg.Wait()
+		return true
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(g.shutdownTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func (g *Group) stopAll() {

@@ -50,10 +50,14 @@ func Once[T any](factory func(ctx context.Context) (T, error)) Provider[T] {
 	)
 	return func(ctx context.Context) T {
 		once.Do(func() {
-			if val, err = factory(ctx); err != nil {
-				panic(err)
-			}
+			val, err = factory(ctx)
 		})
+		// A failed init is fatal. sync.Once marks the factory as run even after
+		// it errored, so re-panic on every call rather than silently handing a
+		// zero-value dependency to a caller that recovered the first panic.
+		if err != nil {
+			panic(err)
+		}
 		return val
 	}
 }
@@ -67,11 +71,14 @@ func OnceWithName[T any](name string, factory func(ctx context.Context) (T, erro
 	)
 	return func(ctx context.Context) T {
 		once.Do(func() {
-			if val, err = factory(ctx); err != nil {
-				panic(err)
+			if val, err = factory(ctx); err == nil {
+				slog.Info("successfully initialized", "resource", name)
 			}
-			slog.Info("successfully initialized", "resource", name)
 		})
+		// See Once: a failed init re-panics on every call.
+		if err != nil {
+			panic(err)
+		}
 		return val
 	}
 }

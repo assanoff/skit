@@ -53,7 +53,7 @@ func (r *resource[T]) get(ctx context.Context) T {
 				slog.String("name", r.name),
 				slog.String("error", r.err.Error()),
 			)
-			panic(r.err)
+			return
 		}
 
 		slog.Info("resource initialized",
@@ -61,6 +61,12 @@ func (r *resource[T]) get(ctx context.Context) T {
 			slog.Duration("duration", time.Since(start)),
 		)
 	})
+	// A failed init is fatal: re-panic on every call so a recovered first panic
+	// cannot leave a caller holding a zero-value resource (sync.Once will never
+	// re-run the factory).
+	if r.err != nil {
+		panic(r.err)
+	}
 	return r.value
 }
 
