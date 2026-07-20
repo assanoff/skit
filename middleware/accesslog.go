@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/assanoff/skit/httpw"
 	"github.com/assanoff/skit/logger"
 )
 
@@ -13,7 +14,7 @@ func AccessLog(log *logger.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			rec := &statusRecorder{ResponseWriter: w}
+			rec := httpw.Wrap(w)
 			next.ServeHTTP(rec, r)
 			if log != nil {
 				// Field names follow OpenTelemetry HTTP semantic conventions.
@@ -21,8 +22,8 @@ func AccessLog(log *logger.Logger) Middleware {
 					r.Context(), "http.request",
 					"http.request.method", r.Method,
 					"url.path", r.URL.Path,
-					"http.response.status_code", rec.status,
-					"http.response.body.size", rec.bytes,
+					"http.response.status_code", rec.Status(),
+					"http.response.body.size", rec.BytesWritten(),
 					"duration_ms", time.Since(start).Milliseconds(),
 				)
 			}

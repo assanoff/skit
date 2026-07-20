@@ -8,6 +8,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/assanoff/skit/httpw"
 )
 
 // Metrics bundles a registry with the standard HTTP request collectors.
@@ -53,7 +55,7 @@ func (m *Metrics) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			rec := httpw.Wrap(w)
 			next.ServeHTTP(rec, r)
 
 			pattern := r.Pattern
@@ -63,27 +65,16 @@ func (m *Metrics) Middleware() func(http.Handler) http.Handler {
 				// cardinality (a memory-DoS vector).
 				pattern = "<unmatched>"
 			}
-			status := strconv.Itoa(rec.status)
+			// A handler that returns without touching the writer leaves Status
+			// at 0; net/http sends 200 in that case, so record it as such.
+			code := rec.Status()
+			if code == 0 {
+				code = http.StatusOK
+			}
+			status := strconv.Itoa(code)
 			labels := prometheus.Labels{"method": r.Method, "path": pattern, "status": status}
 			m.reqTotal.With(labels).Inc()
 			m.reqMillis.With(labels).Observe(float64(time.Since(start).Milliseconds()))
 		})
 	}
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
-	r.ResponseWriter.WriteHeader(code)
-}
-
-// Unwrap exposes the underlying writer so http.ResponseController can reach
-// optional interfaces (Flusher/Hijacker/…) through this wrapper — otherwise
-// wrapping every request would mask Flush for SSE/streaming handlers.
-func (r *statusRecorder) Unwrap() http.ResponseWriter {
-	return r.ResponseWriter
 }

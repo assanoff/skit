@@ -94,14 +94,14 @@ func bodyAllowed(code int) bool {
 }
 
 // Flush flushes the gzip stream then the underlying writer, so streaming
-// responses (SSE) still reach the client promptly.
+// responses (SSE) still reach the client promptly. It reaches the underlying
+// Flusher via http.ResponseController, which walks the Unwrap chain, so it
+// works regardless of how this middleware is ordered against other wrappers.
 func (w *gzipResponseWriter) Flush() {
 	if w.started {
 		_ = w.gz.Flush()
 	}
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	_ = http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 // Unwrap exposes the underlying writer for http.ResponseController.

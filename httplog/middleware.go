@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/assanoff/skit/httpw"
 )
 
 var ErrClientAborted = fmt.Errorf("request aborted: client disconnected before response was sent")
@@ -47,7 +49,7 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 				r.Body = io.NopCloser(io.TeeReader(r.Body, &reqBody))
 			}
 
-			ww := NewWrapResponseWriter(w, r.ProtoMajor)
+			ww := httpw.Wrap(w)
 
 			var respBody bytes.Buffer
 			if logRespBody {

@@ -164,9 +164,9 @@ func TestAccessLogWritesStructuredLine(t *testing.T) {
 
 	out := buf.String()
 	is.True(strings.Contains(out, "http.request"))                    // the event was logged
-	is.True(strings.Contains(out, `"http.response.status_code":201`)) // statusRecorder captured the status
+	is.True(strings.Contains(out, `"http.response.status_code":201`)) // the wrapper captured the status
 	is.True(strings.Contains(out, `"url.path":"/things"`))            // the path
-	is.True(strings.Contains(out, `"http.response.body.size":5`))     // statusRecorder counted the bytes
+	is.True(strings.Contains(out, `"http.response.body.size":5`))     // the wrapper counted the bytes
 	is.Equal(rec.Code, http.StatusCreated)                            // downstream status is preserved
 }
 
@@ -181,4 +181,42 @@ func TestAccessLogNilLogger(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	is.Equal(rec.Code, http.StatusTeapot) // a nil logger is a no-op wrapper
+}
+
+// TestPanicsPreservesFlusher guards against the wrapper hiding the underlying
+// writer's optional interfaces: a handler behind Panics must still be able to
+// Flush (SSE/streaming) via http.ResponseController, which walks the Unwrap
+// chain to the real writer.
+func TestPanicsPreservesFlusher(t *testing.T) {
+	is := is.New(t)
+
+	var called, flushed bool
+	h := middleware.Panics(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		// httptest.ResponseRecorder implements http.Flusher; the Panics wrapper
+		// must not mask it from ResponseController.
+		flushed = http.NewResponseController(w).Flush() == nil
+	}))
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+	is.True(called)
+	is.True(flushed) // Flush reached the underlying Flusher through Unwrap
+}
+
+// TestPanicsAfterWriteKeepsStatus checks that a handler which already started
+// the response and then panics keeps its status: no superfluous 500 override.
+func TestPanicsAfterWriteKeepsStatus(t *testing.T) {
+	is := is.New(t)
+
+	h := middleware.Panics(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("partial"))
+		panic("boom after write")
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	is.Equal(rec.Code, http.StatusOK) // the already-sent status is preserved, not overwritten with 500
 }

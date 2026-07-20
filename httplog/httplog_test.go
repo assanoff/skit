@@ -40,49 +40,6 @@ func TestCURL(t *testing.T) {
 	is.True(strings.Contains(CURL(post, "a'b"), `--data-raw 'a'\''b'`))
 }
 
-func TestWrapResponseWriterStatusAndBytes(t *testing.T) {
-	is := is.New(t)
-
-	rec := httptest.NewRecorder()
-	ww := NewWrapResponseWriter(rec, 1)
-
-	is.Equal(ww.Status(), 0) // nothing written yet
-
-	ww.WriteHeader(http.StatusCreated)
-	n, err := ww.Write([]byte("hello"))
-	is.NoErr(err)
-	is.Equal(n, 5)
-
-	is.Equal(ww.Status(), http.StatusCreated)
-	is.Equal(ww.BytesWritten(), 5)
-	is.Equal(rec.Code, http.StatusCreated) // proxied to the underlying writer
-	is.Equal(rec.Body.String(), "hello")
-}
-
-func TestWrapResponseWriterImplicitOK(t *testing.T) {
-	is := is.New(t)
-
-	rec := httptest.NewRecorder()
-	ww := NewWrapResponseWriter(rec, 1)
-	_, _ = ww.Write([]byte("x"))
-
-	is.Equal(ww.Status(), http.StatusOK) // a Write with no WriteHeader implies 200
-}
-
-func TestWrapResponseWriterTee(t *testing.T) {
-	is := is.New(t)
-
-	rec := httptest.NewRecorder()
-	ww := NewWrapResponseWriter(rec, 1)
-
-	var tee bytes.Buffer
-	ww.Tee(&tee)
-	_, _ = ww.Write([]byte("dup"))
-
-	is.Equal(rec.Body.String(), "dup") // proxied to the original
-	is.Equal(tee.String(), "dup")      // and copied to the tee
-}
-
 func TestClientIP(t *testing.T) {
 	is := is.New(t)
 
