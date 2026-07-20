@@ -92,7 +92,7 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 		DO UPDATE SET translation_value = EXCLUDED.translation_value,
 		              updated_at = EXCLUDED.updated_at`
 
-	const clear = `
+	const clearRow = `
 		DELETE FROM translations
 		WHERE model_name = :model_name AND column_name = :column_name
 		  AND key_id = :key_id AND language_id = :language_id`
@@ -110,7 +110,7 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 			}
 			q := upsert
 			if value == "" {
-				q = clear
+				q = clearRow
 			}
 			if err := dbx.NamedExecContext(ctx, s.log, tx, q, row); err != nil {
 				return fmt.Errorf("save column %s: %w", column, err)
