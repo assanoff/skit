@@ -2,6 +2,7 @@ package page
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 )
 
@@ -53,6 +54,11 @@ func Parse(page, rowsPerPage string) (Page, error) {
 
 	if rows > MaxRowsPerPage {
 		return Page{}, fmt.Errorf("rows value too large, must be %d or less", MaxRowsPerPage)
+	}
+
+	// Guard against an Offset() overflow: (number-1)*rows must stay within int.
+	if number-1 > math.MaxInt/rows {
+		return Page{}, fmt.Errorf("page value too large")
 	}
 
 	return Page{number: number, rows: rows}, nil

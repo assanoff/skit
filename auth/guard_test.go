@@ -67,3 +67,42 @@ func TestGuardEnforcesAuthAndRole(t *testing.T) {
 	_, isErr = resp.(*errs.Error)
 	is.True(!isErr) // authorized
 }
+
+// TestGuardNoRolesIsAuthOnly verifies Guard(v) with no roles is an
+// authentication-only guard: any valid token passes, regardless of roles.
+func TestGuardNoRolesIsAuthOnly(t *testing.T) {
+	is := is.New(t)
+
+	h := Guard(testVerifier(t))(func(_ context.Context, _ *http.Request) rest.ResponseEncoder {
+		return rest.JSON("ok")
+	})
+
+	// A valid token with no matching roles still passes (auth-only).
+	tok := signHMAC(t, jwt.MapClaims{
+		"sub": "u", "iss": "test-iss", "roles": []any{"viewer"},
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	_, isErr := h(context.Background(), req).(*errs.Error)
+	is.True(!isErr) // authenticated -> allowed
+
+	// No token -> still rejected.
+	_, isErr = h(context.Background(), httptest.NewRequest(http.MethodPost, "/x", nil)).(*errs.Error)
+	is.True(isErr) // unauthenticated -> rejected
+}
+
+// TestRequireRoleAppNoRolesDenies verifies RequireRoleApp with no roles denies an
+// authenticated principal (deny-by-default), unlike Guard which routes around it.
+func TestRequireRoleAppNoRolesDenies(t *testing.T) {
+	is := is.New(t)
+
+	h := RequireRoleApp()(func(_ context.Context, _ *http.Request) rest.ResponseEncoder {
+		return rest.JSON("ok")
+	})
+
+	ctx := WithPrincipal(context.Background(), &Principal{Subject: "u", Roles: []string{"admin"}})
+	e, isErr := h(ctx, httptest.NewRequest(http.MethodPost, "/x", nil)).(*errs.Error)
+	is.True(isErr)                          // authenticated but no roles configured
+	is.Equal(e.Code, errs.PermissionDenied) // denied by default
+}

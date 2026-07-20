@@ -66,6 +66,8 @@ func RequireAuthenticated() Middleware {
 
 // RequireRole rejects requests whose Principal lacks at least one of roles:
 // 401 when unauthenticated, 403 when authenticated without a required role.
+// Called with no roles it denies every request with 403 (a role gate must name
+// at least one role); use RequireAuthenticated for an authentication-only guard.
 func RequireRole(roles ...string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +77,7 @@ func RequireRole(roles ...string) Middleware {
 					WithMessageID("auth.required"))
 				return
 			}
-			if !p.HasAnyRole(roles...) {
+			if len(roles) == 0 || !p.HasAnyRole(roles...) {
 				writeErr(w, r, nil, errs.Newf(errs.PermissionDenied, "insufficient permissions").
 					WithMessageID("auth.forbidden"))
 				return

@@ -50,6 +50,11 @@ func NamedQueryStructUsingIn(ctx context.Context, log *logger.Logger, db sqlx.Ex
 	defer func() { _ = rows.Close() }()
 
 	if !rows.Next() {
+		// rows.Next returning false also covers a mid-stream failure (conn
+		// reset, ctx cancel); surface it instead of reporting "not found".
+		if err := rows.Err(); err != nil {
+			return translateError(err)
+		}
 		return ErrDBNotFound
 	}
 	return rows.StructScan(dest)

@@ -185,4 +185,14 @@ func TestRequireRole(t *testing.T) {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
 	})
+
+	t.Run("no roles configured -> 403 (deny by default)", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req = req.WithContext(WithPrincipal(req.Context(), &Principal{Subject: "u", Roles: []string{"admin"}}))
+		rec := httptest.NewRecorder()
+		RequireRole()(handler()).ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", rec.Code)
+		}
+	})
 }

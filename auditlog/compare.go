@@ -132,16 +132,6 @@ func (c *Core) NormalizeDiff(diff string) string {
 // payloadData holds parsed JSON as a map for field-level comparison.
 type payloadData map[string]any
 
-// isArray reports whether v decoded to a JSON array.
-func isArray(v any) bool {
-	switch v.(type) {
-	case []any:
-		return true
-	default:
-		return false
-	}
-}
-
 func unmarshalJSON(data string) (payloadData, error) {
 	var result payloadData
 	err := json.Unmarshal([]byte(data), &result)
@@ -153,21 +143,26 @@ func unmarshalJSON(data string) (payloadData, error) {
 
 func compareJSON(prev, curr payloadData) map[string]map[string]any {
 	changes := make(map[string]map[string]any)
+	record := func(key string, oldVal, newVal any) {
+		changes[key] = map[string]any{"old_value": oldVal, "new_value": newVal}
+	}
 
-	// Iterate over the keys of the current version
+	// Changed or newly-added keys (present in curr). Arrays are compared too;
+	// a missing prev key yields a nil old_value.
 	for key, currValue := range curr {
-		// If the key exists in the previous version and the value is not an array
-		if prevValue, exists := prev[key]; exists {
-			// Compare only simple types (non-arrays)
-			if !isArray(currValue) && !reflect.DeepEqual(prevValue, currValue) {
-				// Store the changed key and its values
-				if changes[key] == nil {
-					changes[key] = make(map[string]any)
-				}
-				changes[key]["old_value"] = prevValue
-				changes[key]["new_value"] = currValue
-			}
+		prevValue, existed := prev[key]
+		if existed && reflect.DeepEqual(prevValue, currValue) {
+			continue
 		}
+		record(key, prevValue, currValue)
+	}
+
+	// Removed keys (present in prev, absent from curr) yield a nil new_value.
+	for key, prevValue := range prev {
+		if _, exists := curr[key]; exists {
+			continue
+		}
+		record(key, prevValue, nil)
 	}
 
 	return changes

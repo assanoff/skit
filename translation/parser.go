@@ -239,7 +239,16 @@ func collectNested(model Translatable, visited map[uintptr]bool) []Translatable 
 			}
 			tr, ok := elem.Interface().(Translatable)
 			if !ok {
-				continue
+				// The interface is satisfied by *T (pointer receiver) while the
+				// slice holds T values; take the element's address. Slice
+				// elements are addressable, so this covers []T + *T Translatable.
+				if !elem.CanAddr() {
+					continue
+				}
+				tr, ok = elem.Addr().Interface().(Translatable)
+				if !ok {
+					continue
+				}
 			}
 			result = append(result, tr)
 			result = append(result, collectNested(tr, visited)...)

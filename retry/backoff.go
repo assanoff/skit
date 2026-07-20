@@ -60,6 +60,13 @@ func (b Backoff) NextWithRand(attempt int, randFraction float64) time.Duration {
 	if b.Max > 0 && delay > float64(b.Max) {
 		delay = float64(b.Max)
 	}
+	// Guard the float->Duration conversion. An uncapped backoff (Max == 0) can
+	// grow past the int64 nanosecond range and math.Pow can reach +Inf; either
+	// would wrap to a garbage (possibly negative) duration. Clamp to the max
+	// representable duration instead.
+	if delay >= float64(math.MaxInt64) {
+		return time.Duration(math.MaxInt64)
+	}
 	return time.Duration(delay)
 }
 

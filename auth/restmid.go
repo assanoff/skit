@@ -68,7 +68,8 @@ func RequireAuthenticatedApp() rest.MidFunc {
 // RequireRoleApp is the rest.MidFunc form of RequireRole: it rejects requests
 // whose Principal lacks at least one of roles — Unauthenticated when no
 // principal is present, PermissionDenied when one is present without a required
-// role. With no roles given, authentication alone suffices.
+// role. Called with no roles it denies every request (PermissionDenied); use
+// RequireAuthenticatedApp for an authentication-only guard.
 func RequireRoleApp(roles ...string) rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) rest.ResponseEncoder {
@@ -77,7 +78,7 @@ func RequireRoleApp(roles ...string) rest.MidFunc {
 				return errs.Newf(errs.Unauthenticated, "authentication required").
 					WithMessageID("auth.required")
 			}
-			if !p.HasAnyRole(roles...) {
+			if len(roles) == 0 || !p.HasAnyRole(roles...) {
 				return errs.Newf(errs.PermissionDenied, "insufficient permissions").
 					WithMessageID("auth.forbidden")
 			}
@@ -102,6 +103,12 @@ func RequireRoleApp(roles ...string) rest.MidFunc {
 func Guard(v Verifier, roles ...string) rest.MidFunc {
 	if v == nil {
 		return nil
+	}
+	// With no roles the intent is unambiguous — verify the token and require a
+	// principal, nothing more. Compose AuthenticateApp alone rather than
+	// RequireRoleApp (which denies when given no roles).
+	if len(roles) == 0 {
+		return AuthenticateApp(v)
 	}
 	return rest.Chain(AuthenticateApp(v), RequireRoleApp(roles...))
 }
