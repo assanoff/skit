@@ -24,7 +24,7 @@ type Page struct {
 // and validates the values are in reason. Empty strings fall back to the
 // defaults; out-of-range or non-numeric values are errors a handler should map
 // to a 400.
-func Parse(page string, rowsPerPage string) (Page, error) {
+func Parse(page, rowsPerPage string) (Page, error) {
 	number := DefaultPageNumber
 	if page != "" {
 		var err error
@@ -59,7 +59,7 @@ func Parse(page string, rowsPerPage string) (Page, error) {
 }
 
 // MustParse creates a paging value for testing; it panics on an invalid input.
-func MustParse(page string, rowsPerPage string) Page {
+func MustParse(page, rowsPerPage string) Page {
 	pg, err := Parse(page, rowsPerPage)
 	if err != nil {
 		panic(err)
@@ -72,7 +72,7 @@ func MustParse(page string, rowsPerPage string) Page {
 // fields where an unset value reads as 0, or programmatic callers). Unlike
 // Parse, it is lenient: a non-positive number or rows-per-page falls back to the
 // default, and rows above MaxRowsPerPage are capped rather than rejected.
-func New(number int, rowsPerPage int) Page {
+func New(number, rowsPerPage int) Page {
 	if number < 1 {
 		number = DefaultPageNumber
 	}

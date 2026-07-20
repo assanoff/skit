@@ -18,7 +18,7 @@ import (
 func AdvisoryKey(name string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(name)) // hash.Hash.Write never returns an error
-	return int64(h.Sum64())
+	return int64(h.Sum64())      //nolint:gosec // G115: intentional reinterpret of a 64-bit hash to a stable advisory key
 }
 
 // EnsureSchema applies idempotent DDL once, safely, at service startup. It runs

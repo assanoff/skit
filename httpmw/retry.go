@@ -59,7 +59,7 @@ func NewRetryTransport(next http.RoundTripper, cfg RetryConfig) *RetryTransport 
 }
 
 // RoundTrip executes the request, retrying on configured statuses until the
-// attempt budget is exhausted or the context is cancelled. The request body is
+// attempt budget is exhausted or the context is canceled. The request body is
 // rewound between attempts.
 func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	getBody, err := rewindable(req)
@@ -72,9 +72,9 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	for attempt := 1; ; attempt++ {
 		if getBody != nil {
-			body, err := getBody()
-			if err != nil {
-				return nil, err
+			body, bErr := getBody()
+			if bErr != nil {
+				return nil, bErr
 			}
 			req.Body = body
 		}
@@ -102,8 +102,8 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func (t *RetryTransport) delay(attempt int, resp *http.Response) time.Duration {
 	if !t.cfg.DisableRetryAfter {
 		if d, ok := retryAfter(resp.Header.Get("Retry-After")); ok {
-			if max := t.cfg.Backoff.Max; max > 0 && d > max {
-				d = max
+			if maxDelay := t.cfg.Backoff.Max; maxDelay > 0 && d > maxDelay {
+				d = maxDelay
 			}
 			return d
 		}

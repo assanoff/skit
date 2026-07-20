@@ -21,7 +21,7 @@ type TopicMapper func(topic, key string) (exchange, routingKey string)
 // back to the topic as the routing key when no key is set (so a single-key
 // topic still routes). This makes the common case — one topic per exchange —
 // work with no configuration.
-func defaultTopicMapper(topic, key string) (string, string) {
+func defaultTopicMapper(topic, key string) (exchange, routingKey string) {
 	if key == "" {
 		key = topic
 	}

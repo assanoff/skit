@@ -31,7 +31,7 @@ type Config struct {
 	// those). Use it for logging or retry statistics. attempt is the 1-based
 	// number of the attempt that just failed.
 	OnRetry func(attempt int, err error)
-	// Sleep waits d or returns early with ctx.Err() if ctx is cancelled first.
+	// Sleep waits d or returns early with ctx.Err() if ctx is canceled first.
 	// Defaults to a context-aware timer; override it in tests for determinism.
 	Sleep func(ctx context.Context, d time.Duration) error
 	// Rand returns the jitter fraction in [0,1) for each delay. Defaults to
@@ -49,7 +49,7 @@ func Fixed(d time.Duration) func(attempt int) time.Duration {
 }
 
 // Do calls fn and retries it on error according to cfg, until fn succeeds, the
-// attempt budget is spent, cfg.IsTerminal matches, or ctx is cancelled. It
+// attempt budget is spent, cfg.IsTerminal matches, or ctx is canceled. It
 // returns nil on the first success, or the last error otherwise.
 //
 // Do wraps any context-aware operation — an HTTP call, a DB transaction, a
@@ -93,15 +93,15 @@ func Do(ctx context.Context, cfg Config, fn func(ctx context.Context) error) err
 			cfg.OnRetry(attempt, err)
 		}
 		if serr := sleep(ctx, delay(attempt)); serr != nil {
-			// Context cancelled mid-wait: stop and report the operation's last error.
+			// Context canceled mid-wait: stop and report the operation's last error.
 			return err
 		}
 	}
 	return err
 }
 
-// sleepCtx waits for d, returning early with ctx.Err() if ctx is cancelled. A
-// non-positive d returns immediately (respecting an already-cancelled ctx).
+// sleepCtx waits for d, returning early with ctx.Err() if ctx is canceled. A
+// non-positive d returns immediately (respecting an already-canceled ctx).
 func sleepCtx(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return ctx.Err()

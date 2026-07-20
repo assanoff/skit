@@ -178,6 +178,6 @@ func TestDoStopsOnContextCancel(t *testing.T) {
 		t.Fatalf("err = %v, want last operation error %v", err, want)
 	}
 	if calls != 1 {
-		t.Fatalf("calls = %d, want 1 (cancelled during first backoff)", calls)
+		t.Fatalf("calls = %d, want 1 (canceled during first backoff)", calls)
 	}
 }

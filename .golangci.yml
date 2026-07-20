@@ -41,10 +41,15 @@ linters:
         - rangeValCopy
         - singleCaseSwitch
         - ifElseChain
+        - unnamedResult # noisy on the many Encode() ([]byte, string, error) impls
       enabled-tags:
         - performance
         - style
         - experimental
+    gosec:
+      excludes:
+        - G704 # SSRF taint analysis: false positive for an HTTP-client SDK
+        - G705 # XSS taint analysis: false positive (JSON error bodies via errs)
     govet:
       enable:
         - shadow
@@ -57,26 +62,37 @@ linters:
   exclusions:
     generated: lax
     rules:
-      # Test files: relax duplication, security, and unused-arg noise.
+      # Test files: relax duplication, security, style, and unused-arg noise.
       - path: _test\.go
         linters:
           - dupl
           - gosec
           - errcheck
           - unparam
-          - bodyclose
+          - gocritic
+          - prealloc
       - path: _test\.go$
         linters:
           - revive
           - unparam
           - unused
         text: unused-parameter
+      # go vet's shadow check flags idiomatic `if err := ...` in tests; allow it.
+      - path: _test\.go
+        linters:
+          - govet
+        text: 'shadow:'
       # Generated mocks are not held to our style rules.
       - path: mocks/
         linters:
           - revive
           - dupl
           - unparam
+      # The scaffolding CLI legitimately creates dirs/files, runs subprocesses,
+      # and reads file paths from its arguments.
+      - path: cmd/skit/
+        linters:
+          - gosec
       # httplog is adapted third-party access-log code kept close to upstream.
       - path: httplog/
         linters:

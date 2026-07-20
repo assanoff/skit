@@ -24,7 +24,7 @@
 //
 // Do calls fn, and on a non-nil error waits Backoff.Next(attempt) and tries
 // again, until fn succeeds, the attempt budget is spent, IsTerminal matches, or
-// ctx is cancelled. It returns nil on the first success or the last error
+// ctx is canceled. It returns nil on the first success or the last error
 // otherwise. Retries run in the calling goroutine and block on the backoff
 // delay, so keep the budget and delays modest when the caller holds a resource
 // for the duration (for example a queue lease, which another consumer may

@@ -28,7 +28,7 @@ import (
 // clickHouseDialect is goose's ClickHouse dialect. skit/migrate re-exports only
 // Postgres/MySQL/SQLite3, but migrate.Dialect is an alias for goose.Dialect, so
 // the constant is assignable directly.
-const clickHouseDialect = migrate.Dialect(goose.DialectClickHouse)
+const clickHouseDialect = goose.DialectClickHouse
 
 // Config describes how to reach ClickHouse. Addrs is a list of host:port native
 // endpoints (default native port 9000). Compression enables LZ4 wire compression,
@@ -105,7 +105,7 @@ func Migrate(ctx context.Context, cfg Config, fsys fs.FS) error {
 	if err != nil {
 		return fmt.Errorf("new migrator: %w", err)
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	if err := m.Up(ctx); err != nil {
 		return fmt.Errorf("apply clickhouse migrations: %w", err)
 	}

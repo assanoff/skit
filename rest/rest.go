@@ -154,9 +154,9 @@ type jsonResponse struct {
 	status int
 }
 
-func (j jsonResponse) Encode() ([]byte, string, error) {
-	data, err := json.Marshal(j.value)
-	return data, "application/json", err
+func (j jsonResponse) Encode() (body []byte, contentType string, err error) {
+	body, err = json.Marshal(j.value)
+	return body, "application/json", err
 }
 
 func (j jsonResponse) HTTPStatus() int { return j.status }
@@ -173,7 +173,7 @@ func JSONStatus(v any, status int) ResponseEncoder { return jsonResponse{value: 
 type NoResponse struct{}
 
 // Encode implements ResponseEncoder; it produces no body.
-func (NoResponse) Encode() ([]byte, string, error) {
+func (NoResponse) Encode() (body []byte, contentType string, err error) {
 	return nil, "", nil
 }
 

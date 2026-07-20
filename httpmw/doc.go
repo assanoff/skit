@@ -5,7 +5,7 @@
 // default) using the shared retry.Backoff policy, honoring a server-supplied
 // Retry-After header (RFC 7231 §7.1.3) when present. It rewinds the request body
 // between attempts (buffering in memory when the body is not otherwise
-// replayable) and aborts as soon as the request context is cancelled. Wrap it
+// replayable) and aborts as soon as the request context is canceled. Wrap it
 // around any http.RoundTripper (or http.DefaultTransport when nil) and install
 // it on an http.Client.
 //

@@ -238,9 +238,9 @@ func (c *Core) Create(ctx context.Context, in NewAuditLog) (AuditLog, error) {
 
 		// If a previous version exists and is unchanged, skip writing a new one.
 		if last.Version != 0 {
-			unchanged, err := payloadsEqual(body.Bytes(), last.Payload)
-			if err != nil {
-				return AuditLog{}, err
+			unchanged, eqErr := payloadsEqual(body.Bytes(), last.Payload)
+			if eqErr != nil {
+				return AuditLog{}, eqErr
 			}
 			if unchanged {
 				return AuditLog{}, nil

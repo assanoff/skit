@@ -123,7 +123,7 @@ func nextMigrationSeq(dir string) (int, error) {
 		}
 		return 0, err
 	}
-	max := 0
+	maxSeq := 0
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
@@ -136,11 +136,11 @@ func nextMigrationSeq(dir string) (int, error) {
 		if err != nil {
 			continue
 		}
-		if n > max {
-			max = n
+		if n > maxSeq {
+			maxSeq = n
 		}
 	}
-	return max + 1, nil
+	return maxSeq + 1, nil
 }
 
 type addRESTOpts struct {

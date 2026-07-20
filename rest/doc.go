@@ -53,7 +53,7 @@
 //     bundle and pass it where a single MidFunc is expected; the []MidFunc + spread
 //     form stays the primary way to accumulate middleware on a router group.
 //   - Respond: write a ResponseEncoder to an http.ResponseWriter (nil -> 204; encode
-//     failure -> 500 with a generic body; cancelled ctx -> returns ctx.Err).
+//     failure -> 500 with a generic body; canceled ctx -> returns ctx.Err).
 //   - JSON / JSONStatus: wrap a value as a JSON ResponseEncoder (status 200, or
 //     explicit).
 //   - Decode: read and validate a JSON request body (DisallowUnknownFields +

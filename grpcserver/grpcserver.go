@@ -136,11 +136,10 @@ func New(log *logger.Logger, cfg Config, opts ...Option) *Server {
 	schain = append(schain, errorMapStream())
 	schain = append(schain, o.streamExtra...)
 
-	serverOpts := []grpc.ServerOption{
+	serverOpts := append([]grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(chain...),
 		grpc.ChainStreamInterceptor(schain...),
-	}
-	serverOpts = append(serverOpts, buildTuningOptions(cfg)...)
+	}, buildTuningOptions(cfg)...)
 
 	gs := grpc.NewServer(serverOpts...)
 

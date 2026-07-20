@@ -98,7 +98,7 @@ func (a *AsyncRecorder) shardFor(entry NewAuditLog) int {
 	_, _ = h.Write([]byte(entry.ModelType))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(entry.ModelID))
-	return int(h.Sum32() % uint32(len(a.shards)))
+	return int(h.Sum32() % uint32(len(a.shards))) //nolint:gosec // G115: shard count is small; the modulo result always fits an int
 }
 
 // Start runs the workers until ctx is canceled, then drains the buffered entries

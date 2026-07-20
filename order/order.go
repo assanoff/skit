@@ -28,7 +28,7 @@ type By struct {
 // NewBy builds a By, defaulting an unknown direction to ASC. It performs no field
 // validation — pair it with a fixed field name (e.g. a default order), or use
 // Parse for untrusted input.
-func NewBy(field string, direction string) By {
+func NewBy(field, direction string) By {
 	if _, ok := directions[direction]; !ok {
 		return By{Field: field, Direction: ASC}
 	}
