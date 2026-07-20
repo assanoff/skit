@@ -70,7 +70,10 @@ type translationRow struct {
 	UpdatedAt        time.Time `db:"updated_at"`
 }
 
-// SaveTranslation upserts every column of data in a single transaction.
+// SaveTranslation upserts every column of data in a single transaction. An empty
+// value is not a translation: it clears any existing row for that column instead
+// of storing an empty one, keeping "empty" and "absent" the same so
+// CheckTranslationsExist stays consistent.
 func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) error {
 	now := time.Now().UTC()
 	if data.CreatedAt.IsZero() {
@@ -80,7 +83,7 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 		data.UpdatedAt = now
 	}
 
-	const q = `
+	const upsert = `
 		INSERT INTO translations
 			(model_name, column_name, key_id, language_id, translation_value, created_at, updated_at)
 		VALUES
@@ -88,6 +91,11 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 		ON CONFLICT (model_name, column_name, key_id, language_id)
 		DO UPDATE SET translation_value = EXCLUDED.translation_value,
 		              updated_at = EXCLUDED.updated_at`
+
+	const clear = `
+		DELETE FROM translations
+		WHERE model_name = :model_name AND column_name = :column_name
+		  AND key_id = :key_id AND language_id = :language_id`
 
 	return dbx.WithinTran(ctx, s.log, s.db, func(tx *sqlx.Tx) error {
 		for column, value := range data.Columns {
@@ -99,6 +107,10 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 				TranslationValue: value,
 				CreatedAt:        data.CreatedAt,
 				UpdatedAt:        data.UpdatedAt,
+			}
+			q := upsert
+			if value == "" {
+				q = clear
 			}
 			if err := dbx.NamedExecContext(ctx, s.log, tx, q, row); err != nil {
 				return fmt.Errorf("save column %s: %w", column, err)

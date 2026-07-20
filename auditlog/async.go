@@ -19,7 +19,8 @@ type AsyncConfig struct {
 	Buffer int
 	// BlockOnFull makes Record block until there is room instead of dropping.
 	// Default (false) drops the entry and calls OnDrop, so the request path is
-	// never slowed by a saturated audit pipeline.
+	// never slowed by a saturated audit pipeline. On shutdown Record drops even
+	// when BlockOnFull is set, so a saturated shard cannot hang a caller forever.
 	BlockOnFull bool
 	// OnDrop is invoked with an entry dropped because its shard was full (when
 	// BlockOnFull is false). Use it for a metric/log; may be nil.
@@ -39,6 +40,17 @@ type AsyncRecorder struct {
 	cfg    AsyncConfig
 	log    *slog.Logger
 	shards []chan job
+
+	// mu guards closing; Record holds it read-locked across the enqueue so a
+	// shutting-down Start (which takes the write lock) cannot finish quiescing
+	// producers until in-flight enqueues return.
+	mu      sync.RWMutex
+	closing bool
+	// done is closed on shutdown to unblock a BlockOnFull producer parked on a
+	// saturated shard. drainReady is closed once producers are quiesced, after
+	// which the workers drain the buffered entries without racing an enqueue.
+	done       chan struct{}
+	drainReady chan struct{}
 }
 
 type job struct {
@@ -63,7 +75,14 @@ func NewAsyncRecorder(core *Core, cfg AsyncConfig) *AsyncRecorder {
 	if core != nil && core.log != nil {
 		log = core.log.Slog()
 	}
-	return &AsyncRecorder{core: core, cfg: cfg, log: log, shards: shards}
+	return &AsyncRecorder{
+		core:       core,
+		cfg:        cfg,
+		log:        log,
+		shards:     shards,
+		done:       make(chan struct{}),
+		drainReady: make(chan struct{}),
+	}
 }
 
 // Name identifies the recorder in the supervisor and logs.
@@ -76,20 +95,39 @@ func (a *AsyncRecorder) Name() string { return "auditlog-async" }
 func (a *AsyncRecorder) Record(ctx context.Context, entry NewAuditLog) {
 	j := job{ctx: context.WithoutCancel(ctx), entry: entry}
 	shard := a.shards[a.shardFor(entry)]
+
+	// Hold the read lock across the enqueue so shutdown (write lock) waits for
+	// this send to finish; once closing is set no further entry is enqueued, so
+	// the drain-to-empty on shutdown cannot lose an in-flight entry.
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closing {
+		a.drop(entry)
+		return
+	}
 	if a.cfg.BlockOnFull {
-		shard <- j
+		select {
+		case shard <- j:
+		case <-a.done: // shutting down: drop instead of blocking forever
+			a.drop(entry)
+		}
 		return
 	}
 	select {
 	case shard <- j:
 	default:
-		if a.cfg.OnDrop != nil {
-			a.cfg.OnDrop(entry)
-		}
-		if a.log != nil {
-			a.log.Warn("auditlog: async buffer full, dropping entry",
-				"model_type", entry.ModelType, "model_id", entry.ModelID)
-		}
+		a.drop(entry)
+	}
+}
+
+// drop reports a discarded entry via OnDrop and the log.
+func (a *AsyncRecorder) drop(entry NewAuditLog) {
+	if a.cfg.OnDrop != nil {
+		a.cfg.OnDrop(entry)
+	}
+	if a.log != nil {
+		a.log.Warn("auditlog: async entry dropped (buffer full or shutting down)",
+			"model_type", entry.ModelType, "model_id", entry.ModelID)
 	}
 }
 
@@ -104,6 +142,18 @@ func (a *AsyncRecorder) shardFor(entry NewAuditLog) int {
 // Start runs the workers until ctx is canceled, then drains the buffered entries
 // and returns. It implements worker.Runnable.
 func (a *AsyncRecorder) Start(ctx context.Context) error {
+	// Coordinator: on shutdown, unblock any parked producer, take the write lock
+	// to wait for in-flight enqueues, mark closing so later Records drop, then
+	// release the workers to drain what is already buffered.
+	go func() {
+		<-ctx.Done()
+		close(a.done)
+		a.mu.Lock()
+		a.closing = true
+		a.mu.Unlock()
+		close(a.drainReady)
+	}()
+
 	var wg sync.WaitGroup
 	wg.Add(len(a.shards))
 	for i := range a.shards {
@@ -124,6 +174,10 @@ func (a *AsyncRecorder) drain(ctx context.Context, ch chan job) {
 		case j := <-ch:
 			a.write(j)
 		case <-ctx.Done():
+			// Wait until producers are quiesced (Start set closing under the write
+			// lock) before draining to empty, so a concurrent Record cannot enqueue
+			// after the default branch has declared the shard empty.
+			<-a.drainReady
 			for {
 				select {
 				case j := <-ch:
