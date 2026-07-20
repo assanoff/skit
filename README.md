@@ -3,8 +3,8 @@
 skit ([S]ervice [KIT]) Go SDK (software development kit) for building production web services that speak **REST and/or gRPC**, backed by Postgres, with first-class observability (slog + OpenTelemetry traces + Prometheus metrics), reliable background
 workers, and a transactional outbox.
 
-This is NOT a framework
-This is a just a building block of production ready application in Go
+This is NOT a framework.
+It is just a building block for production-ready applications in Go.
 
 It distills patterns from several reference services into a single, importable module
 (`github.com/assanoff/skit`). A separate repo,
@@ -44,10 +44,22 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `dbtest` | testcontainers Postgres for integration tests: start, migrate, connect, auto-teardown |
 | `apitest` | Stdlib-only HTTP test helpers: JSON requests, status/body assertions against an `httptest.Server` |
 | `safetick` | Panic recovery for worker ticks and consumer callbacks |
-| `httplog` | Access logger support otel and ecs-http specification  |
-| `cmd/skit` | Scaffolding CLI: `skit new <module>` (embedded starter, or gonew passthrough with `--template`) |
+| `httplog` | Access logger with OpenTelemetry trace correlation and ECS-HTTP formatting |
+| `httpclient` | Typed JSON HTTP client with OAuth2 (client-credentials) support and pluggable request middleware |
+| `retry` | Generic retry with pluggable `Backoff` (exponential + jitter) and terminal-error short-circuit; the backoff shared by `httpmw`/`worker` |
+| `cron` | Cron scheduler (`robfig/cron`) as a `worker.Runnable`: spec-validated jobs, per-firing panic recovery, graceful drain |
+| `lock` | Distributed mutual exclusion behind a common `Locker`: Postgres advisory locks and single-instance Redis locks |
+| `chx` | Optional ClickHouse helper (connect + goose migrations); pulls the ClickHouse driver only when imported |
+| `grpcgateway` | grpc-gateway REST↔gRPC transcoding as a `worker.Runnable`, sharing the app's server core |
+| `grpctest` | In-process gRPC test harness over `bufconn` running the real `grpcserver` interceptor chain |
+| `provider` | Ready-made `dim` factories for common dependencies (Postgres, Redis, RabbitMQ, tracer, Sentry, translator) |
+| `app` | Opinionated application entrypoint: wires config → deps → `worker.Group` and drives graceful shutdown via `closer` |
+| `to` | Small response-encoding helpers (`to.JSON`, JSON:API) — a convenience seam over `rest` |
+| `cmd/skit` | Scaffolding CLI: `skit new <module>` (embedded starter, `--full` service layout, or gonew passthrough with `--template`), plus per-model generators via `skit add …` |
 
-(The CLI's per-model CRUD/REST/gRPC generators land in a later milestone.)
+The `skit add` generators scaffold per-model code: `rest`, `rest-test`, `grpc`, `grpc-test`,
+`consumer`, `worker`, `migration`, `event`, `cron`, and `http-client`. See
+[quick-start.md](quick-start.md) for an end-to-end walkthrough.
 
 ## Installation
 
@@ -62,7 +74,7 @@ or a workspace — do **not** rename the import paths (that forks the SDK).
 Versioned, reproducible, `go.sum`-verified. This is what `skit new` generates.
 
 ```bash
-go get github.com/assanoff/skit@v0.2.0   # or @latest
+go get github.com/assanoff/skit@v0.6.0   # or @latest
 ```
 
 ```go
@@ -84,14 +96,14 @@ equivalent ways — pick one:
 
 ```bash
 # in your service module
-go get github.com/assanoff/skit@v0.2.0          # keeps a sane version + go.sum entry
+go get github.com/assanoff/skit@v0.6.0          # keeps a sane version + go.sum entry
 go mod edit -replace github.com/assanoff/skit=../skit
 go mod tidy
 ```
 
 ```
 // resulting go.mod
-require github.com/assanoff/skit v0.2.0
+require github.com/assanoff/skit v0.6.0
 replace github.com/assanoff/skit => ../skit
 ```
 

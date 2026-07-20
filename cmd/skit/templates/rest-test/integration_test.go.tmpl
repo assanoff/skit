@@ -75,9 +75,13 @@ func list200(srv *apitest.Server, sd seed) func(t *testing.T) {
 		is := is.New(t)
 		resp := srv.Get("/{{.Plural}}?page=1&rows=10")
 		resp.ExpectStatus(http.StatusOK)
-		total, ok := resp.JSON()["total"].(float64)
-		is.True(ok)                               // paginated envelope carries a total
-		is.True(int(total) >= len(sd.items))      // at least the seeded rows are listed
+		data, ok := resp.JSON()["data"].(map[string]any) // {error_code, data:{items, pagination}}
+		is.True(ok)                                       // response carries a data envelope
+		pg, ok := data["pagination"].(map[string]any)
+		is.True(ok) // list envelope carries pagination
+		total, ok := pg["total_items"].(float64)
+		is.True(ok)                          // pagination carries total_items
+		is.True(int(total) >= len(sd.items)) // at least the seeded rows are listed
 	}
 }
 
@@ -87,7 +91,9 @@ func get200(srv *apitest.Server, sd seed) func(t *testing.T) {
 		id := sd.items[0].ID.String()
 		resp := srv.Get("/{{.Plural}}/" + id)
 		resp.ExpectStatus(http.StatusOK)
-		is.Equal(resp.JSON()["id"], id)
+		data, ok := resp.JSON()["data"].(map[string]any) // {error_code, data:{...}}
+		is.True(ok)                                       // response carries a data envelope
+		is.Equal(data["id"], id)
 	}
 }
 
@@ -103,6 +109,8 @@ func create201(srv *apitest.Server) func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"name": gofakeit.ProductName(), "description": gofakeit.Sentence(6)})
 		resp := srv.PostJSON("/{{.Plural}}", string(body))
 		resp.ExpectStatus(http.StatusCreated)
-		is.True(resp.JSON()["id"] != nil)
+		data, ok := resp.JSON()["data"].(map[string]any) // {error_code, data:{...}}
+		is.True(ok)                                       // response carries a data envelope
+		is.True(data["id"] != nil)                        // created object has an id
 	}
 }

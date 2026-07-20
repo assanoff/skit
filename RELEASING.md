@@ -54,7 +54,7 @@ the build before it ships.
    make release-auto
 
    # or pin it explicitly (validated by gorelease before tagging):
-   make release VERSION=v0.1.0
+   make release VERSION=v0.7.0
    ```
 
    Either path verifies build+tests, validates the version against the public
@@ -72,15 +72,15 @@ satisfies both, since it uses gorelease's suggestion.
 Once published, downstream services depend on the SDK normally:
 
 ```bash
-go get github.com/assanoff/skit@v0.1.0
+go get github.com/assanoff/skit@v0.6.0
 ```
 
 Scaffold a new service with the CLI (no `replace` needed — it pins the SDK
 version in the generated `go.mod`):
 
 ```bash
-go install github.com/assanoff/skit/cmd/skit@v0.1.0
-skit new github.com/you/svc --sdk-version v0.1.0
+go install github.com/assanoff/skit/cmd/skit@v0.6.0
+skit new github.com/you/svc --sdk-version v0.6.0
 ```
 
 ## The showcase application
