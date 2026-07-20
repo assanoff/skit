@@ -62,14 +62,20 @@ func NewRetryTransport(next http.RoundTripper, cfg RetryConfig) *RetryTransport 
 // attempt budget is exhausted or the context is canceled. The request body is
 // rewound between attempts.
 func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Per the http.RoundTripper contract we must not mutate the caller's
-	// request; clone it so body rewinding and per-attempt Body assignment touch
-	// only our copy.
-	req = req.Clone(req.Context())
-
 	getBody, err := rewindable(req)
 	if err != nil {
 		return nil, err
+	}
+
+	// The only per-attempt mutation is reassigning req.Body below; Header and URL
+	// are read-only here. So, per the http.RoundTripper contract forbidding us to
+	// mutate the caller's request, a shallow struct copy is enough to isolate that
+	// assignment — and only when there is a body to replay. A bodyless request is
+	// never mutated, so it is passed through untouched, avoiding req.Clone's deep
+	// Header/URL copy on the common path.
+	if getBody != nil {
+		clone := *req
+		req = &clone
 	}
 
 	maxAttempts := max(t.cfg.Backoff.MaxAttempts, 1)
