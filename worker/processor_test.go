@@ -71,6 +71,51 @@ func TestProcessorHappyPath(t *testing.T) {
 	}
 }
 
+// deadlineSink records the context its mark call receives, to assert the mark
+// gets its own timeout budget rather than the handler's.
+type deadlineSink struct {
+	markCtx context.Context
+}
+
+func (s *deadlineSink) MarkDone(ctx context.Context, _ memItem, _ time.Time) error {
+	s.markCtx = ctx
+	return nil
+}
+
+func (s *deadlineSink) MarkFailed(ctx context.Context, _ memItem, _ string, _ bool, _ time.Time) error {
+	s.markCtx = ctx
+	return nil
+}
+
+func TestProcessorMarkGetsFreshTimeout(t *testing.T) {
+	src := SourceFunc[memItem](func(_ context.Context, _ time.Time, _ int) ([]memItem, error) {
+		return []memItem{{1}}, nil
+	})
+
+	var handleDeadline time.Time
+	h := HandlerFunc[memItem](func(ctx context.Context, _ memItem) error {
+		handleDeadline, _ = ctx.Deadline()
+		return nil
+	})
+
+	sink := &deadlineSink{}
+	p := NewProcessor[memItem](nil, src, h, sink, ProcessorConfig{HandleTimeout: 200 * time.Millisecond})
+
+	if err := p.Tick()(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	markDeadline, ok := sink.markCtx.Deadline()
+	if !ok {
+		t.Fatal("mark ctx has no deadline")
+	}
+	// A fresh budget means the mark's deadline is strictly later than the
+	// handler's; if they shared one context the deadlines would be equal.
+	if !markDeadline.After(handleDeadline) {
+		t.Fatalf("mark deadline %v should be after handle deadline %v (independent budget)", markDeadline, handleDeadline)
+	}
+}
+
 func TestProcessorRetryableVsTerminal(t *testing.T) {
 	errTerminal := errors.New("bad request: do not retry")
 	errTransient := errors.New("temporary network blip")

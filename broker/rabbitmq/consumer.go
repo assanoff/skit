@@ -111,9 +111,17 @@ func (c *Consumer) Name() string { return c.cfg.Name }
 // Start consumes until ctx is canceled (or Stop closes the consumer). Run
 // blocks with automatic reconnection; a watcher goroutine closes it on cancel.
 func (c *Consumer) Start(ctx context.Context) error {
+	// The watcher closes the consumer on ctx cancel. It also unblocks when Start
+	// returns for any other reason (Run errored / reconnection exhausted), so the
+	// goroutine never parks on a context that outlives this Run.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
-		c.close()
+		select {
+		case <-ctx.Done():
+			c.close()
+		case <-done:
+		}
 	}()
 
 	c.log.Info(ctx, "rabbitmq consumer started", "queue", c.cfg.Queue, "consumer", c.cfg.Name)

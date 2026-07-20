@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,18 +28,27 @@ func queryString(query string, args any) string {
 		return q
 	}
 
+	type binding struct{ placeholder, value string }
+	var bindings []binding
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		tag := t.Field(i).Tag.Get("db")
 		if tag == "" || tag == "-" {
 			continue
 		}
-		placeholder := ":" + tag
 		value := "'***'"
 		if !isSensitive(tag) {
 			value = formatValue(v.Field(i).Interface())
 		}
-		q = strings.ReplaceAll(q, placeholder, value)
+		bindings = append(bindings, binding{placeholder: ":" + tag, value: value})
+	}
+
+	// Replace longer placeholders first so ":id" does not corrupt ":id_owner".
+	sort.Slice(bindings, func(i, j int) bool {
+		return len(bindings[i].placeholder) > len(bindings[j].placeholder)
+	})
+	for _, b := range bindings {
+		q = strings.ReplaceAll(q, b.placeholder, b.value)
 	}
 	return q
 }

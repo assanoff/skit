@@ -26,8 +26,6 @@ func Compress() Middleware {
 				return
 			}
 
-			w.Header().Add("Vary", "Accept-Encoding")
-
 			gz := gzipPool.Get().(*gzip.Writer)
 			gz.Reset(w)
 			cw := &gzipResponseWriter{ResponseWriter: w, gz: gz}
@@ -66,6 +64,9 @@ func (w *gzipResponseWriter) WriteHeader(code int) {
 		// Content-Length would describe the uncompressed size; gzip invalidates it.
 		w.Header().Del("Content-Length")
 		w.Header().Set("Content-Encoding", "gzip")
+		// Vary only when we actually encode, so bodyless (204/304/1xx) or
+		// pre-encoded passthroughs do not fragment shared caches.
+		w.Header().Add("Vary", "Accept-Encoding")
 		w.started = true
 	}
 	w.ResponseWriter.WriteHeader(code)

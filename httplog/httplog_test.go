@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/matryer/is"
 
@@ -82,6 +83,13 @@ func TestLogBody(t *testing.T) {
 	trimmed := logBody(bytes.NewBufferString("123456"), jsonHdr, short)
 	is.True(strings.HasPrefix(trimmed, "123"))
 	is.True(strings.HasSuffix(trimmed, "... [trimmed]"))
+
+	// Trimming backs off to a rune boundary so it never emits invalid UTF-8.
+	// "aé" is 3 bytes (a=1, é=2); a 2-byte cut would split é, so it backs off to "a".
+	runeCut := &Options{LogBodyContentTypes: []string{"application/json"}, LogBodyMaxLen: 2}
+	got := logBody(bytes.NewBufferString("aé"), jsonHdr, runeCut)
+	is.True(utf8.ValidString(got)) // no broken rune
+	is.Equal(got, "a... [trimmed]")
 }
 
 func TestAppendAttrsSkipsEmptyKey(t *testing.T) {
@@ -164,6 +172,45 @@ func TestRequestLoggerRecoversPanic(t *testing.T) {
 
 	is.Equal(rec.Code, http.StatusInternalServerError) // RecoverPanics defaults to true -> 500
 	is.True(strings.Contains(buf.String(), "panic: boom"))
+}
+
+func TestRequestLoggerRecoversPanicWithStrayUpgradeHeader(t *testing.T) {
+	is := is.New(t)
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	h := RequestLogger(log, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Header.Set("Connection", "Upgrade") // stray header, no Upgrade token -> not a real upgrade
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	is.Equal(rec.Code, http.StatusInternalServerError) // stray Connection: Upgrade must not mask the 500
+}
+
+func TestRequestLoggerPanicOnUpgradeRequestSkips500(t *testing.T) {
+	is := is.New(t)
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	h := RequestLogger(log, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Connection", "keep-alive, Upgrade") // comma-list, case-insensitive token
+	req.Header.Set("Upgrade", "websocket")              // genuine handshake
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	is.Equal(rec.Code, http.StatusOK) // no status written over a real upgrade (recorder defaults to 200)
 }
 
 func TestMiddlewareUsesServicekitLogger(t *testing.T) {

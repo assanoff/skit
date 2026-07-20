@@ -53,8 +53,10 @@ type ProcessorConfig struct {
 	Name string
 	// BatchSize is the max number of items leased per tick (defaults to 100).
 	BatchSize int
-	// HandleTimeout bounds each Handle call and its follow-up mark (0 = inherit
-	// the tick context with no extra bound).
+	// HandleTimeout bounds each Handle call and, independently, its follow-up
+	// mark: each gets its own budget so a slow-but-successful Handle cannot
+	// starve the mark (which would leave the item unacknowledged and cause a
+	// redelivery). 0 = inherit the tick context with no extra bound.
 	HandleTimeout time.Duration
 	// IsTerminal classifies a Handle error as permanent (true) or retryable
 	// (false). When nil, every failure is treated as retryable.
@@ -151,23 +153,21 @@ func (p *Processor[T]) processN(ctx context.Context) (int, error) {
 // logged but not propagated — the surrounding tick has no caller to surface them
 // to, and the next tick (or the sweeper) will reclaim an unacknowledged item.
 func (p *Processor[T]) handleOne(ctx context.Context, item T) {
-	itemCtx := ctx
-	if p.cfg.HandleTimeout > 0 {
-		var cancel context.CancelFunc
-		itemCtx, cancel = context.WithTimeout(ctx, p.cfg.HandleTimeout)
-		defer cancel()
-	}
-
 	now := p.cfg.Now()
-	handleErr := p.h.Handle(itemCtx, item)
 
-	var markErr error
-	if handleErr != nil {
-		terminal := p.cfg.IsTerminal(handleErr)
-		markErr = p.sink.MarkFailed(itemCtx, item, errs.Sanitize(handleErr.Error()), terminal, now)
-	} else {
-		markErr = p.sink.MarkDone(itemCtx, item, now)
-	}
+	handleErr := p.bounded(ctx, func(c context.Context) error {
+		return p.h.Handle(c, item)
+	})
+
+	// The mark gets its own timeout derived from the parent ctx, not the handle
+	// context, so a slow handle cannot leave the mark on a near-expired deadline.
+	markErr := p.bounded(ctx, func(c context.Context) error {
+		if handleErr != nil {
+			terminal := p.cfg.IsTerminal(handleErr)
+			return p.sink.MarkFailed(c, item, errs.Sanitize(handleErr.Error()), terminal, now)
+		}
+		return p.sink.MarkDone(c, item, now)
+	})
 
 	if markErr != nil && p.log != nil {
 		p.log.Error(
@@ -177,4 +177,15 @@ func (p *Processor[T]) handleOne(ctx context.Context, item T) {
 			"mark_err", markErr,
 		)
 	}
+}
+
+// bounded runs op under a fresh HandleTimeout derived from ctx (each call gets
+// its own budget); with no HandleTimeout it runs op on ctx directly.
+func (p *Processor[T]) bounded(ctx context.Context, op func(context.Context) error) error {
+	if p.cfg.HandleTimeout <= 0 {
+		return op(ctx)
+	}
+	opCtx, cancel := context.WithTimeout(ctx, p.cfg.HandleTimeout)
+	defer cancel()
+	return op(opCtx)
 }

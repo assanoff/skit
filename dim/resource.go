@@ -9,12 +9,16 @@ import (
 
 // resource represents a managed resource with automatic cleanup registration.
 type resource[T any] struct {
-	name      string
-	factory   FactoryFunc[T]
-	once      sync.Once
-	value     T
+	name    string
+	factory FactoryFunc[T]
+	once    sync.Once
+	value   T
+	err     error
+	// mu guards cleanupFn: get writes it inside once.Do while the cleanup closure
+	// (returned by getCleanup) may read it from another goroutine before init
+	// completes. value/err are read only by get callers, synchronized by once.
+	mu        sync.Mutex
 	cleanupFn CleanupFunc
-	err       error
 }
 
 // NewResource creates a new managed resource and returns Provider and CleanupFunc.
@@ -47,7 +51,11 @@ func (r *resource[T]) get(ctx context.Context) T {
 		start := time.Now()
 		slog.Info("initializing resource", slog.String("name", r.name))
 
-		r.value, r.cleanupFn, r.err = r.factory(ctx)
+		value, cleanupFn, err := r.factory(ctx)
+		r.value, r.err = value, err
+		r.mu.Lock()
+		r.cleanupFn = cleanupFn
+		r.mu.Unlock()
 		if r.err != nil {
 			slog.Error("failed to initialize resource",
 				slog.String("name", r.name),
@@ -74,9 +82,12 @@ func (r *resource[T]) get(ctx context.Context) T {
 func (r *resource[T]) getCleanup() CleanupFunc {
 	// Wrap cleanup to add logging and a nil check.
 	return NamedCleanup(r.name, func() error {
-		if r.cleanupFn == nil {
+		r.mu.Lock()
+		fn := r.cleanupFn
+		r.mu.Unlock()
+		if fn == nil {
 			return nil
 		}
-		return r.cleanupFn()
+		return fn()
 	})
 }

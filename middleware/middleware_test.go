@@ -20,6 +20,37 @@ func discardLogger() *logger.Logger {
 	return logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
 }
 
+func TestCompressSetsVaryWhenGzipping(t *testing.T) {
+	is := is.New(t)
+
+	h := middleware.Compress()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "hello world hello world")
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	is.Equal(rec.Header().Get("Content-Encoding"), "gzip") // encoded
+	is.Equal(rec.Header().Get("Vary"), "Accept-Encoding")  // and varied
+}
+
+func TestCompressNoVaryOnBodylessResponse(t *testing.T) {
+	is := is.New(t)
+
+	h := middleware.Compress()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent) // 204: never gzipped
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	is.Equal(rec.Code, http.StatusNoContent)
+	is.Equal(rec.Header().Get("Content-Encoding"), "") // not encoded
+	is.Equal(rec.Header().Get("Vary"), "")             // so no cache-fragmenting Vary
+}
+
 func TestPanicsRecoversWith500(t *testing.T) {
 	is := is.New(t)
 

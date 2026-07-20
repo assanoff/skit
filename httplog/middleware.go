@@ -12,11 +12,30 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/assanoff/skit/httpw"
 )
 
 var ErrClientAborted = fmt.Errorf("request aborted: client disconnected before response was sent")
+
+// isUpgradeRequest reports whether r is a protocol-upgrade handshake (e.g. a
+// WebSocket). It requires a non-empty Upgrade header and the "upgrade" token in
+// Connection (case-insensitive, comma-list aware), so a bare "Connection:
+// Upgrade" on an ordinary request is not mistaken for one.
+func isUpgradeRequest(r *http.Request) bool {
+	if r.Header.Get("Upgrade") == "" {
+		return false
+	}
+	for _, v := range r.Header.Values("Connection") {
+		for tok := range strings.SplitSeq(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(tok), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Handler {
 	// Work on a copy so filling in defaults never mutates the caller's Options
@@ -62,8 +81,13 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 				var logAttrs []slog.Attr
 
 				if rec := recover(); rec != nil {
-					// Return HTTP 500 if recover is enabled and no response status was set.
-					if o.RecoverPanics && ww.Status() == 0 && r.Header.Get("Connection") != "Upgrade" {
+					// Return HTTP 500 if recover is enabled and no response status
+					// was set. A genuine protocol-upgrade handshake (e.g. WebSocket)
+					// takes over the connection via Hijack — which the response
+					// wrapper cannot observe (Status stays 0) — so writing a 500
+					// there is wrong; a stray "Connection: Upgrade" on an ordinary
+					// request must still yield a 500.
+					if o.RecoverPanics && ww.Status() == 0 && !isUpgradeRequest(r) {
 						ww.WriteHeader(http.StatusInternalServerError)
 					}
 
@@ -245,7 +269,17 @@ func logBody(body *bytes.Buffer, header http.Header, o *Options) string {
 			if o.LogBodyMaxLen <= 0 || o.LogBodyMaxLen >= body.Len() {
 				return body.String()
 			}
-			return body.String()[:o.LogBodyMaxLen] + "... [trimmed]"
+			s := body.String()
+			end := o.LogBodyMaxLen
+			// Back off a trailing partial rune so the cut never splits a
+			// multi-byte character into invalid UTF-8.
+			for end > 0 {
+				if r, size := utf8.DecodeLastRuneInString(s[:end]); r != utf8.RuneError || size > 1 {
+					break
+				}
+				end--
+			}
+			return s[:end] + "... [trimmed]"
 		}
 	}
 	return fmt.Sprintf("[body redacted for Content-Type: %s]", contentType)
