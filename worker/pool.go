@@ -69,18 +69,25 @@ func (p *Pool) Submit(ctx context.Context, job JobFn) (string, error) {
 	case p.sem <- struct{}{}:
 	}
 
-	// Detach from the submission ctx so a single Submit caller returning does not
-	// cancel the job, but keep any deadline it carried. Cancel/Shutdown drive the
-	// job's lifetime instead.
-	jobCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	if deadline, ok := ctx.Deadline(); ok {
-		jobCtx, cancel = context.WithDeadline(context.WithoutCancel(ctx), deadline)
-	}
-
+	jobCtx, cancel := detach(ctx)
 	key := uuid.NewString()
-	p.track(key, cancel)
 
+	// Register under the lock so a concurrent Shutdown either observes this job
+	// in p.running (and cancels it) or has already closed isShutdown (and we back
+	// out here) — and so wg.Add never races Shutdown's wg.Wait.
+	p.mu.Lock()
+	select {
+	case <-p.isShutdown:
+		p.mu.Unlock()
+		cancel()
+		<-p.sem // release the slot we acquired
+		return "", ErrPoolShutdown
+	default:
+	}
+	p.running[key] = cancel
 	p.wg.Add(1)
+	p.mu.Unlock()
+
 	go func() {
 		// Release the semaphore in its own defer so a panic in the cleanup defer
 		// still frees the slot.
@@ -134,14 +141,20 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 	}
 }
 
-func (p *Pool) track(key string, cancel context.CancelFunc) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.running[key] = cancel
-}
-
 func (p *Pool) untrack(key string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.running, key)
+}
+
+// detach returns a context that keeps ctx's values and any deadline but not its
+// cancellation, so a Submit caller returning does not cancel the job — only
+// Cancel/Shutdown do. It builds exactly one cancelable context so the cancel we
+// track is the one that frees it (a throwaway WithCancel would leak).
+func detach(ctx context.Context) (context.Context, context.CancelFunc) {
+	base := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(base, deadline)
+	}
+	return context.WithCancel(base)
 }

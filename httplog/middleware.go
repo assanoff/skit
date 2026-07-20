@@ -17,15 +17,19 @@ import (
 var ErrClientAborted = fmt.Errorf("request aborted: client disconnected before response was sent")
 
 func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Handler {
-	if o == nil {
-		o = &defaultOptions
+	// Work on a copy so filling in defaults never mutates the caller's Options
+	// (or the package-global defaultOptions when o is nil).
+	opts := defaultOptions
+	if o != nil {
+		opts = *o
 	}
-	if len(o.LogBodyContentTypes) == 0 {
-		o.LogBodyContentTypes = defaultOptions.LogBodyContentTypes
+	if len(opts.LogBodyContentTypes) == 0 {
+		opts.LogBodyContentTypes = defaultOptions.LogBodyContentTypes
 	}
-	if o.LogBodyMaxLen == 0 {
-		o.LogBodyMaxLen = defaultOptions.LogBodyMaxLen
+	if opts.LogBodyMaxLen == 0 {
+		opts.LogBodyMaxLen = defaultOptions.LogBodyMaxLen
 	}
+	o = &opts
 	s := o.Schema
 	if s == nil {
 		s = SchemaECS

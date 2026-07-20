@@ -51,7 +51,7 @@ type Consumer struct {
 
 	mu      sync.Mutex
 	readers []*kgo.Reader
-	once    sync.Once
+	closed  bool
 }
 
 // New builds a Consumer from a transport-neutral broker.Subscription, mapping it
@@ -108,6 +108,13 @@ func (c *Consumer) Start(ctx context.Context) error {
 			Topic:   c.cfg.Topic,
 		})
 		c.mu.Lock()
+		if c.closed {
+			// Stop / ctx-cancel raced ahead of reader creation; close this one
+			// now so it can't leak, and don't start a goroutine for it.
+			c.mu.Unlock()
+			_ = r.Close()
+			continue
+		}
 		c.readers = append(c.readers, r)
 		c.mu.Unlock()
 
@@ -133,14 +140,17 @@ func (c *Consumer) Stop(context.Context) error {
 	return nil
 }
 
+// close closes every reader and marks the consumer closed. It is idempotent
+// (kafka-go Reader.Close is safe to call twice) and, together with the closed
+// check in Start, guarantees no reader is leaked when Stop races reader startup.
 func (c *Consumer) close() {
-	c.once.Do(func() {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		for _, r := range c.readers {
-			_ = r.Close()
-		}
-	})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+	for _, r := range c.readers {
+		_ = r.Close()
+	}
+	c.readers = nil
 }
 
 // consume leases records one at a time (FetchMessage does not auto-commit),

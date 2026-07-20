@@ -58,7 +58,10 @@ func (m *Metrics) Middleware() func(http.Handler) http.Handler {
 
 			pattern := r.Pattern
 			if pattern == "" {
-				pattern = r.URL.Path
+				// Unmatched routes / 404s have no pattern; using the raw path
+				// here would let arbitrary URLs explode Prometheus label
+				// cardinality (a memory-DoS vector).
+				pattern = "<unmatched>"
 			}
 			status := strconv.Itoa(rec.status)
 			labels := prometheus.Labels{"method": r.Method, "path": pattern, "status": status}
@@ -76,4 +79,11 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap exposes the underlying writer so http.ResponseController can reach
+// optional interfaces (Flusher/Hijacker/…) through this wrapper — otherwise
+// wrapping every request would mask Flush for SSE/streaming handlers.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
