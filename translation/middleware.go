@@ -3,6 +3,8 @@ package translation
 import (
 	"context"
 	"net/http"
+
+	"golang.org/x/text/language"
 )
 
 // contextKey is a private context key type to avoid collisions.
@@ -11,18 +13,31 @@ type contextKey string
 const languageKey contextKey = "translation:language"
 
 // LanguageFromRequest resolves the request language from the X-Language header,
-// falling back to Accept-Language and then the translator's default. Unsupported
-// codes fall back to the default.
+// falling back to Accept-Language and then the translator's default. The
+// Accept-Language header is parsed into client-preferred tags (RFC 7231, with
+// quality weights), and each is matched on its base subtag — so "ru-RU,ru;q=0.9"
+// resolves to supported "ru". Unsupported codes fall back to the default.
 func (t *Translator) LanguageFromRequest(r *http.Request) Language {
-	code := r.Header.Get("X-Language")
-	if code == "" {
-		code = r.Header.Get("Accept-Language")
-	}
-	if code == "" {
+	if code := r.Header.Get("X-Language"); code != "" {
+		if lang, err := t.findLanguage(code); err == nil {
+			return lang
+		}
 		return t.defaultLang
 	}
-	if lang, err := t.findLanguage(code); err == nil {
-		return lang
+
+	accept := r.Header.Get("Accept-Language")
+	if accept == "" {
+		return t.defaultLang
+	}
+	tags, _, err := language.ParseAcceptLanguage(accept)
+	if err != nil {
+		return t.defaultLang
+	}
+	for _, tag := range tags {
+		base, _ := tag.Base()
+		if lang, err := t.findLanguage(base.String()); err == nil {
+			return lang
+		}
 	}
 	return t.defaultLang
 }

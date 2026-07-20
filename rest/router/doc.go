@@ -68,14 +68,14 @@
 //
 // Global cross-cutting — transport for infra, app for request semantics:
 //
-//	r := router.New(reqctxMid, localizeErrMid)        // application: every typed route
-//	r.Use(mid.Panics(log), mid.TraceRequest(tracer),  // transport: every route incl. debug
-//		mid.AccessLog(log))
+//	r := router.New(reqctxMid, localizeErrMid)                      // application: every typed route
+//	r.Use(middleware.Panics(log), middleware.TraceRequest(tracer),  // transport: every route incl. debug
+//		middleware.AccessLog(log))
 //
 // A business sub-group with guards that must not touch debug/pprof routes (a
 // request timeout would cut off a long profile), then features register on it:
 //
-//	api := r.With(mid.Timeout(5*time.Second), mid.SizeLimit(1<<20)) // transport sub-group
+//	api := r.With(middleware.Timeout(5*time.Second), middleware.SizeLimit(1<<20)) // transport sub-group
 //	d.WidgetHandler(ctx).Routes(api.HandleApp)                      // feature owns its routes
 //	auditrest.NewHandlers(d.AuditLog(ctx)).Routes(api.HandleApp)
 //

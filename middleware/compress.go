@@ -14,9 +14,9 @@ var gzipPool = sync.Pool{
 
 // Compress returns middleware that gzip-encodes responses when the client sends
 // "Accept-Encoding: gzip". It sets Content-Encoding: gzip and Vary:
-// Accept-Encoding, and drops the (now-wrong) Content-Length. Compression starts
-// lazily on the first Write, so empty/204 responses are untouched; a handler
-// that already set Content-Encoding is left alone. Flusher is preserved.
+// Accept-Encoding, and drops the (now-wrong) Content-Length. Bodyless responses
+// (1xx, 204, 304) are never encoded, and a handler that already set
+// Content-Encoding is left alone. Flusher is preserved.
 func Compress() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,30 +43,54 @@ func Compress() Middleware {
 	}
 }
 
-// gzipResponseWriter compresses body bytes on the way out. It defers the gzip
-// setup to the first Write so a handler that writes nothing (204) never emits a
-// gzip stream, and it delegates status/headers to the wrapped writer.
+// gzipResponseWriter compresses body bytes on the way out. It decides whether to
+// encode at WriteHeader time, based on the status code: bodyless responses (1xx,
+// 204, 304) and any response whose handler already set Content-Encoding are
+// passed through untouched (no gzip stream, Content-Length preserved). For
+// gzippable responses it sets Content-Encoding: gzip and drops the now-wrong
+// Content-Length.
 type gzipResponseWriter struct {
 	http.ResponseWriter
-	gz      *gzip.Writer
-	started bool
+	gz          *gzip.Writer
+	wroteHeader bool
+	started     bool // gzip is active; false means passthrough
 }
 
 func (w *gzipResponseWriter) WriteHeader(code int) {
-	// Content-Length would describe the uncompressed size; gzip invalidates it.
-	w.Header().Del("Content-Length")
-	w.Header().Set("Content-Encoding", "gzip")
+	if w.wroteHeader {
+		w.ResponseWriter.WriteHeader(code)
+		return
+	}
+	w.wroteHeader = true
+	if bodyAllowed(code) && w.Header().Get("Content-Encoding") == "" {
+		// Content-Length would describe the uncompressed size; gzip invalidates it.
+		w.Header().Del("Content-Length")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.started = true
+	}
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
 	if !w.started {
-		w.started = true
-		if w.Header().Get("Content-Encoding") == "" {
-			w.WriteHeader(http.StatusOK)
-		}
+		return w.ResponseWriter.Write(b) // passthrough: 204/304/1xx or pre-set encoding
 	}
 	return w.gz.Write(b)
+}
+
+// bodyAllowed reports whether a response with this status code may carry a body
+// we can gzip. 1xx, 204 (No Content) and 304 (Not Modified) must not be encoded.
+func bodyAllowed(code int) bool {
+	switch {
+	case code >= 100 && code < 200:
+		return false
+	case code == http.StatusNoContent, code == http.StatusNotModified:
+		return false
+	}
+	return true
 }
 
 // Flush flushes the gzip stream then the underlying writer, so streaming

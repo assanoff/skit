@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -45,6 +46,12 @@ func InitTracing(ctx context.Context, cfg Config) (trace.Tracer, func(context.Co
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithSampler(newEndpointExcluder(cfg.ExcludedRoutes, cfg.Probability)),
+		// Tag every span with service.name so collectors don't label them
+		// "unknown_service". Schemaless avoids merge conflicts with the SDK's
+		// default resource.
+		sdktrace.WithResource(resource.NewSchemaless(
+			attribute.String("service.name", cfg.ServiceName),
+		)),
 	)
 
 	otel.SetTracerProvider(tp)
