@@ -31,9 +31,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - uses: golangci/golangci-lint-action@v6
+      # v7+ installs golangci-lint v2 (v6 shipped v1, built with an older Go that
+      # rejects a go 1.26 module and our version: "2" config). Keep in sync with
+      # the v2 binary the Makefile installs via `make tools`.
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          version: v2.12.2
 
   # Verify semantic-version compatibility of the public module against the
   # latest release tag. Skipped on the first release (no tag yet).
