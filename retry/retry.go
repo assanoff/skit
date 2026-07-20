@@ -59,10 +59,7 @@ func Fixed(d time.Duration) func(attempt int) time.Duration {
 // holds a resource for the duration (for example a queue lease, which another
 // consumer may reclaim if the total retry time exceeds the lease timeout).
 func Do(ctx context.Context, cfg Config, fn func(ctx context.Context) error) error {
-	budget := cfg.Backoff.MaxAttempts
-	if budget < 1 {
-		budget = 1
-	}
+	budget := max(cfg.Backoff.MaxAttempts, 1)
 	sleep := cfg.Sleep
 	if sleep == nil {
 		sleep = sleepCtx

@@ -93,7 +93,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	c := robfig.New(robfig.WithParser(specParser))
 
 	for _, e := range s.entries {
-		e := e
 		if _, err := c.AddFunc(e.spec, func() { s.run(ctx, e) }); err != nil {
 			// Specs were validated in Add, so this is unexpected — surface it.
 			return fmt.Errorf("cron %q: schedule %q: %w", s.name, e.name, err)

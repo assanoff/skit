@@ -146,14 +146,14 @@ func TestCallerSkipAttributesWrapper(t *testing.T) {
 func srcOf(t *testing.T, line string) string {
 	t.Helper()
 	const key = `"source":"`
-	i := strings.Index(line, key)
-	if i < 0 {
+	_, after, ok := strings.Cut(line, key)
+	if !ok {
 		return ""
 	}
-	rest := line[i+len(key):]
-	j := strings.IndexByte(rest, '"')
-	if j < 0 {
+	rest := after
+	before, _, ok := strings.Cut(rest, "\"")
+	if !ok {
 		return ""
 	}
-	return rest[:j]
+	return before
 }
