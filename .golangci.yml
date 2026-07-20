@@ -5,21 +5,25 @@ run:
   tests: true
 
 linters:
-  default: standard
+  default: none
   enable:
-    - bodyclose
-    - errorlint
+    - dupl
+    - errcheck
+    - gochecknoinits
     - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
     - misspell
+    - nakedret
+    - prealloc
     - revive
+    - staticcheck
     - unconvert
     - unparam
-    - wastedassign
+    - unused
   settings:
-    revive:
-      rules:
-        - name: exported
-          disabled: false
     errcheck:
       # Writes to stdout/stderr (CLI progress, log lines) don't warrant error
       # handling; everything else must still be checked.
@@ -27,33 +31,61 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    gocritic:
+      disabled-checks:
+        - wrapperFunc
+        - hugeParam
+        - rangeValCopy
+        - singleCaseSwitch
+        - ifElseChain
+      enabled-tags:
+        - performance
+        - style
+        - experimental
+    govet:
+      enable:
+        - shadow
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: exported
+          disabled: false
   exclusions:
     generated: lax
     rules:
+      # Test files: relax duplication, security, and unused-arg noise.
       - path: _test\.go
         linters:
+          - dupl
+          - gosec
           - errcheck
           - unparam
           - bodyclose
+      - path: _test\.go$
+        linters:
+          - revive
+          - unparam
+          - unused
+        text: unused-parameter
+      # Generated mocks are not held to our style rules.
       - path: mocks/
         linters:
           - revive
+          - dupl
+          - unparam
+      # httplog is adapted third-party access-log code kept close to upstream.
       - path: httplog/
         linters:
           - revive
-          - errorlint
           - gocritic
+          - gocyclo
+          - gosec
+          - dupl
           - staticcheck
-      # Vendored third-party code (lib/pq array support, MIT) kept verbatim in
-      # sqldb/dbarray; do not hold it to our lint standards.
-      - path: sqldb/dbarray/
-        linters:
-          - revive
-          - errorlint
-          - gocritic
-          - staticcheck
-          - govet
-          - unparam
 
 formatters:
   enable:
@@ -67,4 +99,6 @@ formatters:
     generated: lax
     paths:
       - httplog
-      - sqldb/dbarray
+      - third_party$
+      - builtin$
+      - examples$

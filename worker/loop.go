@@ -35,8 +35,9 @@ type PacedTickFunc func(ctx context.Context) (Pace, error)
 type LoopConfig struct {
 	// Name identifies the loop in logs and panic metrics.
 	Name string
-	// Interval between ticks. Required (> 0). In an adaptive loop (NewPacedLoop)
-	// this is the idle interval — the wait after a tick that found no work.
+	// Interval between ticks (defaults to 1s if non-positive). In an adaptive loop
+	// (NewPacedLoop) this is the idle interval — the wait after a tick that found
+	// no work.
 	Interval time.Duration
 	// ImmediateFirstTick runs a tick at startup before the first interval.
 	ImmediateFirstTick bool
@@ -67,8 +68,13 @@ type Loop struct {
 	log   *slog.Logger
 }
 
-// NewLoop builds a fixed-interval Loop. log may be nil.
+// NewLoop builds a fixed-interval Loop. A non-positive Interval defaults to 1s
+// (so a zero-value config never panics in time.NewTicker), matching NewPacedLoop.
+// log may be nil.
 func NewLoop(log *slog.Logger, cfg LoopConfig, tick TickFunc) *Loop {
+	if cfg.Interval <= 0 {
+		cfg.Interval = time.Second
+	}
 	return &Loop{cfg: cfg, tick: tick, log: log}
 }
 

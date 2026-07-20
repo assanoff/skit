@@ -94,17 +94,17 @@ func Open(ctx context.Context, cfg Config) (*Client, error) {
 func Migrate(ctx context.Context, cfg Config, fsys fs.FS) error {
 	// clickhouse.OpenDB never returns an error; connectivity surfaces on first use.
 	db := clickhouse.OpenDB(cfg.options())
+	// migrate.Close releases the goose provider but does NOT close db (the caller
+	// owns the handle), so this Migrate owns and closes db itself.
+	defer func() { _ = db.Close() }()
+
 	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
 		return fmt.Errorf("ping clickhouse (migrations): %w", err)
 	}
 	m, err := migrate.New(clickHouseDialect, db, fsys)
 	if err != nil {
-		_ = db.Close()
 		return fmt.Errorf("new migrator: %w", err)
 	}
-	// migrate.Close releases the goose provider AND closes db, so db is owned by m
-	// from here on; do not close it separately.
 	defer m.Close()
 	if err := m.Up(ctx); err != nil {
 		return fmt.Errorf("apply clickhouse migrations: %w", err)

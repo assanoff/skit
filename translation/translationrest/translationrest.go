@@ -17,17 +17,20 @@ import (
 type LangFunc func(context.Context) string
 
 // Middleware translates response payloads, resolving the request language itself
-// from the X-Language / Accept-Language headers. Use this for standalone setups
-// where no other middleware resolves the language.
+// from request headers. With no sources it uses the canonical language headers
+// (X-Language / Accept-Language); pass custom translation.HeaderSource values to
+// read the language from your own headers instead (canonical ones can be kept as
+// a fallback via translation.DefaultHeaderSources). Use this for standalone
+// setups where no other middleware resolves the language.
 //
 // After the handler runs, a response is translated when its ResponseEncoder is a
 // translation.Translatable (single model) or translation.TranslatableList
 // (collection, translated in one batch query). Translating to the default
 // language is a no-op; translation errors are logged and the original content is
 // served, so a missing translation never fails the request.
-func Middleware(log *logger.Logger, t *translation.Translator) rest.MidFunc {
+func Middleware(log *logger.Logger, t *translation.Translator, sources ...translation.HeaderSource) rest.MidFunc {
 	return middleware(log, t, func(_ context.Context, r *http.Request) translation.Language {
-		return t.LanguageFromRequest(r)
+		return t.LanguageFrom(r, sources...)
 	})
 }
 

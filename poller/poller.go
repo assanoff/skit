@@ -17,7 +17,7 @@ type Getter[T any] func(ctx context.Context) (T, error)
 type Config struct {
 	// Name identifies the poller in logs and panic metrics (defaults to "poller").
 	Name string
-	// Interval between polls. Required (> 0).
+	// Interval between polls (defaults to 1s if non-positive).
 	Interval time.Duration
 	// PollTimeout bounds each Getter call (0 = inherit the run context).
 	PollTimeout time.Duration
@@ -44,6 +44,9 @@ type Poller[T any] struct {
 func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config) *Poller[T] {
 	if cfg.Name == "" {
 		cfg.Name = "poller"
+	}
+	if cfg.Interval <= 0 {
+		cfg.Interval = time.Second
 	}
 	return &Poller[T]{cfg: cfg, getter: getter, log: log, current: initial}
 }
