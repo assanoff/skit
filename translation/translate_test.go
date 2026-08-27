@@ -414,6 +414,22 @@ func TestTranslator_CheckTranslationsExist(t *testing.T) {
 		t.Errorf("Expected ErrMissingTranslations, got %v", err)
 	}
 
+	// The error has to tell which column is missing which language
+	var missingErr *MissingTranslationsError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("Expected *MissingTranslationsError, got %T", err)
+	}
+	if got := missingErr.Missing["title"]; len(got) != 1 || got[0] != LanguageKk.Code {
+		t.Errorf("Expected title to miss [%s], got %v", LanguageKk.Code, got)
+	}
+
+	// Describe names the columns and languages, unnamed ones stay as they are
+	want := `"description" - Kazakh; "Title" - Kazakh`
+	got := missingErr.Describe(map[string]string{"title": "Title"}, map[string]string{"kk": "Kazakh"})
+	if got != want {
+		t.Errorf("Describe() = %q, want %q", got, want)
+	}
+
 	// Save translation
 	modelKk := &TestModel{
 		ID:          "999",

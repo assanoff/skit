@@ -34,9 +34,12 @@ func (t *Translator) CheckTranslationsExist(ctx context.Context, model Translata
 
 	var columns []string
 	for _, field := range fields {
-		if !field.isPrimary {
-			columns = append(columns, field.columnName)
+		// Fields tagged with "omitcheck" are translatable, but their
+		// translations are not required.
+		if field.isPrimary || field.optional {
+			continue
 		}
+		columns = append(columns, field.columnName)
 	}
 
 	if len(columns) == 0 {

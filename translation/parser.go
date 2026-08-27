@@ -7,6 +7,43 @@ import (
 	"sync"
 )
 
+// translateTagOmitCheck is the translate tag option that makes a field's
+// translation optional. For such a field an empty value means "no translation"
+// on both sides: Translator.CheckTranslationsExist ignores it, applyTranslations
+// keeps the default language value on read, and Translator.Save leaves the
+// stored column untouched on write.
+const translateTagOmitCheck = "omitcheck"
+
+// parseTranslateTag splits a translate tag value into a column name and its
+// options, e.g. `translate:"poster,omitcheck"` -> ("poster", true). Unknown
+// options are rejected: silently ignoring them would turn a typo such as
+// `translate:"poster,omitCheck"` into a required field with no signal at all.
+func parseTranslateTag(tag string) (name string, omitCheck bool, err error) {
+	name, opts, hasOpts := strings.Cut(tag, ",")
+	name = strings.TrimSpace(name)
+	opts = strings.TrimSpace(opts)
+
+	if name == "" && hasOpts && opts != "" {
+		return "", false, fmt.Errorf("%w: %q has options but no column name", ErrInvalidTag, tag)
+	}
+
+	for opts != "" {
+		var opt string
+		opt, opts, _ = strings.Cut(opts, ",")
+
+		switch strings.TrimSpace(opt) {
+		case translateTagOmitCheck:
+			omitCheck = true
+		case "":
+			// tolerate a trailing or doubled comma
+		default:
+			return "", false, fmt.Errorf("%w: unknown option %q in %q", ErrInvalidTag, strings.TrimSpace(opt), tag)
+		}
+	}
+
+	return name, omitCheck, nil
+}
+
 // fieldSchema is the per-type description of one translatable leaf field. It is
 // independent of any instance, so it can be cached by reflect.Type.
 type fieldSchema struct {
@@ -14,6 +51,7 @@ type fieldSchema struct {
 	fieldName  string   // dotted path, e.g. "Label.Title"
 	columnName string
 	isPrimary  bool
+	optional   bool // the "omitcheck" tag option, see translateTagOmitCheck
 }
 
 // schemaCache memoizes the (reflection-heavy) tag walk per concrete type.
@@ -53,6 +91,7 @@ func parseTranslateTags(model Translatable) ([]fieldInfo, error) {
 			fieldName:  fs.fieldName,
 			columnName: fs.columnName,
 			isPrimary:  fs.isPrimary,
+			optional:   fs.optional,
 		}
 		if ok && fv.CanInterface() {
 			info.value = fmt.Sprintf("%v", fv.Interface())
@@ -93,14 +132,17 @@ func walkTags(t reflect.Type, prefix []string, fields *[]fieldSchema, primaryFou
 	defer delete(visited, t)
 
 	for field := range t.Fields() {
-		tag := field.Tag.Get("translate")
+		tagName, omitCheck, err := parseTranslateTag(field.Tag.Get("translate"))
+		if err != nil {
+			return fmt.Errorf("field %s: %w", field.Name, err)
+		}
 
 		ft := field.Type
 		if ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
 
-		if tag == "" {
+		if tagName == "" {
 			// Recurse into untagged nested structs to reach their tagged fields.
 			if ft.Kind() == reflect.Struct {
 				if err := walkTags(ft, append(prefix, field.Name), fields, primaryFound, visited); err != nil {
@@ -113,7 +155,7 @@ func walkTags(t reflect.Type, prefix []string, fields *[]fieldSchema, primaryFou
 		path := append(append([]string{}, prefix...), field.Name)
 		fs := fieldSchema{path: path, fieldName: strings.Join(path, ".")}
 
-		if tag == "primary" {
+		if tagName == "primary" {
 			if *primaryFound {
 				return ErrMultiplePrimaryKeys
 			}
@@ -126,7 +168,8 @@ func walkTags(t reflect.Type, prefix []string, fields *[]fieldSchema, primaryFou
 			if ft.Kind() != reflect.String {
 				return fmt.Errorf("%w: field %s must be a string, got %s", ErrInvalidTag, fs.fieldName, ft.Kind())
 			}
-			fs.columnName = tag
+			fs.columnName = tagName
+			fs.optional = omitCheck
 		}
 
 		*fields = append(*fields, fs)

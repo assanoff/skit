@@ -17,7 +17,8 @@ type Store interface {
 	DeleteTranslations(ctx context.Context, modelName, keyID string, lang Language) error
 
 	// CheckTranslationsExist checks if translations exist for all specified columns and languages
-	// Returns nil if all translations exist, ErrMissingTranslations otherwise
+	// Returns nil if all translations exist, otherwise a *MissingTranslationsError
+	// (which wraps ErrMissingTranslations) listing the missing column/language pairs
 	CheckTranslationsExist(ctx context.Context, modelName, keyID string, columns []string, langs []Language) error
 
 	// GetTranslationsBatch retrieves translations for multiple model instances

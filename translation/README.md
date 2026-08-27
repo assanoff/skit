@@ -39,6 +39,45 @@ func (s *Product) GetTranslationKey() (modelName, keyID string) {
 
 Only `primary` is required. Every other tagged field must be a `string`.
 
+| Tag | Description |
+|-----|-------------|
+| `translate:"primary"` | The field holding the model's ID (required, exactly one) |
+| `translate:"column_name"` | A translatable field stored under that column name |
+| `translate:"column_name,omitcheck"` | Same, but the translation is optional |
+
+### Optional translations (`omitcheck`)
+
+By default every tagged field is required — `CheckTranslationsExist` reports it
+as missing until it is translated into all supported languages. Add `omitcheck`
+when a translation is a nice-to-have and the default language value is a valid
+fallback:
+
+```go
+type Product struct {
+    ID     string `json:"id"     translate:"primary"`
+    Title  string `json:"title"  translate:"title"`             // required
+    Poster string `json:"poster" translate:"poster,omitcheck"`  // optional
+}
+```
+
+For a field marked `omitcheck` an **empty** value means "no translation" on both
+sides:
+
+- on read, an absent or empty stored translation leaves the default language
+  value in place;
+- on write, `Save` skips the column entirely instead of storing an empty string,
+  so a caller that does not know about the field — an older client, or one
+  following a previous version of the API contract — cannot wipe a translation
+  somebody else has set.
+
+The trade-off is that an already stored translation of an optional field cannot
+be cleared by saving an empty value; use `Delete` to drop the translations of a
+model.
+
+Unknown options are rejected at parse time with `ErrInvalidTag`:
+`translate:"poster,omitCheck"` fails loudly instead of silently turning the field
+back into a required one.
+
 ## 2. Build the translator
 
 ```go
@@ -117,8 +156,27 @@ translation.TranslateSlice(ctx, tr, products, translation.LanguageKk)
 tr.ValidateTranslateTags(&Product{})
 
 // All non-default languages have every translatable column (e.g. before publish):
-tr.CheckTranslationsExist(ctx, &Product{ID: "123", Title: "x", Description: "y"})
+err := tr.CheckTranslationsExist(ctx, &Product{ID: "123", Title: "x", Description: "y"})
 ```
+
+`CheckTranslationsExist` returns a `*MissingTranslationsError` wrapping
+`ErrMissingTranslations`, so `errors.Is` keeps working while `errors.As` gives
+the details — which column is missing which languages, and a `Describe` helper
+that renders them for the end user with your own display names:
+
+```go
+var missing *translation.MissingTranslationsError
+if errors.As(err, &missing) {
+    // `"Poster" - Kazakh; "Title" - Kazakh, English`
+    text := missing.Describe(
+        map[string]string{"title": "Title", "poster": "Poster"},
+        map[string]string{"kk": "Kazakh", "en": "English"},
+    )
+}
+```
+
+Columns tagged `omitcheck` are skipped by the check; an empty stored value counts
+as no translation.
 
 ## Testing
 
@@ -133,8 +191,8 @@ tr.Save(ctx, translation.LanguageKk, &Product{ID: "123", Title: "Тест"})
 
 ## Notes & limitations
 
-- Translatable fields must be strings; the parser rejects other kinds with
-  `ErrInvalidTag`.
+- Translatable fields must be strings; the parser rejects other kinds — and
+  unknown tag options — with `ErrInvalidTag`.
 - Nested structs are walked for tagged fields; empty nested structs contribute
   nothing. Slice fields of `Translatable` are translated recursively.
 - `Get`/batch lookups return `ErrTranslationNotFound` only from `Get`; the

@@ -68,23 +68,26 @@ func (m *MockStore) DeleteTranslations(ctx context.Context, modelName, keyID str
 	return nil
 }
 
-// CheckTranslationsExist checks if translations exist for all columns and languages
+// CheckTranslationsExist checks if translations exist for all columns and
+// languages. When some are missing it returns a *MissingTranslationsError
+// listing them. An empty value counts as no translation, matching the Postgres
+// store.
 func (m *MockStore) CheckTranslationsExist(ctx context.Context, modelName, keyID string, columns []string, langs []Language) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	for _, lang := range langs {
-		key := m.buildKey(modelName, keyID, lang.Code)
-		translations, exists := m.translations[key]
-		if !exists {
-			return ErrMissingTranslations
-		}
-
-		for _, column := range columns {
-			if _, exists := translations[column]; !exists {
-				return ErrMissingTranslations
+	missing := make(map[string][]string)
+	for _, column := range columns {
+		for _, lang := range langs {
+			translations := m.translations[m.buildKey(modelName, keyID, lang.Code)]
+			if translations[column] == "" {
+				missing[column] = append(missing[column], lang.Code)
 			}
 		}
+	}
+
+	if len(missing) > 0 {
+		return &MissingTranslationsError{Missing: missing}
 	}
 
 	return nil

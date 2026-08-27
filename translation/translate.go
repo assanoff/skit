@@ -176,9 +176,18 @@ func (t *Translator) Save(ctx context.Context, lang Language, model Translatable
 	// key is the column name, value is the field value
 	columns := make(map[string]string)
 	for _, field := range fields {
-		if !field.isPrimary {
-			columns[field.columnName] = field.value
+		if field.isPrimary {
+			continue
 		}
+
+		// An empty optional field means "no translation supplied", so its column
+		// is left untouched: a caller that does not carry the field must not be
+		// able to wipe an existing translation. Mirrors applyTranslations.
+		if field.optional && field.value == "" {
+			continue
+		}
+
+		columns[field.columnName] = field.value
 	}
 
 	if len(columns) == 0 {
@@ -247,6 +256,12 @@ func (t *Translator) applyTranslations(model Translatable, fields []fieldInfo, t
 		translationValue, exists := translations[field.columnName]
 		if !exists {
 			// No translation for this field, keep original value
+			continue
+		}
+
+		// For an optional field an empty translation also means "no
+		// translation": the default language value is kept.
+		if field.optional && translationValue == "" {
 			continue
 		}
 

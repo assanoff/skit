@@ -23,6 +23,19 @@
 // Only the primary key field is required; every other tagged field must be a
 // string. Fields without a translate tag are ignored.
 //
+// # Optional translations
+//
+// A tag may carry the "omitcheck" option — `translate:"poster,omitcheck"` — to
+// mark a field whose translation is not required: CheckTranslationsExist skips
+// it, an empty stored translation leaves the default language value in place on
+// read, and Save leaves the stored column untouched when the field is empty, so
+// a caller that does not carry the field cannot wipe an existing translation.
+// Unknown options are rejected with ErrInvalidTag.
+//
+// CheckTranslationsExist returns a *MissingTranslationsError (wrapping
+// ErrMissingTranslations) that lists which columns are missing which languages
+// and renders them for the end user via its Describe method.
+//
 // # Setup
 //
 //	store := postgres.NewStore(log, db)

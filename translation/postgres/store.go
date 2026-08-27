@@ -176,8 +176,17 @@ func (s *Store) DeleteTranslations(ctx context.Context, modelName, keyID string,
 	return nil
 }
 
-// CheckTranslationsExist returns ErrMissingTranslations unless every (column,
-// language) pair has a non-empty value.
+// existingRow is the select projection used to find which (column, language)
+// pairs already have a translation.
+type existingRow struct {
+	ColumnName string `db:"column_name"`
+	LanguageID string `db:"language_id"`
+}
+
+// CheckTranslationsExist reports the (column, language) pairs that have no
+// non-empty value. When some are missing it returns a
+// *translation.MissingTranslationsError listing them, so the caller can tell the
+// user what exactly to fill in.
 func (s *Store) CheckTranslationsExist(ctx context.Context, modelName, keyID string, columns []string, langs []translation.Language) error {
 	if len(columns) == 0 || len(langs) == 0 {
 		return nil
@@ -189,7 +198,7 @@ func (s *Store) CheckTranslationsExist(ctx context.Context, modelName, keyID str
 	}
 
 	const base = `
-		SELECT COUNT(DISTINCT column_name || '|' || language_id)
+		SELECT column_name, language_id
 		FROM translations
 		WHERE model_name = ?
 		  AND key_id = ?
@@ -203,12 +212,27 @@ func (s *Store) CheckTranslationsExist(ctx context.Context, modelName, keyID str
 	}
 	q = s.db.Rebind(q)
 
-	var count int
-	if err := sqlx.GetContext(ctx, s.db, &count, q, args...); err != nil {
-		return fmt.Errorf("count translations: %w", err)
+	var rows []existingRow
+	if err := sqlx.SelectContext(ctx, s.db, &rows, q, args...); err != nil {
+		return fmt.Errorf("query translations: %w", err)
 	}
-	if count < len(columns)*len(langs) {
-		return translation.ErrMissingTranslations
+
+	filled := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		filled[r.ColumnName+"|"+r.LanguageID] = struct{}{}
+	}
+
+	missing := make(map[string][]string)
+	for _, column := range columns {
+		for _, code := range langCodes {
+			if _, ok := filled[column+"|"+code]; !ok {
+				missing[column] = append(missing[column], code)
+			}
+		}
+	}
+
+	if len(missing) > 0 {
+		return &translation.MissingTranslationsError{Missing: missing}
 	}
 	return nil
 }

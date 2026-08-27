@@ -50,4 +50,9 @@ type fieldInfo struct {
 	columnName string
 	isPrimary  bool
 	value      string
+
+	// optional is set by the "omitcheck" tag option: the field is translated,
+	// but the presence of its translation is not required and an empty value
+	// means "no translation" on both read and write.
+	optional bool
 }
