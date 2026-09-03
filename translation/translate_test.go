@@ -34,7 +34,7 @@ func TestNew(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing store and db",
+			name: "missing store",
 			config: Config{
 				DefaultLanguage: LanguageRu,
 				SupportedLangs:  []Language{LanguageRu, LanguageKk},
