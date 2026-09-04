@@ -11,6 +11,7 @@ type ctxKey int
 const (
 	tracerKey ctxKey = iota + 1
 	traceIDKey
+	suppressKey
 )
 
 const defaultTraceID = "00000000000000000000000000000000"

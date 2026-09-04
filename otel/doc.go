@@ -4,7 +4,8 @@
 //
 // InitTracing wires a global TracerProvider that exports spans over OTLP/gRPC
 // and samples with a parent-based ratio sampler that always drops excluded
-// routes (health/readiness probes). InjectTracing seeds the request context
+// routes (health/readiness probes) and anything started from a suppressed
+// context (see Suppress). InjectTracing seeds the request context
 // with the tracer and a guaranteed trace id, so GetTraceID — usable directly as
 // logger.TraceIDFn — makes every log line carry the active trace.
 //
@@ -39,6 +40,31 @@
 //
 // AddSpan returns a no-op span when no tracer is in ctx, so callers never need a
 // nil check.
+//
+// # Suppressing background traces
+//
+// Background tick loops — pollers, outbox relays, sweepers, cleaners — run every
+// few seconds with no request behind them, so each poll query exports its own
+// single-span trace and buries the traces that describe real traffic. Wrap the
+// tick context in Suppress and the sampler drops those spans outright:
+//
+//	ctx = otel.Suppress(ctx)                 // once per tick
+//	rows, err := store.LeasePending(ctx)     // no span exported
+//
+// Suppression is inherited by every derived context, so nothing below the tick is
+// traced either. When a tick finds work worth tracing, start that span from
+// context.Background() instead of from the suppressed context. Re-inject the
+// tracer, since it travels in the context too:
+//
+//	rowCtx := otel.InjectTracing(context.Background(), tracer)
+//	rowCtx, span := otel.AddSpan(rowCtx, "dispatch-row")
+//
+// AddSpan takes no span links; to associate the new root with the tick, start it
+// on the tracer directly with trace.WithLinks(trace.LinkFromContext(ctx)).
+//
+// Note that re-rooting also detaches cancellation: derive a fresh
+// context.WithTimeout (or check the tick's ctx.Err() between rows) so shutdown
+// still stops the loop.
 //
 // # Propagation
 //
