@@ -8,7 +8,8 @@
 // sentinels (ErrDBNotFound, ErrDBDuplicatedEntry, ErrUndefinedTable) so callers
 // match them with errors.Is instead of inspecting driver codes. WithinTran runs
 // a function inside a transaction, committing on success and rolling back on
-// error or panic. Bulk* batch large multi-row writes within Postgres's
+// error or panic, and transparently re-runs it when Postgres aborts it as a
+// deadlock victim. Bulk* batch large multi-row writes within Postgres's
 // parameter limit.
 //
 // # Usage
@@ -94,6 +95,15 @@
 // or an outer transaction, depend on the Beginner / CommitRollbacker seam:
 // NewBeginner adapts a *sqlx.DB, and ExtContext extracts the query surface from
 // a started transaction.
+//
+// When two transactions lock the same rows in different orders Postgres aborts
+// one of them with SQLSTATE 40P01 ("deadlock detected"); the victim is rolled
+// back in full. WithinTran treats that as transient: it re-runs the function in
+// a fresh transaction with a short exponential backoff (3 attempts) and only
+// then returns the error. The function must therefore be safe to run more than
+// once — keep side effects inside the transaction and do not mutate captured
+// state between runs. IsDeadlock exposes the same check for statements that
+// run outside WithinTran.
 //
 // # Schema provisioning
 //

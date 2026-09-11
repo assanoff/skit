@@ -18,8 +18,9 @@ import (
 
 // Postgres error codes we translate into sentinel errors.
 const (
-	uniqueViolation = "23505"
-	undefinedTable  = "42P01"
+	uniqueViolation  = "23505"
+	undefinedTable   = "42P01"
+	deadlockDetected = "40P01"
 )
 
 // Sentinel errors returned by this package; match them with errors.Is.
