@@ -1,6 +1,10 @@
 package router
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/go-pkgz/routegroup"
+)
 
 // Middleware is standard net/http middleware: it wraps an http.Handler. It is
 // the transport layer's currency; the application layer uses rest.MidFunc.
@@ -42,8 +46,7 @@ func (r *Router) With(mws ...Middleware) *Router {
 // prefer a sub-group via With over repeating mws per route.
 func (r *Router) Handle(pattern string, h http.Handler, mws ...Middleware) {
 	if len(mws) > 0 {
-		r.Bundle.With(mws[0], mws[1:]...).Handle(pattern, h)
-		return
+		h = routegroup.Wrap(h, mws[0], mws[1:]...)
 	}
 	r.Bundle.Handle(pattern, h)
 }

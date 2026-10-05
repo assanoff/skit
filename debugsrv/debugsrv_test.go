@@ -126,3 +126,17 @@ func TestHandlerOmitsUnsetStartupAndVersion(t *testing.T) {
 		}
 	}
 }
+
+// Pprof serves every pprof route on its own, e.g. mounted at /debug/pprof/ on an
+// application router.
+func TestPprofServesItsRoutes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.Handle("/debug/pprof/", Pprof())
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline", "/debug/pprof/heap"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", path, rec.Code)
+		}
+	}
+}

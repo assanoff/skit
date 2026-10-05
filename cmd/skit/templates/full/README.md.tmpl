@@ -8,20 +8,55 @@ A skit-based HTTP service scaffolded by `skit new --full`.
 go mod tidy
 docker compose up -d          # postgres (+ rabbitmq)
 go run . migrate up
-go run . serve                # GET /healthz, /readyz, /hello
+go run . serve                # :8080 GET /hello; localhost:6060 /healthz, /readyz, /metrics
 ```
 
 Configuration is 12-factor: every flag has an env var (see `.env.example`).
 Copy it to `.env` for local development.
 
+## Run modes
+
+The same binary runs as one process or as several, depending on the command:
+
+| Command | Runs | Replicas |
+|---|---|---|
+| `serve` | API + workers + consumers | 1 (local dev, single pod) |
+| `http` | API only | N |
+| `worker` | background loops + outbox workers | 1 |
+| `consumer` | queue consumers only | N |
+
+A command is a list of options (`internal/app/server/options.go`), e.g. `worker`:
+
+```go
+return run(c.ServerOpts,
+	server.WithServer(c.Debug.Addr, server.Debug),
+	server.WithWorkers(),
+)
+```
+
+`WithServer(addr, route sets…)` adds an HTTP server; an empty address adds none,
+so clearing `HTTP_ADDR` or `DEBUG_ADDR` turns that server off. `Install` is the
+business API with its request middleware chain; `Debug` is the technical sets —
+`Health` (`/healthz`, `/readyz`), `Metrics`, `Pprof`, `Info` (`/debug/components`).
+Every command serves `Debug` on `DEBUG_ADDR`, so the probes work in every process —
+point the Kubernetes probes there and the same manifest fits every pod. In a
+container set `DEBUG_ADDR=:6060`; the default `localhost:6060` is not reachable by
+the kubelet. To put a set on another port, edit the command's list.
+
+`GET /debug/components` reports what the process runs — the same values it logs
+at startup: `{"servers":[":8080","localhost:6060"],"workers":0,"consumers":0}`.
+
+A wall-clock cron in the worker process fires once per replica — keep the worker at
+one replica or gate the job with a `lock.Locker` (`skit add cron --lock`).
+
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `internal/cmd` | `serve` / `migrate` / `version` subcommands (go-flags) |
+| `internal/cmd` | `serve` / `http` / `worker` / `consumer` / `migrate` / `version` subcommands (go-flags) |
 | `internal/app/config` | configuration: one struct → flags + env + `--help` |
 | `internal/app/deps` | lazy dependency container + ordered initializers |
-| `internal/app/server` | router build, route install, supervised runnables |
+| `internal/app/server` | options the commands compose (servers, route sets, workers, consumers), business routes (`Install`) |
 | `internal/migrations` | embedded goose SQL migrations |
 | `core/<entity>` | domain business logic + Postgres store |
 | `api/<entity>` | REST transport (typed handlers) |

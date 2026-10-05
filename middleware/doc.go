@@ -19,25 +19,29 @@
 //
 // # Ordering
 //
-// Register them outermost-first. Panics goes first so it wraps everything;
-// TraceRequest next so downstream logs and spans share the request's trace
-// context; then AccessLog, then the limit/timeout guards:
+// Register them outermost-first. Panics goes first so it wraps everything; the
+// server span next — this package opens none, use otelhttp.NewMiddleware — then
+// TraceRequest, so downstream logs and spans share the request's trace context;
+// then AccessLog, then the limit/timeout guards:
 //
 //	r := router.New(appMids...)
 //	r.Use(
-//		middleware.Panics(log),            // recover -> 500, log stack
-//		middleware.TraceRequest(tracer),   // extract/seed W3C trace context
-//		middleware.AccessLog(log),         // one structured line per request
-//		middleware.SizeLimit(1<<20),       // cap request body at 1 MiB
-//		middleware.Timeout(5*time.Second), // cancel ctx after 5s
+//		middleware.Panics(log),                // recover -> 500, log stack
+//		otelhttp.NewMiddleware("http.server"), // server span per request
+//		middleware.TraceRequest(tracer),       // continue it, seed trace id, traceparent
+//		middleware.AccessLog(log),             // one structured line per request
+//		middleware.SizeLimit(1<<20),           // cap request body at 1 MiB
+//		middleware.Timeout(5*time.Second),     // cancel ctx after 5s
 //	)
 //
 // # Middleware
 //
 //   - Panics(log): recover from panics, log the stack, respond 500. A nil log
-//     skips logging.
-//   - TraceRequest(tracer): extract incoming W3C trace context and ensure a
-//     trace id is available for logging.
+//     skips logging. http.ErrAbortHandler is panicked again for net/http.
+//   - TraceRequest(tracer): continue the server span an earlier middleware
+//     opened (or, without one, the incoming W3C trace context), store tracer for
+//     otel.AddSpan, ensure a trace id is available for logging and return the
+//     server span's traceparent in the response. It opens and ends no span.
 //   - AccessLog(log): emit one structured line per request using OpenTelemetry
 //     HTTP semantic-convention field names. A nil log skips logging.
 //   - Timeout(d): cancel the request context after d; a non-positive d disables

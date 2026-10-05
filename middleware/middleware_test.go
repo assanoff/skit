@@ -77,6 +77,21 @@ func TestPanicsNilLogger(t *testing.T) {
 	is.Equal(rec.Code, http.StatusInternalServerError) // a nil logger still recovers
 }
 
+// http.ErrAbortHandler goes back to net/http, which aborts the response.
+func TestPanicsLeavesAbortToServer(t *testing.T) {
+	h := middleware.Panics(discardLogger())(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	}))
+
+	defer func() {
+		if p := recover(); p != http.ErrAbortHandler {
+			t.Errorf("recovered %v, want http.ErrAbortHandler panicked again", p)
+		}
+	}()
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	t.Error("http.ErrAbortHandler was swallowed")
+}
+
 func TestPanicsPassesThroughWhenNoPanic(t *testing.T) {
 	is := is.New(t)
 

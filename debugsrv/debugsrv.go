@@ -89,11 +89,7 @@ var Paths = []string{"/debug/pprof/", "/metrics", "/healthz", "/readyz", "/start
 func Handler(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	mux.Handle("/debug/pprof/", Pprof())
 
 	if cfg.MetricsHandler != nil {
 		mux.Handle("/metrics", cfg.MetricsHandler)
@@ -110,6 +106,21 @@ func Handler(cfg Config) http.Handler {
 	if cfg.Version != nil {
 		mux.Handle("/version", versionHandler(cfg.Version))
 	}
+	return mux
+}
+
+// Pprof serves net/http/pprof — the index and the named profiles, cmdline,
+// profile, symbol and trace — for requests under /debug/pprof/. Mount it there
+// on its own when the other debug endpoints live elsewhere:
+//
+//	r.Handle("/debug/pprof/", debugsrv.Pprof())
+func Pprof() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	return mux
 }
 

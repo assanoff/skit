@@ -219,6 +219,9 @@ func (s *Server) Install(svcs ...Service) {
 // Name identifies the server in the supervisor and logs.
 func (s *Server) Name() string { return "grpc-server" }
 
+// Addr returns the configured listen address.
+func (s *Server) Addr() string { return s.cfg.Addr }
+
 // Start binds a TCP listener on the configured address and serves until Stop.
 func (s *Server) Start(ctx context.Context) error {
 	lis, err := net.Listen("tcp", s.cfg.Addr)

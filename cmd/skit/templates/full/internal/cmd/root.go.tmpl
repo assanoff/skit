@@ -18,10 +18,16 @@ import (
 )
 
 // Opts declares the available subcommands.
+//
+// The four long-running commands differ only by the options they list (see
+// run): serve = everything in one process, the others split it across pods.
 type Opts struct {
-	Serve   ServeCommand   `command:"serve"   description:"run the HTTP server"`
-	Migrate MigrateCommand `command:"migrate" description:"apply database migrations (up|down|status)"`
-	Version VersionCommand `command:"version" description:"print the build version"`
+	Serve    ServeCommand    `command:"serve"    description:"run everything in one process: API + workers + consumers"`
+	HTTP     HTTPCommand     `command:"http"     description:"run the API only, scale to N replicas"`
+	Worker   WorkerCommand   `command:"worker"   description:"run the background workers only (single replica)"`
+	Consumer ConsumerCommand `command:"consumer" description:"run the queue consumers only"`
+	Migrate  MigrateCommand  `command:"migrate"  description:"apply database migrations (up|down|status)"`
+	Version  VersionCommand  `command:"version"  description:"print the build version"`
 }
 
 // Execute loads .env, parses flags/env, and runs the selected subcommand.

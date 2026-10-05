@@ -1,0 +1,215 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/matryer/is"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/assanoff/skit/httpserver"
+	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/rest/router"
+
+	"{{.Module}}/internal/app/config"
+)
+
+// setPaths is one path per route set, enough to tell whether a server serves it.
+var setPaths = []struct{ set, path string }{
+	{"health", "/healthz"},
+	{"metrics", "/metrics"},
+	{"pprof", "/debug/pprof/"},
+	{"info", "/debug/components"},
+	{"install", "/hello"},
+}
+
+// techPaths is one path per technical route set served on GET.
+var techPaths = []string{"/healthz", "/metrics", "/debug/components"}
+
+// WithServer adds exactly the server it describes: on the address it was given,
+// serving the route sets it was given — nothing is added or moved for it.
+func TestWithServer(t *testing.T) {
+	type srv struct {
+		addr string
+		sets []string
+	}
+	debug := []string{"health", "metrics", "pprof", "info"}
+
+	tests := []struct {
+		name    string
+		options []Option
+		want    []srv
+	}{
+		{
+			name:    "the API and the technical sets on their own ports",
+			options: []Option{WithServer(":8080", Install), WithServer(":6060", Debug)},
+			want: []srv{
+				{addr: ":8080", sets: []string{"install"}},
+				{addr: ":6060", sets: debug},
+			},
+		},
+		{
+			name:    "one port",
+			options: []Option{WithServer(":8080", Debug, Install)},
+			want: []srv{
+				{addr: ":8080", sets: slices.Concat(debug, []string{"install"})},
+			},
+		},
+		{
+			name: "a port per set",
+			options: []Option{
+				WithServer(":8080", Install),
+				WithServer(":9100", Metrics),
+				WithServer(":6060", Health, Pprof, Info),
+			},
+			want: []srv{
+				{addr: ":8080", sets: []string{"install"}},
+				{addr: ":9100", sets: []string{"metrics"}},
+				{addr: ":6060", sets: []string{"health", "pprof", "info"}},
+			},
+		},
+		{
+			name:    "an empty address adds no server",
+			options: []Option{WithServer("", Debug)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is := is.New(t)
+			a := newTestApp(t, io.Discard, tt.options...)
+
+			var got []srv
+			for _, s := range a.servers {
+				h := handlerOf(t, s)
+				l := srv{addr: s.Addr()}
+				for _, p := range setPaths {
+					if serves(h, p.path) {
+						l.sets = append(l.sets, p.set)
+					}
+				}
+				got = append(got, l)
+			}
+			is.Equal(got, tt.want)
+		})
+	}
+}
+
+// The request middleware chain is Install's, not the server's: on a shared port
+// the business routes reach the access log, the technical sets do not.
+func TestRequestChainWrapsInstallOnly(t *testing.T) {
+	is := is.New(t)
+	var logs bytes.Buffer
+	a := newTestApp(t, &logs, WithServer(":8080", Debug, Install))
+	h := handlerOf(t, a.servers[0])
+
+	for _, path := range techPaths {
+		get(h, path)
+		is.True(!strings.Contains(logs.String(), path)) // a technical set reached the access log
+	}
+
+	get(h, "/hello")
+	is.True(strings.Contains(logs.String(), "/hello")) // /hello is in the access log
+}
+
+// Install opens a server span per business request, named after the route, and
+// returns its traceparent; the technical sets next to it are not traced.
+func TestInstallTracesRequests(t *testing.T) {
+	is := is.New(t)
+	sr := tracetest.NewSpanRecorder()
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr)))
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	a := newTestApp(t, io.Discard, WithServer(":8080", Debug, Install))
+	h := handlerOf(t, a.servers[0])
+
+	for _, path := range techPaths {
+		get(h, path)
+	}
+	is.Equal(len(sr.Ended()), 0) // the technical sets are not traced
+
+	rec := get(h, "/hello")
+
+	spans := sr.Ended()
+	is.Equal(len(spans), 1)
+	span := spans[0]
+	is.Equal(span.Name(), "GET /hello")
+	is.Equal(span.SpanKind(), trace.SpanKindServer)
+	code := attribute.Int("http.response.status_code", http.StatusOK)
+	is.True(slices.Contains(span.Attributes(), code)) // the status code is recorded
+	sc := span.SpanContext()
+	want := "00-" + sc.TraceID().String() + "-" + sc.SpanID().String() + "-01"
+	is.Equal(rec.Header().Get("traceparent"), want)
+}
+
+// The server recovers a panic at its root, so a route set without a chain of
+// its own — any technical set — still answers 500.
+func TestServerRecoversPanics(t *testing.T) {
+	is := is.New(t)
+	boom := func(_ context.Context, _ *App, r *router.Router) {
+		r.HandleFunc("GET /boom", func(http.ResponseWriter, *http.Request) {
+			panic("boom")
+		})
+	}
+	a := newTestApp(t, io.Discard, WithServer(":6060", boom))
+
+	is.Equal(get(handlerOf(t, a.servers[0]), "/boom").Code, http.StatusInternalServerError)
+}
+
+// /debug/components lists where the process listens, one address per server,
+// whichever server serves it.
+func TestDebugComponents(t *testing.T) {
+	is := is.New(t)
+	a := newTestApp(t, io.Discard, WithServer(":8080", Install), WithServer(":6060", Info))
+
+	rec := get(handlerOf(t, a.servers[1]), "/debug/components")
+	is.Equal(rec.Code, http.StatusOK)
+
+	var got Components
+	is.NoErr(json.Unmarshal(rec.Body.Bytes(), &got))
+	is.Equal(got, Components{Servers: []string{":8080", ":6060"}})
+}
+
+// newTestApp builds the app from options without starting it. Every dependency
+// is lazy, so nothing connects to Postgres until a route asks for it.
+func newTestApp(t *testing.T, w io.Writer, options ...Option) *App {
+	t.Helper()
+
+	log := logger.New(w, logger.Config{Service: "test", Level: logger.LevelInfo})
+	a, err := New(context.Background(), config.ServerOpts{Service: "test"}, log, options...)
+	is.New(t).NoErr(err)
+	return a
+}
+
+// handlerOf is what the HTTP server s serves.
+func handlerOf(t *testing.T, s listener) http.Handler {
+	t.Helper()
+
+	hs, ok := s.(*httpserver.Server)
+	is.New(t).True(ok) // the server is an HTTP server
+	return hs.Handler()
+}
+
+// get serves a GET of path through h.
+func get(h http.Handler, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	return rec
+}
+
+// serves reports whether h has a route for a GET of path.
+func serves(h http.Handler, path string) bool {
+	return get(h, path).Code != http.StatusNotFound
+}

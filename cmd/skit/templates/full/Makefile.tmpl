@@ -1,13 +1,22 @@
 SHELL := /bin/bash
 GO ?= go
 
-.PHONY: help run build test tidy lint generate proto migrate-up migrate-down migrate-status compose-up compose-down
+.PHONY: help run run-http run-worker run-consumer build test tidy lint generate proto migrate-up migrate-down migrate-status compose-up compose-down
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}'
 
-run: ## Run the HTTP server (serve). Ctrl+C shuts down gracefully (not a make error).
+run: ## Run everything in one process (serve). Ctrl+C shuts down gracefully (not a make error).
 	@trap 'exit 0' INT; $(GO) run . serve
+
+run-http: ## Run the transports only
+	@trap 'exit 0' INT; $(GO) run . http
+
+run-worker: ## Run the background workers only, debug port shifted
+	@trap 'exit 0' INT; DEBUG_ADDR=localhost:6061 $(GO) run . worker
+
+run-consumer: ## Run the queue consumers only, debug port shifted
+	@trap 'exit 0' INT; DEBUG_ADDR=localhost:6062 $(GO) run . consumer
 
 build: ## Build the binary into bin/
 	$(GO) build -o bin/{{.Name}} .

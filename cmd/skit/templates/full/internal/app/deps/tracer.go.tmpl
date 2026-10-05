@@ -13,7 +13,8 @@ import (
 
 // initTracer initializes the application tracer. When tracing is disabled it
 // assigns a no-op tracer (no cleanup); otherwise it uses the SDK's Tracer
-// provider to bootstrap OTLP export, excluding the health probes from sampling.
+// provider to bootstrap OTLP export. The probes need no sampling exclusion: the
+// technical route sets open no spans.
 var initTracer = func(c *Deps) (cleanup dim.CleanupFunc, err error) {
 	if !c.Opts.OTEL.Enabled {
 		svc := c.Opts.Service
@@ -28,10 +29,6 @@ var initTracer = func(c *Deps) (cleanup dim.CleanupFunc, err error) {
 		Endpoint:    c.Opts.OTEL.Endpoint,
 		Insecure:    c.Opts.OTEL.Insecure,
 		Probability: c.Opts.OTEL.Probability,
-		ExcludedRoutes: map[string]struct{}{
-			"GET /healthz": {},
-			"GET /readyz":  {},
-		},
 	}))
 	return cleanup, nil
 }

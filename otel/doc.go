@@ -39,7 +39,11 @@
 //	defer span.End()
 //
 // AddSpan returns a no-op span when no tracer is in ctx, so callers never need a
-// nil check.
+// nil check — and ending it never ends the span already in ctx.
+//
+// The server span of a request is opened by otelhttp (middleware.TraceRequest
+// continues it); InjectToResponse returns its traceparent so a client can find
+// the trace by the response.
 //
 // # Suppressing background traces
 //

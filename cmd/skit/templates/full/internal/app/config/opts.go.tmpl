@@ -41,8 +41,9 @@ func (o ServerOpts) Validate() error {
 	return nil
 }
 
-// HTTP holds REST server settings. The server starts iff Addr is non-empty, so
-// an empty ADDR (HTTP_ADDR=) turns the transport off without a separate flag.
+// HTTP holds the API server settings; the timeouts apply to every WithServer
+// server. The API server starts iff Addr is non-empty, so an empty ADDR
+// (HTTP_ADDR=) turns it off without a separate flag.
 type HTTP struct {
 	Addr              string        `long:"addr"                env:"ADDR"                default:":8080"   description:"REST listen address (empty disables the REST server)"`
 	ReadHeaderTimeout time.Duration `long:"read-header-timeout" env:"READ_HEADER_TIMEOUT" default:"5s"      description:"read header timeout"`
@@ -63,10 +64,11 @@ type GRPC struct {
 	Docs       bool   `long:"docs"       env:"DOCS"       description:"serve the OpenAPI (swagger) UI at /docs"`
 }
 
-// Debug serves the status endpoints (pprof + metrics + health) on their own
-// internal port. Starts iff Addr is non-empty.
+// Debug is where the commands serve the technical routes (server.Debug: health,
+// metrics, pprof, /debug/components) — an internal port of their own. The
+// server starts iff Addr is non-empty.
 type Debug struct {
-	Addr string `long:"addr" env:"ADDR" default:"localhost:6060" description:"status listen address — pprof, metrics, health (empty disables it)"`
+	Addr string `long:"addr" env:"ADDR" default:"localhost:6060" description:"technical routes listen address — health, metrics, pprof, components (empty disables it)"`
 }
 
 // DB holds Postgres connection settings.

@@ -48,10 +48,20 @@ func TestAddSpanAtNests(t *testing.T) {
 	is.Equal(len(sr.Ended()), 2)
 }
 
-// With no tracer in the context AddSpanAt is a no-op returning an invalid span.
+// With no tracer in ctx AddSpanAt is a no-op returning an invalid span, never
+// the span already in ctx: ending it leaves that span open.
 func TestAddSpanAtNoTracerNoOp(t *testing.T) {
 	is := is.New(t)
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	ctx, parent := tp.Tracer("test").Start(context.Background(), "parent")
+
 	base := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
-	_, span := AddSpanAt(context.Background(), "x", base, base.Add(time.Second))
+	_, span := AddSpanAt(ctx, "x", base, base.Add(time.Second))
+	span.End()
+
 	is.True(!span.SpanContext().IsValid())
+	is.True(parent.IsRecording())
+	is.Equal(len(sr.Ended()), 0)
 }

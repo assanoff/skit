@@ -38,6 +38,10 @@
 //		appRouter.Handle(p, dh)
 //	}
 //
+// To place the endpoints one by one — pprof on one port, health and metrics on
+// another — mount Pprof at /debug/pprof/ and the metrics/health handlers at
+// their paths directly.
+//
 // *Server also implements http.Handler (ServeHTTP delegates to the same routes),
 // so the same instance can run standalone via Start or be reused as a handler.
 //

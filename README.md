@@ -24,7 +24,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `config` | 12-factor config via go-flags: one struct → CLI flags + env vars + `--help`, dotenv for local, subcommand dispatch |
 | `rest` (+ `router`/`mid`) | Typed HTTP handlers over stdlib `ServeMux` + `routegroup`; routing (`router`) and typed application middleware (`rest/mid`: error localize/mask, panics, observability, cache, ETag) |
 | `middleware` | net/http **server** middleware (`func(http.Handler) http.Handler`): panic recovery, trace-context, access log, timeout, body-size limit (cf. `httpmw` for the **client** side) |
-| `httpserver` | `http.Handler`-on-a-listener as a `worker.Runnable`; the shared server core for REST, the gRPC-gateway and `debugsrv` |
+| `httpserver` | `http.Handler`-on-a-listener as a `worker.Runnable`; the shared server core for REST, the gRPC-gateway and `debugsrv`; idle/header timeouts, `net/http` errors to your logger, stuck connections closed on shutdown |
 | `order`, `page`, `query` | Listing primitives shared by the domain and both transports: allowlisted sort (`order`), validated offset/cursor paging input (`page`), paginated result envelope (`query`) |
 | `grpcserver` | gRPC server as a `worker.Runnable`: recovery/trace/logging/metrics interceptors, `errs`→status mapping, health, reflection, transport tuning knobs |
 | `worker` | Unified worker abstraction: `Runnable`, `Group`, `Loop` (fixed) / `NewPacedLoop` (adaptive: drain-when-busy, idle-backoff), `Pool`, `Processor[T]`, `Backoff` |
@@ -37,7 +37,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `auth` | `Principal` in context, credential extraction, pluggable `Verifier`, built-in JWT (HMAC/RSA/EC + JWKS via Keyfunc), `Authenticate`/`Optional`/`RequireRole` middleware |
 | `metrics` | Prometheus registry + HTTP middleware; extensible model — one shared registry, each package owns its collectors, `Register` (register-or-get) makes it conflict-free so SDK and app metrics coexist |
 | `health` | Liveness/readiness handlers for Kubernetes probes |
-| `debugsrv` | `net/http/pprof` + optional metrics/health as one `http.Handler` (`Handler`); run it standalone on a separate port (`New`, a `worker.Runnable` that is also an `http.Handler`) or attach it to the app router at `Paths` |
+| `debugsrv` | `net/http/pprof` + optional metrics/health as one `http.Handler` (`Handler`); run it standalone on a separate port (`New`, a `worker.Runnable` that is also an `http.Handler`), attach it to the app router at `Paths`, or mount pprof alone (`Pprof`) |
 | `migrate` | goose wrapper applying SQL migrations from an `fs.FS` via the Provider API (no goose global state) |
 | `httpmw` | Outbound HTTP-client middleware: `RetryTransport` retries 429/503 with `worker.Backoff` + RFC 7231 `Retry-After` |
 | `dbtest` | testcontainers Postgres for integration tests: start, migrate, connect, auto-teardown |
@@ -217,6 +217,81 @@ span is a child of the producer span).
 The showcase wires this end-to-end: `POST /widgets/import` enqueues a batch, and a
 supervised import worker bulk-inserts it (idempotently, via `dbx.BulkInsert` +
 `ON CONFLICT DO NOTHING`). See `skit-x/core/widgetimport`.
+
+## Splitting one binary across pods
+
+A service usually starts as one process doing everything. When the HTTP side has
+to scale, the background loops must not scale with it — N replicas would poll the
+same rows N times and any wall-clock cron would fire N times.
+
+The SDK deliberately ships **no role/profile type** for this: it already gives
+you two orthogonal gates, and the third question is answered by the command.
+
+| Question | Answered by |
+|---|---|
+| Is this transport configured at all? | addr-gating — `HTTP_ADDR`, `GRPC_ADDR`, `DEBUG_ADDR` |
+| Is this subsystem switched on? | its own flag — `Worker.Disabled`, `Broker.Enabled` |
+| Does *this process* run that part, and where? | the command, which lists its options |
+
+The scaffold (`skit new --full`) generates exactly that. A process is assembled
+like Lego from options (`internal/app/server/options.go`): `server.New` builds the
+dependency container and applies the options the command lists, `app.Run`
+supervises what they added. Each long-running command is that list:
+
+```go
+// internal/cmd/worker.go
+func (c *WorkerCommand) Execute(_ []string) error {
+	return run(c.ServerOpts,
+		server.WithServer(c.Debug.Addr, server.Debug),
+		server.WithWorkers(),
+	)
+}
+```
+
+| Command | Options |
+|---|---|
+| `serve` | `WithServer(HTTP_ADDR, Install)`, `WithServer(DEBUG_ADDR, Debug)`, `WithWorkers()`, `WithConsumers()` |
+| `http` | `WithServer(HTTP_ADDR, Install)`, `WithServer(DEBUG_ADDR, Debug)` |
+| `worker` | `WithServer(DEBUG_ADDR, Debug)`, `WithWorkers()` |
+| `consumer` | `WithServer(DEBUG_ADDR, Debug)`, `WithConsumers()` |
+
+There is one kind of server: `WithServer(addr, route sets…)` — an `httpserver.Server`
+serving the route sets it is given. A "debug server" is not a type but a server with
+the technical sets: `Health` (`/healthz`, `/readyz`), `Metrics`, `Pprof`, `Info`
+(`/debug/components`), or `Debug` for all of them. `Install` is the business API and
+brings its own request middleware chain (trace, access log, HTTP metrics, timeout,
+body limit), so a set behaves the same on any server — probes and scrapes never reach
+the access log or the request timeout. Moving a set to another port is an edit of the
+command, not a config switch:
+
+```go
+run(c.ServerOpts,
+	server.WithServer(c.HTTP.Addr, server.Install),
+	server.WithServer(":9100", server.Metrics),
+	server.WithServer(c.Debug.Addr, server.Health, server.Pprof, server.Info),
+)
+```
+
+No role type, no conditions inside the server package — what a process runs and
+where it listens is read off the command. Splitting a deployment is then a
+values-only change: the same image with a different command.
+
+Every command keeps a server with `Health`: `/healthz` and `/readyz` are what keep a
+worker-only pod probeable and alive until SIGTERM, so one probe configuration fits
+every pod. `GET /debug/components` reports what the pod runs — the same values it
+logs at startup:
+
+```
+{"servers":[":8080",":6060"],"workers":0,"consumers":0}   ← http
+{"servers":[":6060"],"workers":3,"consumers":0}           ← worker
+```
+
+For a cron that must fire once across the fleet, gate it with `lock.Locker`
+(`skit add cron --lock postgres`).
+
+Why it is built this way, what a live split deployment showed (migration races,
+requests lost on rollout, the release layout) and what is still open — see
+[research-pod-split.md](research-pod-split.md).
 
 ## gRPC
 

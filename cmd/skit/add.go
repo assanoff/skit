@@ -465,16 +465,20 @@ the transport lives in %[1]s_rmq.go. Next:
 
 2. Add a config group to ServerOpts (internal/app/config/opts.go):
 
-   %[2]sConsumer config.ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
+   %[2]sConsumer ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
 
-3. Wire it into brokerWorkers (internal/app/server/server.go) — the generated
-   Runnable builds the RabbitMQ consumer from config:
+3. Wire it into initConsumers (internal/app/server/server.go), behind the
+   Broker.Enabled switch (it gates RabbitMQ) — the generated Runnable builds the
+   RabbitMQ consumer from config. The consumer command and serve run it
+   (server.WithConsumers):
 
-   cons, err := %[1]s.New(d.Logger).Runnable(d.BrokerConn(ctx), d.Opts.%[2]sConsumer)
-   if err != nil {
-       return nil, err   // brokerWorkers returns []worker.Runnable today — thread an error, or log.Fatal on init
+   if a.d.Opts.Broker.Enabled {
+       cons, err := %[1]s.New(a.d.Logger).Runnable(a.d.BrokerConn(ctx), a.d.Opts.%[2]sConsumer)
+       if err != nil {
+           return err
+       }
+       a.consumers = append(a.consumers, cons)
    }
-   runnables = append(runnables, cons)
    // import: %[1]s "%[4]s/internal/app/consumers/%[1]s"
 
 4. go test ./internal/app/consumers/%[1]s/...
@@ -491,17 +495,17 @@ the transport lives in %[1]s_kafka.go. Next:
 
 2. Add a config group to ServerOpts (internal/app/config/opts.go):
 
-   %[2]sConsumer config.ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
+   %[2]sConsumer ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
 
-3. Wire it into the worker group (internal/app/server/server.go). The generated
+3. Wire it into initConsumers (internal/app/server/server.go). The generated
    Runnable builds the Kafka consumer from config — supply the brokers (from your
    own config/env):
 
-   cons, err := %[1]s.New(d.Logger).Runnable(kafka.Config{Brokers: d.Opts.Kafka.Brokers}, d.Opts.%[2]sConsumer)
+   cons, err := %[1]s.New(a.d.Logger).Runnable(kafka.Config{Brokers: a.d.Opts.Kafka.Brokers}, a.d.Opts.%[2]sConsumer)
    if err != nil {
-       return nil, err
+       return err
    }
-   runnables = append(runnables, cons)
+   a.consumers = append(a.consumers, cons)
    // imports: %[1]s "%[4]s/internal/app/consumers/%[1]s", "github.com/assanoff/skit/broker/kafka"
 
 4. go test ./internal/app/consumers/%[1]s/...
@@ -520,7 +524,7 @@ broker.Subscription from config and bind it to %[1]s.New(d.Logger).Handle).
 
 2. Add a config group to ServerOpts (internal/app/config/opts.go):
 
-   %[2]sConsumer config.ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
+   %[2]sConsumer ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
 
 3. go test ./internal/app/consumers/%[1]s/...
 `, d.Pkg, d.Type, d.UpperSnake, d.Module, transport)
@@ -621,14 +625,16 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
    q := queue.NewPG(d.Logger, d.DB(ctx), queue.Options{})
    _ = q.EnsureSchema(ctx)
 
-3. Wire the processor into the worker group (internal/app/server/server.go), in
-   the "if !opts.Worker.Disabled" block:
+3. Wire the processor into initWorkers (internal/app/server/server.go), behind
+   the Worker.Disabled kill switch:
 
-   mux := queue.NewMux()
-   _ = mux.Register(%[1]s.Kind, %[1]s.New(d.Logger).Handle)
-   proc := worker.NewProcessor[queue.Task](d.Logger.Slog(), q, mux, q, worker.ProcessorConfig{})
-   extra = append(extra, worker.NewPacedLoop(d.Logger.Slog(),
-       worker.LoopConfig{Name: %[1]q + "-worker", Interval: time.Second}, proc.PacedTick()))
+   if !a.d.Opts.Worker.Disabled {
+       mux := queue.NewMux()
+       _ = mux.Register(%[1]s.Kind, %[1]s.New(a.d.Logger).Handle)
+       proc := worker.NewProcessor[queue.Task](a.d.Logger.Slog(), q, mux, q, worker.ProcessorConfig{})
+       a.workers = append(a.workers, worker.NewPacedLoop(a.d.Logger.Slog(),
+           worker.LoopConfig{Name: %[1]q + "-worker", Interval: time.Second}, proc.PacedTick()))
+   }
    // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue", "github.com/assanoff/skit/worker"
 
 4. Enqueue work: q.Schedule(ctx, queue.ScheduleParams{Kind: %[1]s.Kind, Payload: ...})
@@ -643,10 +649,12 @@ Scaffolded the %[1]q periodic worker. Next:
 
 1. go mod tidy   # test dep (matryer/is)
 
-2. Wire it into the worker group (internal/app/server/server.go), in the
-   "if !opts.Worker.Disabled" block:
+2. Wire it into initWorkers (internal/app/server/server.go), behind the
+   Worker.Disabled kill switch:
 
-   extra = append(extra, %[1]s.New(d.Logger).Loop(d.Opts.Worker.Interval))
+   if !a.d.Opts.Worker.Disabled {
+       a.workers = append(a.workers, %[1]s.New(a.d.Logger).Loop(a.d.Opts.Worker.Interval))
+   }
    // import: %[1]s "%[2]s/internal/app/workers/%[1]s"
 
 3. go test ./internal/app/workers/%[1]s/...
@@ -747,37 +755,37 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 	switch d.Backend {
 	case "postgres":
 		fmt.Fprintf(out, `
-2. Wire it into the worker group (internal/app/server/server.go), building a
+2. Wire it into initWorkers (internal/app/server/server.go), building a
    Postgres advisory-lock Locker:
 
-   locker := lock.NewPG(d.DB(ctx), d.Logger.Slog())
-   sched, err := %[1]s.New(d.Logger, locker).Scheduler()
+   locker := lock.NewPG(a.d.DB(ctx), a.d.Logger.Slog())
+   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler()
    if err != nil { return err }
-   extra = append(extra, sched)
+   a.workers = append(a.workers, sched)
    // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
 
 3. go test ./internal/app/crons/%[1]s/...
 `, d.Pkg, d.Module)
 	case "redis":
 		fmt.Fprintf(out, `
-2. Enable Redis (REDIS_ENABLED=true) and wire it into the worker group
+2. Enable Redis (REDIS_ENABLED=true) and wire it into initWorkers
    (internal/app/server/server.go), building a Redis Locker:
 
-   locker := lock.NewRedis(d.Redis(ctx), d.Logger.Slog())
-   sched, err := %[1]s.New(d.Logger, locker).Scheduler()
+   locker := lock.NewRedis(a.d.Redis(ctx), a.d.Logger.Slog())
+   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler()
    if err != nil { return err }
-   extra = append(extra, sched)
+   a.workers = append(a.workers, sched)
    // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
 
 3. go test ./internal/app/crons/%[1]s/...
 `, d.Pkg, d.Module)
 	default:
 		fmt.Fprintf(out, `
-2. Wire it into the worker group (internal/app/server/server.go):
+2. Wire it into initWorkers (internal/app/server/server.go):
 
-   sched, err := %[1]s.New(d.Logger).Scheduler()
+   sched, err := %[1]s.New(a.d.Logger).Scheduler()
    if err != nil { return err }
-   extra = append(extra, sched)
+   a.workers = append(a.workers, sched)
    // import: %[1]s "%[2]s/internal/app/crons/%[1]s"
 
    Note: without a lock this fires on EVERY replica. Use --lock postgres|redis
@@ -893,11 +901,12 @@ Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic)
    if err := %[1]s.Register(reg); err != nil { return nil, err }
    // import: %[1]s "%[2]s/internal/app/events/%[1]s"
 
-3. Wire the outbox at startup (deps/server), passing your broker publisher:
+3. Wire the outbox relay into initWorkers (internal/app/server/server.go),
+   passing your broker publisher:
 
-   store, err := events.NewStore(ctx, d.Logger, d.DB(ctx))
+   store, err := events.NewStore(ctx, a.d.Logger, a.d.DB(ctx))
    reg, err  := events.NewRegistry()
-   extra = append(extra, events.NewRelay(d.Logger, store, pub)) // pub = rabbitmq/kafka NewPublisher
+   a.workers = append(a.workers, events.NewRelay(a.d.Logger, store, pub)) // pub = rabbitmq/kafka NewPublisher
    // import: "%[2]s/internal/app/events"
 
 4. Publish transactionally from your core (atomic with the domain write):
@@ -913,11 +922,12 @@ Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic)
 	}
 
 	fmt.Fprintf(out, `
-2. Build the outbox once at startup (or generate it with --with-relay):
+2. Build the outbox once at startup (or generate it with --with-relay) and run
+   its relay with the workers — in initWorkers (internal/app/server/server.go):
 
-   store := outbox.NewPG(d.Logger, d.DB(ctx), outbox.Options{}); _ = store.EnsureSchema(ctx)
+   store := outbox.NewPG(a.d.Logger, a.d.DB(ctx), outbox.Options{}); _ = store.EnsureSchema(ctx)
    reg := outbox.NewRegistry(); _ = %[1]s.Register(reg)
-   extra = append(extra, outbox.NewRelay(d.Logger, store, pub, outbox.RelayConfig{})) // pub = broker publisher
+   a.workers = append(a.workers, outbox.NewRelay(a.d.Logger, store, pub, outbox.RelayConfig{})) // pub = broker publisher
 
 3. Publish transactionally from your core (atomic with the domain write):
 
@@ -1051,13 +1061,11 @@ Scaffolded the %[1]q gRPC stack (service + gateway + swagger + protovalidate). T
    - gatewayRegistrars: %[1]sv1.Register%[2]sServiceHandler,
      import %[1]sv1 "%[3]s/gen/%[1]s/v1"
 
-3. Wire the bootstrap into the app (once):
-   - internal/app/server/server.go, in New (near the HTTP transport):
-       if opts.GRPC.Addr != "" {
-           runnables = append(runnables, buildGRPCServer(ctx, d, m, log))
-       }
-   - internal/app/server/routes.go, at the end of Install:
-       mountGRPCGateway(ctx, r, d)
+3. Wire the bootstrap into the app (once) — internal/cmd/serve.go and http.go,
+   in the options list: the gRPC server, and the gateway route set next to
+   Install on the API server, both on the same address:
+       server.WithServer(c.HTTP.Addr, server.Install, server.GRPCGateway(c.GRPC.Addr)),
+       server.WithGRPC(c.GRPC.Addr),
 
 4. go mod tidy && go build ./...
 
@@ -1309,7 +1317,7 @@ Scaffolded the %[1]q module. Next:
 
    c) internal/app/server (Install) — register the routes on the handle seam:
 
-      d.%[2]sHandler(ctx).Routes(handle)
+      a.d.%[2]sHandler(ctx).Routes(handle)
 `, d.Pkg, d.Type, d.Module)
 	} else {
 		// [1]=Pkg [2]=Module

@@ -1,76 +1,69 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"net/http"
 
-	"github.com/assanoff/skit/health"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/assanoff/skit/httplog"
-	"github.com/assanoff/skit/metrics"
 	"github.com/assanoff/skit/middleware"
 	"github.com/assanoff/skit/rest"
-	"github.com/assanoff/skit/rest/mid"
 	"github.com/assanoff/skit/rest/router"
-
-	"{{.Module}}/internal/app/deps"
 )
 
-// buildRouter constructs the HTTP handler: it builds the router shell (the typed
-// handler middleware) and hands it to Install, which describes every route in
-// one place. Global middleware (trace + access log) wraps every route; the
-// request-scoped middleware (metrics, timeout, body limit) is applied only to
-// business routes via a sub-group inside Install.
-func buildRouter(ctx context.Context, d *deps.Deps, m *metrics.Metrics) http.Handler {
-	log := d.Logger
-	tracer := d.Tracer(ctx)
+// Install is the business API route set — the single place that describes the
+// application's routes. They sit behind the request chain (see requestChain).
+// Only processes whose server lists Install resolve the handlers — and the
+// cores behind them — from the container.
+//
+// Feature handlers register via their Routes(handle) method using the handle
+// seam, so they never depend on the router type.
+func Install(ctx context.Context, a *App, r *router.Router) {
+	handle := requestChain(ctx, a, r).HandleApp
 
-	// App middleware applied to every typed handler (mid.Chain, in order):
-	// LocalizeErrors -> MaskInternal (hides 5xx detail in production) -> Errors
-	// (records 5xx on the span + logs) -> Panics (turns a panic into a clean
-	// Internal error). Localization is off until you wire i18n (Translator/Lang).
-	appMids := mid.Chain(mid.Config{
-		Logger:       log,
-		MaskInternal: d.Opts.Env == "production",
-	})
-	r := router.New(appMids...)
+	// Sample route — replace with your domain handlers, e.g.:
+	//   a.d.WalletHandler(ctx).Routes(handle)
+	handle("GET /hello", hello)
+}
 
-	// Global middleware — safe for every route. Access logging (httplog) also
-	// recovers panics; TraceRequest runs first so trace_id is present.
-	r.Use(
-		middleware.TraceRequest(tracer),
-		httplog.Middleware(log.Named("access"), &httplog.Options{
+// requestChain returns the group of r that business requests go through:
+// server span, trace context, access log, HTTP metrics, per-request timeout,
+// body-size limit. It wraps the business routes only, so the technical sets
+// mounted next to them stay out of the access log, the HTTP metrics and the
+// traces, and a long pprof profile is not cut off by the request timeout.
+func requestChain(ctx context.Context, a *App, r *router.Router) *router.Router {
+	d := a.d
+	return r.With(
+		// otelhttp opens the server span of every business request, named after
+		// the route ("GET /hello"), and records its status. The span is
+		// otelhttp's: nothing below it ends the span.
+		otelhttp.NewMiddleware("http.server", otelhttp.WithSpanNameFormatter(spanName)),
+		// TraceRequest continues that span — it does not re-extract the headers
+		// over it — stores the tracer for otel.AddSpan, puts the trace_id the
+		// access log carries into the context and returns the span's
+		// traceparent with the response.
+		middleware.TraceRequest(d.Tracer(ctx)),
+		// RecoverPanics turns a panic below the logger into a 500 with the
+		// panic as its error, so the access log and the server span record it;
+		// the root recoverer (see handler) only sees what escapes this chain.
+		httplog.Middleware(d.Logger.Named("access"), &httplog.Options{
 			Level:         slog.LevelInfo,
 			Schema:        httplog.SchemaOTEL.Concise(true),
 			RecoverPanics: true,
 		}),
-	)
-
-	Install(ctx, r, d, m)
-	return r
-}
-
-// Install describes every HTTP route on r. It is the single place that composes
-// the application's transport: technical probes plus the request-scoped business
-// sub-group. Feature handlers register via their Routes(handle) method using the
-// handle seam, so they never depend on the router type.
-func Install(ctx context.Context, r *router.Router, d *deps.Deps, m *metrics.Metrics) {
-	r.HandleFunc("GET /healthz", health.Liveness())
-	r.Handle("GET /readyz", readiness(d))
-
-	// Business endpoints carry the request-scoped middleware (HTTP metrics, per
-	// request timeout, body-size limit). handle is the seam handed to features.
-	api := r.With(
-		m.Middleware(),
+		a.m.Middleware(),
 		middleware.Timeout(d.Opts.HTTP.RequestTimeout),
 		middleware.SizeLimit(d.Opts.HTTP.BodySizeLimit),
 	)
-	handle := api.HandleApp
+}
 
-	// Sample route — replace with your domain handlers, e.g.:
-	//   d.WalletHandler(ctx).Routes(handle)
-	handle("GET /hello", hello)
-	_ = ctx
+// spanName names the server span after the matched route, so traces group by
+// endpoint rather than by a raw path with ids in it.
+func spanName(operation string, r *http.Request) string {
+	return cmp.Or(r.Pattern, operation)
 }
 
 func hello(_ context.Context, _ *http.Request) rest.ResponseEncoder {

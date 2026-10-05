@@ -1,20 +1,19 @@
-// Package server assembles the application: it builds the Deps container, runs
-// app.InitDeps (which registers resource cleanups with the global closer), then
-// composes the enabled HTTP transports plus background workers into one flat
-// []worker.Runnable supervised via app.Run. Each brick starts iff its Addr is
-// set, so they run independently. Resource shutdown is owned by the global
-// closer; the serve command runs closer.CloseSync (via app.Run) after Run returns.
+// Package server assembles the application from the options a command lists.
+// New builds the Deps container — app.InitDeps registers resource cleanups with
+// the global closer — and then applies the options (see options.go): servers
+// with their route sets, background workers, queue consumers. app.Run then
+// supervises what they added and runs closer.CloseSync after it returns.
 package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/assanoff/skit/app"
-	"github.com/assanoff/skit/debugsrv"
+	"github.com/assanoff/skit/closer"
 	"github.com/assanoff/skit/health"
-	"github.com/assanoff/skit/httpserver"
 	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/metrics"
 	"github.com/assanoff/skit/outbox"
@@ -24,70 +23,138 @@ import (
 	"{{.Module}}/internal/app/deps"
 )
 
-// App is the assembled application: the flat set of supervised runnables —
-// servers and background workers, all worker.Runnables.
+// App is the assembled application: what the process runs, by kind. Every part
+// is a worker.Runnable; Runnables hands them all to app.Run.
 type App struct {
-	runnables []worker.Runnable
+	d *deps.Deps
+	m *metrics.Metrics
+
+	servers   []listener
+	workers   []worker.Runnable
+	consumers []worker.Runnable
 }
 
-// New builds the application: initializes dependencies (cleanups go to the
-// global closer) and registers the enabled transports + workers as runnables.
-func New(ctx context.Context, opts config.ServerOpts, log *logger.Logger) (*App, error) {
+// listener is a server the process runs: an httpserver.Server added by
+// WithServer, or the gRPC server. Addr is what Components reports.
+type listener interface {
+	worker.Runnable
+	Addr() string
+}
+
+// New builds the application a command asked for: the dependency container,
+// then the options it lists (see options.go), in that order. Without options
+// it builds the container only. Nothing starts here — app.Run does that.
+func New(ctx context.Context, opts config.ServerOpts, log *logger.Logger, options ...Option) (*App, error) {
 	d, err := initDeps(opts, log)
 	if err != nil {
 		return nil, err
 	}
-	m := metrics.New("{{.Snake}}")
+	// Start tracing before any part is added: it sets the global provider and
+	// propagator, which every part — not only the traced routes — relies on.
+	d.Tracer(ctx)
 
-	// Background workers + (optionally) the transactional-outbox pipeline. They
-	// are supervised alongside the servers, appended after the transports.
-	var extra []worker.Runnable
-	if !opts.Worker.Disabled {
-		// Wire domain background workers here, e.g.:
-		//   extra = append(extra, d.SomeLoop(ctx))
+	a := &App{d: d, m: metrics.New("{{.Snake}}")}
+	for _, add := range options {
+		if err := add(ctx, a); err != nil {
+			// app.Run never runs, so release what the options already built.
+			return nil, errors.Join(err, closer.CloseSync())
+		}
 	}
-	if opts.Broker.Enabled {
-		extra = append(extra, brokerWorkers(ctx, d, m)...)
-	}
-
-	// Each transport is appended only when its Addr is set — clearing an *_ADDR
-	// turns it off without a separate kill-switch flag.
-	var runnables []worker.Runnable
-	if opts.HTTP.Addr != "" {
-		runnables = append(runnables, httpserver.New(httpserver.Config{
-			Name:              "rest-server",
-			Addr:              opts.HTTP.Addr,
-			ReadHeaderTimeout: opts.HTTP.ReadHeaderTimeout,
-			ShutdownTimeout:   opts.HTTP.ShutdownTimeout,
-			Logger:            log.Slog(),
-		}, buildRouter(ctx, d, m)))
-	}
-	if opts.Debug.Addr != "" {
-		runnables = append(runnables, debugsrv.New(debugsrv.Config{
-			Addr:           opts.Debug.Addr,
-			Logger:         log.Slog(),
-			MetricsHandler: m.Handler(),
-			Liveness:       health.Liveness(),
-			Readiness:      readiness(d),
-		}))
-	}
-	runnables = append(runnables, extra...)
-
-	return &App{runnables: runnables}, nil
+	return a, nil
 }
 
-// Runnables returns the supervised transports and workers, ready to hand to
+// Runnables returns the servers, workers and consumers, ready to hand to
 // app.Run (which owns the signal context, worker.Group and closer lifecycle).
-func (a *App) Runnables() []worker.Runnable { return a.runnables }
+func (a *App) Runnables() []worker.Runnable {
+	rs := make([]worker.Runnable, 0, len(a.servers)+len(a.workers)+len(a.consumers))
+	for _, s := range a.servers {
+		rs = append(rs, s)
+	}
+	rs = append(rs, a.workers...)
+	return append(rs, a.consumers...)
+}
 
-// Handler builds the REST handler (middleware + technical and business routes).
+// Components is what the process runs, as its command composed it: where it
+// listens and how many workers and consumers it has. The command logs it at
+// startup and GET /debug/components serves it, so a pod tells what it does.
+type Components struct {
+	Servers   []string `json:"servers"`
+	Workers   int      `json:"workers"`
+	Consumers int      `json:"consumers"`
+}
+
+// Components reports what Runnables returns — kill switches included.
+func (a *App) Components() Components {
+	addrs := make([]string, 0, len(a.servers))
+	for _, s := range a.servers {
+		addrs = append(addrs, s.Addr())
+	}
+	return Components{Servers: addrs, Workers: len(a.workers), Consumers: len(a.consumers)}
+}
+
+// initWorkers registers the background work: the domain loops and — when the
+// broker is enabled — the transactional-outbox workers. Each part sits behind
+// its own switch, so a worker added here starts whatever the broker setting.
+//
+// Run it as a single replica: these loops poll the same rows, so extra replicas
+// only add database load, and a wall-clock cron would fire once per replica
+// (gate it with lock.Locker — see `skit add cron --lock`).
+//
+// Worker.Disabled and Broker.Enabled are configuration, not composition: the
+// command decides whether WithWorkers is in its list at all, the switches decide
+// which of its workers start.
+func initWorkers(ctx context.Context, a *App) error {
+	// Wire domain background workers here, behind their kill switch, e.g.:
+	//   if !a.d.Opts.Worker.Disabled {
+	//   	a.workers = append(a.workers, a.d.SomeLoop(ctx))
+	//   }
+	if a.d.Opts.Broker.Enabled {
+		addOutboxWorkers(ctx, a)
+	}
+	return nil
+}
+
+// addOutboxWorkers adds the outbox workers (relay, sweeper, cleaner) that
+// deliver the domain events written into the outbox inside a business
+// transaction.
+func addOutboxWorkers(ctx context.Context, a *App) {
+	ob := a.d.Outbox(ctx)
+	om := outbox.NewMetrics(a.m.Registry)
+	a.workers = append(a.workers,
+		outbox.NewRelay(a.d.Logger, ob, a.d.Publisher(ctx), outbox.RelayConfig{Metrics: om}),
+		outbox.NewSweeper(a.d.Logger, ob, outbox.SweeperConfig{Metrics: om}),
+		outbox.NewCleaner(a.d.Logger, ob, outbox.CleanerConfig{Metrics: om}),
+	)
+	// Backlog gauges query the store on each scrape; register when supported.
+	if sr, ok := ob.(outbox.StatsReader); ok {
+		a.m.Registry.MustRegister(outbox.NewBacklogCollector(sr, a.d.Logger))
+	}
+}
+
+// initConsumers registers the queue consumers — the receiving half of the
+// pipeline whose sending half (the outbox workers) belongs to initWorkers.
+// Competing consumers, so more than one replica is safe.
+func initConsumers(ctx context.Context, a *App) error {
+	// Wire queue consumers here; a RabbitMQ one goes behind Broker.Enabled, e.g.:
+	//   if a.d.Opts.Broker.Enabled {
+	//   	c, err := rabbitmq.NewConsumer(a.d.BrokerConn(ctx), a.d.Logger, cfg, handler)
+	//   	if err != nil {
+	//   		return err
+	//   	}
+	//   	a.consumers = append(a.consumers, c)
+	//   }
+	return nil
+}
+
+// Handler builds the technical and the business routes on one router — the
+// Debug and Install route sets, assembled by the same code as WithServer.
 // Exported so integration tests can drive the HTTP stack via httptest.
 func Handler(ctx context.Context, opts config.ServerOpts, log *logger.Logger) (http.Handler, error) {
-	d, err := initDeps(opts, log)
+	a, err := New(ctx, opts, log)
 	if err != nil {
 		return nil, err
 	}
-	return buildRouter(ctx, d, metrics.New("{{.Snake}}")), nil
+	return a.handler(ctx, Debug, Install), nil
 }
 
 // initDeps builds the Deps container and runs the initializers (registering
@@ -103,25 +170,9 @@ func initDeps(opts config.ServerOpts, log *logger.Logger) (*deps.Deps, error) {
 // readiness builds the readiness handler (DB ping).
 func readiness(d *deps.Deps) http.Handler {
 	return health.Readiness(2*time.Second, health.NamedChecker{
-		Name:  "postgres",
-		Check: func(ctx context.Context) error { return d.DB(ctx).PingContext(ctx) },
+		Name: "postgres",
+		Check: func(ctx context.Context) error {
+			return d.DB(ctx).PingContext(ctx)
+		},
 	})
-}
-
-// brokerWorkers builds the transactional-outbox workers (relay, sweeper,
-// cleaner) that deliver the domain events written into the outbox inside a
-// business transaction. Add a rabbitmq.NewConsumer here per inbound event.
-func brokerWorkers(ctx context.Context, d *deps.Deps, m *metrics.Metrics) []worker.Runnable {
-	ob := d.Outbox(ctx)
-	om := outbox.NewMetrics(m.Registry)
-	runnables := []worker.Runnable{
-		outbox.NewRelay(d.Logger, ob, d.Publisher(ctx), outbox.RelayConfig{Metrics: om}),
-		outbox.NewSweeper(d.Logger, ob, outbox.SweeperConfig{Metrics: om}),
-		outbox.NewCleaner(d.Logger, ob, outbox.CleanerConfig{Metrics: om}),
-	}
-	// Backlog gauges query the store on each scrape; register when supported.
-	if sr, ok := ob.(outbox.StatsReader); ok {
-		m.Registry.MustRegister(outbox.NewBacklogCollector(sr, d.Logger))
-	}
-	return runnables
 }

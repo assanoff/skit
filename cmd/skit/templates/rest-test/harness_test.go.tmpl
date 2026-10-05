@@ -40,8 +40,8 @@ func startup(ctx context.Context, t *testing.T) (*apitest.Server, *dbtest.Postgr
 }
 
 // testOpts builds a valid ServerOpts for tests: transports are handler-only (no
-// listeners), background workers and the broker are off, and the DB points at
-// the test container.
+// listeners, and server.Handler adds no workers), the broker is off, and the DB
+// points at the test container.
 func testOpts(db dbx.Config) config.ServerOpts {
 	return config.ServerOpts{
 		Service:  "test",
@@ -58,7 +58,6 @@ func testOpts(db dbx.Config) config.ServerOpts {
 			MaxOpenConns: 20,
 			// TLS left off (zero value): the testcontainers Postgres has no TLS.
 		},
-		Worker: config.Worker{Disabled: true},
 		Broker: config.Broker{Enabled: false},
 	}
 }

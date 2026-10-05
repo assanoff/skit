@@ -1,6 +1,6 @@
 module github.com/assanoff/skit
 
-go 1.26
+go 1.27
 
 require (
 	buf.build/go/protovalidate v1.2.0

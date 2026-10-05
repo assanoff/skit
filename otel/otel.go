@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // Config configures tracing.
@@ -78,11 +79,12 @@ func InjectTracing(ctx context.Context, tracer trace.Tracer) context.Context {
 
 // AddSpan starts a child span on the tracer stored in ctx. If no tracer is
 // present it returns ctx unchanged and a no-op span, so callers never need a
-// nil check.
+// nil check. The no-op span is not the span already in ctx: the caller ends
+// what AddSpan returns, and that span belongs to someone else.
 func AddSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	tracer := tracerFrom(ctx)
 	if tracer == nil {
-		return ctx, trace.SpanFromContext(ctx)
+		return ctx, noop.Span{}
 	}
 	ctx, span := tracer.Start(ctx, name)
 	if len(attrs) > 0 {
@@ -95,12 +97,12 @@ func AddSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (con
 // BACKDATED span — for reconstructing already-finished operations whose real
 // times are known (e.g. replaying techlog/audit records into a trace). It returns
 // the child context, so nested backdated spans can be parented to it, and the
-// (already ended) span. With no tracer in ctx it is a no-op returning ctx and the
-// current span, so callers never need a nil check.
+// (already ended) span. With no tracer in ctx it is a no-op returning ctx and a
+// no-op span, so callers never need a nil check.
 func AddSpanAt(ctx context.Context, name string, start, end time.Time, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	tracer := tracerFrom(ctx)
 	if tracer == nil {
-		return ctx, trace.SpanFromContext(ctx)
+		return ctx, noop.Span{}
 	}
 	ctx, span := tracer.Start(ctx, name, trace.WithTimestamp(start))
 	if len(attrs) > 0 {
@@ -120,6 +122,22 @@ func InjectToRequest(ctx context.Context, r *http.Request) {
 // an incoming request's headers.
 func ExtractFromRequest(ctx context.Context, r *http.Request) context.Context {
 	return otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
+}
+
+// InjectToResponse writes the trace context of the request's own span — the
+// server span this process opened — into the response headers as W3C
+// traceparent / tracestate, so a client or QA can find the trace by the
+// response. It writes nothing when ctx carries no span of this process: a
+// remote parent extracted from the request is the caller's span, and echoing it
+// back would point at the wrong span. Baggage is never written — it is
+// request-scoped data that must not leak to the client. Call it before the
+// handler writes the status line.
+func InjectToResponse(ctx context.Context, h http.Header) {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() || sc.IsRemote() {
+		return
+	}
+	propagation.TraceContext{}.Inject(ctx, propagation.HeaderCarrier(h))
 }
 
 // Carrier returns the W3C trace context (traceparent/tracestate) and baggage

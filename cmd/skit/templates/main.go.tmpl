@@ -13,6 +13,7 @@ import (
 	"github.com/assanoff/skit/closer"
 	"github.com/assanoff/skit/health"
 	"github.com/assanoff/skit/logger"
+	"github.com/assanoff/skit/middleware"
 	"github.com/assanoff/skit/rest/router"
 	"github.com/assanoff/skit/worker"
 )
@@ -32,6 +33,7 @@ func run() error {
 	defer closer.CloseSync()
 
 	r := router.New()
+	r.Use(middleware.Panics(log)) // recover -> 500, log the stack
 	r.HandleFunc("GET /healthz", health.Liveness())
 	r.HandleFunc("GET /hello", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "hello from {{.Name}}")

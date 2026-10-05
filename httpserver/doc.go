@@ -37,9 +37,16 @@
 //     status read distinctly.
 //   - ReadHeaderTimeout: bounds reading request headers (default 5s) against
 //     Slowloris-style stalls; a negative value disables it.
-//   - ReadTimeout / WriteTimeout / IdleTimeout: map to the http.Server fields of
-//     the same name; zero leaves each at the net/http default.
+//   - IdleTimeout: bounds an idle keep-alive connection (default 30s); a negative
+//     value leaves it to net/http.
+//   - ReadTimeout / WriteTimeout: map to the http.Server fields of the same name;
+//     zero leaves each at the net/http default.
 //   - ShutdownTimeout: bounds graceful shutdown when Stop's ctx has no deadline
-//     (default 10s).
+//     (default 10s). Connections still busy when it runs out are closed.
 //   - Logger: receives start/stop lines; defaults to slog.Default().
+//   - ErrorLog: receives net/http's own errors (TLS handshakes, superfluous
+//     WriteHeader); nil uses the standard logger.
+//
+// Handler returns the served handler, so tests can drive a server through
+// httptest without binding a port.
 package httpserver
