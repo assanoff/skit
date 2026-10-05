@@ -13,11 +13,10 @@ import (
 // capture records the last request headers a server saw.
 func capture(t *testing.T, seen *http.Header) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*seen = r.Header.Clone()
 		w.WriteHeader(http.StatusOK)
 	}))
-	t.Cleanup(srv.Close)
 	return srv
 }
 
@@ -26,7 +25,7 @@ func TestSetHeaderAndUserAgent(t *testing.T) {
 	var seen http.Header
 	srv := capture(t, &seen)
 
-	client := &http.Client{Transport: httpmw.Chain(nil,
+	client := &http.Client{Transport: httpmw.Chain(srv.Client().Transport,
 		httpmw.UserAgent("svc", "1.2.3", "prod"),
 		httpmw.SetHeader("X-Trace", "abc"),
 	)}
@@ -42,7 +41,7 @@ func TestIdempotencyKeySetWhenAbsentKeptWhenPresent(t *testing.T) {
 	is := is.New(t)
 	var seen http.Header
 	srv := capture(t, &seen)
-	client := &http.Client{Transport: httpmw.Chain(nil, httpmw.IdempotencyKey("X-Idempotency-Key"))}
+	client := &http.Client{Transport: httpmw.Chain(srv.Client().Transport, httpmw.IdempotencyKey("X-Idempotency-Key"))}
 
 	// Absent -> a key is injected.
 	resp, err := client.Get(srv.URL)
@@ -63,7 +62,7 @@ func TestChainDoesNotMutateCallerRequest(t *testing.T) {
 	is := is.New(t)
 	var seen http.Header
 	srv := capture(t, &seen)
-	client := &http.Client{Transport: httpmw.Chain(nil, httpmw.SetHeader("X-Added", "1"))}
+	client := &http.Client{Transport: httpmw.Chain(srv.Client().Transport, httpmw.SetHeader("X-Added", "1"))}
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
 	resp, err := client.Do(req)
@@ -88,7 +87,7 @@ func TestChainOrderIsOutermostFirst(t *testing.T) {
 	}
 	var seen http.Header
 	srv := capture(t, &seen)
-	client := &http.Client{Transport: httpmw.Chain(nil, mw("first"), mw("second"))}
+	client := &http.Client{Transport: httpmw.Chain(srv.Client().Transport, mw("first"), mw("second"))}
 
 	resp, err := client.Get(srv.URL)
 	is.NoErr(err)

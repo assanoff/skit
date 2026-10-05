@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/brianvoe/gofakeit/v7"
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/matryer/is"
 
@@ -99,7 +99,7 @@ func get200(srv *apitest.Server, sd seed) func(t *testing.T) {
 
 func get404(srv *apitest.Server) func(t *testing.T) {
 	return func(t *testing.T) {
-		srv.Get("/{{.Plural}}/" + uuid.NewString()).ExpectStatus(http.StatusNotFound)
+		srv.Get("/{{.Plural}}/" + uuid.New().String()).ExpectStatus(http.StatusNotFound)
 	}
 }
 

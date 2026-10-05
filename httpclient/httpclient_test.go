@@ -15,13 +15,15 @@ import (
 
 func TestNewPlainClientSendsRequest(t *testing.T) {
 	is := is.New(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		is.Equal(r.Header.Get("User-Agent"), "svc/1.0 (test)")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
 
-	c, err := httpclient.New(httpclient.Config{UserAgent: "svc", Version: "1.0", Environment: "test"})
+	c, err := httpclient.New(httpclient.Config{
+		UserAgent: "svc", Version: "1.0", Environment: "test",
+		Base: srv.Client().Transport,
+	})
 	is.NoErr(err)
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
@@ -34,12 +36,11 @@ func TestNewPlainClientSendsRequest(t *testing.T) {
 
 func TestDoJSONNon2xxReturnsStatusError(t *testing.T) {
 	is := is.New(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"nope"}`, http.StatusNotFound)
 	}))
-	defer srv.Close()
 
-	c, _ := httpclient.New(httpclient.Config{})
+	c, _ := httpclient.New(httpclient.Config{Base: srv.Client().Transport})
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
 
 	err := httpclient.DoJSON(c, req, nil)
@@ -51,12 +52,11 @@ func TestDoJSONNon2xxReturnsStatusError(t *testing.T) {
 
 func TestDoJSONEmptyBodyOK(t *testing.T) {
 	is := is.New(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent) // 204, empty body
 	}))
-	defer srv.Close()
 
-	c, _ := httpclient.New(httpclient.Config{})
+	c, _ := httpclient.New(httpclient.Config{Base: srv.Client().Transport})
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
 	var out struct {
 		X int `json:"x"`
@@ -73,6 +73,9 @@ func TestOAuth2ConfigValidation(t *testing.T) {
 // TestOAuth2AttachesBearerToken checks the OAuth2 transport fetches a token from
 // the token endpoint and attaches it as a bearer on the business request.
 func TestOAuth2AttachesBearerToken(t *testing.T) {
+	// Real loopback servers: OAuth2Transport fetches the token with its own
+	// client over http.DefaultTransport (Config.Base is not used for it), so
+	// the token endpoint cannot live on an httptest.NewTestServer fake network.
 	is := is.New(t)
 
 	var tokenHits int

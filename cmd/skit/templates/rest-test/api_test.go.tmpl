@@ -9,9 +9,9 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/brianvoe/gofakeit/v7"
-	"github.com/google/uuid"
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbx"
@@ -74,7 +74,7 @@ func TestRest_Get{{.Type}}_404(t *testing.T) {
 	h := newTestHandler(store)
 
 	req := httptest.NewRequest(http.MethodGet, "/{{.Plural}}/x", nil)
-	req.SetPathValue("id", uuid.NewString())
+	req.SetPathValue("id", uuid.New().String())
 	w := httptest.NewRecorder()
 
 	rest.HandlerFunc(h.queryByID).ServeHTTP(w, req)

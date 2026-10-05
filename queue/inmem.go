@@ -5,8 +5,7 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/assanoff/skit/worker"
 )
@@ -57,7 +56,7 @@ func (q *InMem) Schedule(_ context.Context, p ScheduleParams) (bool, error) {
 
 	name := p.Name
 	if name == "" {
-		name = uuid.NewString()
+		name = uuid.New().String()
 	}
 	if _, dup := q.byName[name]; dup {
 		return false, nil
@@ -102,7 +101,7 @@ func (q *InMem) Claim(_ context.Context, now time.Time, limit int) ([]Task, erro
 
 	out := make([]Task, 0, len(ready))
 	for _, t := range ready {
-		t.LeaseID = uuid.NewString()
+		t.LeaseID = uuid.New().String()
 		t.Attempts++
 		q.leasedAt[t.ID] = now
 		out = append(out, *t) // copy so callers cannot mutate queue state

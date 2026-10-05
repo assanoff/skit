@@ -79,7 +79,7 @@ func (t *Translator) Translate(ctx context.Context, model Translatable, lang Lan
 }
 
 // TranslateSlice translates a slice of models with type safety using generics
-func TranslateSlice[T Translatable](ctx context.Context, t *Translator, models []T, lang Language) error {
+func (t *Translator) TranslateSlice[T Translatable](ctx context.Context, models []T, lang Language) error {
 	if len(models) == 0 {
 		return nil
 	}

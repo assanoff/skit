@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: go.sum
       - name: Build
         run: go build ./...
@@ -30,13 +30,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
       # v7+ installs golangci-lint v2 (v6 shipped v1, built with an older Go that
-      # rejects a go 1.26 module and our version: "2" config). Keep in sync with
+      # rejects a go 1.27 module and our version: "2" config). Keep in sync with
       # the v2 binary the Makefile installs via `make tools`.
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.12.2
+          version: v2.13.2
 
   # Verify semantic-version compatibility of the public module against the
   # latest release tag. Skipped on the first release (no tag yet).
@@ -52,7 +52,7 @@ jobs:
           fetch-depth: 0 # tags needed for the base comparison
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
       - name: gorelease
         # gorelease infers the base from the latest tag (or "none" before the
         # first release) and prints the suggested next version. On v1+ it exits

@@ -40,7 +40,7 @@ type Event struct {
 // and only a decode error is returned to the bus.
 func Register(bus *eventbus.Bus, rec auditlog.Recorder) {
 	bus.Register(Domain, Action, func(ctx context.Context, d eventbus.Data) error {
-		ev, err := eventbus.Decode[Event](d)
+		ev, err := d.Decode[Event]()
 		if err != nil {
 			return err
 		}

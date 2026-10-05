@@ -51,8 +51,7 @@ func (m *rpcMetrics) observe(method, code string, ms float64) {
 
 func registerCounterVec(reg prometheus.Registerer, c *prometheus.CounterVec) *prometheus.CounterVec {
 	if err := reg.Register(c); err != nil {
-		var are prometheus.AlreadyRegisteredError
-		if errors.As(err, &are) {
+		if are, ok := errors.AsType[prometheus.AlreadyRegisteredError](err); ok {
 			if existing, ok := are.ExistingCollector.(*prometheus.CounterVec); ok {
 				return existing
 			}
@@ -63,8 +62,7 @@ func registerCounterVec(reg prometheus.Registerer, c *prometheus.CounterVec) *pr
 
 func registerHistogramVec(reg prometheus.Registerer, h *prometheus.HistogramVec) *prometheus.HistogramVec {
 	if err := reg.Register(h); err != nil {
-		var are prometheus.AlreadyRegisteredError
-		if errors.As(err, &are) {
+		if are, ok := errors.AsType[prometheus.AlreadyRegisteredError](err); ok {
 			if existing, ok := are.ExistingCollector.(*prometheus.HistogramVec); ok {
 				return existing
 			}

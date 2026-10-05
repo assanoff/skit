@@ -174,7 +174,7 @@ with a domain layer that knows nothing about SQL or the transport:
 
   ```go
   reg := outbox.NewRegistry()
-  outbox.Register[widget.Created](reg, "widget.created", "widgets", outbox.WithKey("created"))
+  reg.Register[widget.Created]("widget.created", "widgets", outbox.WithKey("created"))
   ```
 
 - `outbox.Relay` (a `worker.Processor`) drains pending events to any

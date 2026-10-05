@@ -132,7 +132,11 @@ func TestHandlerOmitsUnsetStartupAndVersion(t *testing.T) {
 func TestPprofServesItsRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("/debug/pprof/", Pprof())
-	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline", "/debug/pprof/heap"} {
+	paths := []string{
+		"/debug/pprof/", "/debug/pprof/cmdline", "/debug/pprof/heap",
+		"/debug/pprof/goroutineleak", // Go 1.27+: served by pprof.Index
+	}
+	for _, path := range paths {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/dbx"
@@ -137,13 +137,13 @@ RETURNING e.id, e.type, e.content_type, e.topic, e.route_key, e.payload, e.heade
 		InFlight string    `db:"in_flight"`
 		Now      time.Time `db:"now"`
 		Limit    int       `db:"limit"`
-		LeaseID  uuid.UUID `db:"lease_id"`
+		LeaseID  dbx.UUID  `db:"lease_id"`
 	}{
 		Pending:  StatusPending,
 		InFlight: StatusInFlight,
 		Now:      now,
 		Limit:    limit,
-		LeaseID:  uuid.New(),
+		LeaseID:  dbx.UUID(uuid.New()),
 	}
 
 	var rows []rowDB
@@ -166,9 +166,9 @@ WHERE id = :id AND lease_id = :lease_id AND status = :in_flight`
 		Sent     string    `db:"sent"`
 		InFlight string    `db:"in_flight"`
 		Now      time.Time `db:"now"`
-		ID       uuid.UUID `db:"id"`
-		LeaseID  uuid.UUID `db:"lease_id"`
-	}{Sent: StatusSent, InFlight: StatusInFlight, Now: now, ID: ev.ID, LeaseID: leaseID}
+		ID       dbx.UUID  `db:"id"`
+		LeaseID  dbx.UUID  `db:"lease_id"`
+	}{Sent: StatusSent, InFlight: StatusInFlight, Now: now, ID: dbx.UUID(ev.ID), LeaseID: dbx.UUID(leaseID)}
 
 	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, args)
 	if err != nil {
@@ -203,16 +203,16 @@ WHERE id = :id AND lease_id = :lease_id AND status = :in_flight`
 		Attempts      int       `db:"attempts"`
 		LastError     string    `db:"last_error"`
 		NextAttemptAt time.Time `db:"next_attempt_at"`
-		ID            uuid.UUID `db:"id"`
-		LeaseID       uuid.UUID `db:"lease_id"`
+		ID            dbx.UUID  `db:"id"`
+		LeaseID       dbx.UUID  `db:"lease_id"`
 	}{
 		Status:        status,
 		InFlight:      StatusInFlight,
 		Attempts:      attempts,
 		LastError:     errMsg,
 		NextAttemptAt: nextAttempt,
-		ID:            ev.ID,
-		LeaseID:       leaseID,
+		ID:            dbx.UUID(ev.ID),
+		LeaseID:       dbx.UUID(leaseID),
 	}
 
 	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, args)

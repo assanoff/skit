@@ -377,7 +377,7 @@ func TestAddEventGeneratesParsableEvent(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "advertcreated.go", src, parser.AllErrors); err != nil {
 		t.Errorf("event does not parse: %v", err)
 	}
-	for _, want := range []string{"type AdvertCreated struct", "func Register(", "const EventType", "outbox.Register[AdvertCreated]"} {
+	for _, want := range []string{"type AdvertCreated struct", "func Register(", "const EventType", "reg.Register[AdvertCreated](EventType, Topic)"} {
 		if !strings.Contains(src, want) {
 			t.Errorf("event missing %q:\n%s", want, src)
 		}

@@ -109,9 +109,10 @@ func Handler(cfg Config) http.Handler {
 	return mux
 }
 
-// Pprof serves net/http/pprof — the index and the named profiles, cmdline,
-// profile, symbol and trace — for requests under /debug/pprof/. Mount it there
-// on its own when the other debug endpoints live elsewhere:
+// Pprof serves net/http/pprof — the index and the named profiles (heap,
+// goroutine, goroutineleak, …), cmdline, profile, symbol and trace — for
+// requests under /debug/pprof/. Mount it there on its own when the other debug
+// endpoints live elsewhere:
 //
 //	r.Handle("/debug/pprof/", debugsrv.Pprof())
 func Pprof() http.Handler {

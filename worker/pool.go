@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // JobFn is a unit of work submitted to a Pool.
@@ -70,7 +69,7 @@ func (p *Pool) Submit(ctx context.Context, job JobFn) (string, error) {
 	}
 
 	jobCtx, cancel := detach(ctx)
-	key := uuid.NewString()
+	key := uuid.New().String()
 
 	// Register under the lock so a concurrent Shutdown either observes this job
 	// in p.running (and cancels it) or has already closed isShutdown (and we back

@@ -331,8 +331,8 @@ func TestTranslator_TranslateSlice(t *testing.T) {
 		{ID: "3", Title: "Title 3", Description: "Desc 3"},
 	}
 
-	// Translate all using generic TranslateSlice function
-	err := TranslateSlice(ctx, translator, models, LanguageKk)
+	// Translate all using the generic TranslateSlice method
+	err := translator.TranslateSlice(ctx, models, LanguageKk)
 	if err != nil {
 		t.Fatalf("TranslateSlice() error = %v", err)
 	}

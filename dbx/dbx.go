@@ -287,8 +287,7 @@ func translateError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case uniqueViolation:
 			return ErrDBDuplicatedEntry

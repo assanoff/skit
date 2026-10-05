@@ -23,10 +23,9 @@ func TestHandlerFuncServeHTTP(t *testing.T) {
 		return rest.JSON(map[string]string{"name": "gadget"})
 	}))
 
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, mux)
 
-	resp, err := http.Get(srv.URL + "/widget")
+	resp, err := srv.Client().Get(srv.URL + "/widget")
 	is.NoErr(err) // GET /widget
 	defer resp.Body.Close()
 

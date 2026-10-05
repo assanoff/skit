@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -72,7 +72,7 @@ func InjectTracing(ctx context.Context, tracer trace.Tracer) context.Context {
 
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
 	if traceID == defaultTraceID {
-		traceID = uuid.NewString()
+		traceID = uuid.New().String()
 	}
 	return setTraceID(ctx, traceID)
 }

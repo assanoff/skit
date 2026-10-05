@@ -33,9 +33,10 @@ func (s *Store) applyFilter(filter {{.Pkg}}.QueryFilter, data map[string]any, bu
 		wc = append(wc, "description ILIKE :description")
 	}
 
-	// Exact-match example (uncomment and add the field to QueryFilter):
+	// Exact-match example (uncomment, add the field to QueryFilter and import
+	// github.com/assanoff/skit/dbx — the stdlib uuid.UUID needs its adapter):
 	// if filter.ID != nil {
-	// 	data["id"] = *filter.ID
+	// 	data["id"] = dbx.UUID(*filter.ID)
 	// 	wc = append(wc, "id = :id")
 	// }
 

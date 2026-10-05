@@ -6,7 +6,7 @@ Thanks for your interest in improving skit. It is a single Go module
 
 ## Prerequisites
 
-- **Go 1.26+** (see `go.mod`).
+- **Go 1.27+** (see `go.mod`).
 - `make tools` installs the dev tools (golangci-lint, gofumpt, gonew, gorelease,
   and the protobuf codegen tools).
 - Docker — only for integration tests (which run in the showcase repo).

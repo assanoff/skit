@@ -75,6 +75,20 @@
 // The plain (non-Named) variants take no parameters; the Named variants bind
 // from a struct via its `db` tags.
 //
+// # UUID columns
+//
+// The standard library uuid.UUID is a bare [16]byte with no sql.Scanner or
+// driver.Valuer, so a db model holds UUID instead (sql.Null[UUID] for a
+// nullable column) and converts at the core/db boundary:
+//
+//	type dbWidget struct {
+//	    ID dbx.UUID `db:"id"`
+//	}
+//	row := dbWidget{ID: dbx.UUID(w.ID)} // core -> db
+//	w.ID = uuid.UUID(row.ID)            // db -> core
+//
+// Bind a lone UUID argument the same way: dbx.UUID(id).
+//
 // # Dialects
 //
 // Subpackage dbx/dialect captures the few SQL fragments that differ between

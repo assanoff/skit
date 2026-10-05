@@ -2,15 +2,17 @@ package {{.Pkg}}db
 
 import (
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
+	"github.com/assanoff/skit/dbx"
 
 	"{{.Module}}/core/{{.Pkg}}"
 )
 
-// db{{.Type}} is the database representation of a {{.Type}}.
+// db{{.Type}} is the database representation of a {{.Type}}. The id is a
+// dbx.UUID: the stdlib uuid.UUID has no sql.Scanner / driver.Valuer.
 type db{{.Type}} struct {
-	ID          uuid.UUID `db:"id"`
+	ID          dbx.UUID  `db:"id"`
 	Name        string    `db:"name"`
 	Description string    `db:"description"`
 	CreatedAt   time.Time `db:"created_at"`
@@ -19,7 +21,7 @@ type db{{.Type}} struct {
 
 func toDB(v {{.Pkg}}.{{.Type}}) db{{.Type}} {
 	return db{{.Type}}{
-		ID:          v.ID,
+		ID:          dbx.UUID(v.ID),
 		Name:        v.Name,
 		Description: v.Description,
 		CreatedAt:   v.CreatedAt.UTC(),
@@ -29,7 +31,7 @@ func toDB(v {{.Pkg}}.{{.Type}}) db{{.Type}} {
 
 func toCore(r db{{.Type}}) {{.Pkg}}.{{.Type}} {
 	return {{.Pkg}}.{{.Type}}{
-		ID:          r.ID,
+		ID:          uuid.UUID(r.ID),
 		Name:        r.Name,
 		Description: r.Description,
 		CreatedAt:   r.CreatedAt.In(time.UTC),

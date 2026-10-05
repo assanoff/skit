@@ -32,7 +32,7 @@
 //
 //	// Consumer side (wired once, never imports the producer):
 //	bus.Register("user", "created", func(ctx context.Context, d eventbus.Data) error {
-//	    ev, err := eventbus.Decode[UserCreated](d)
+//	    ev, err := d.Decode[UserCreated]()
 //	    if err != nil {
 //	        return err
 //	    }
@@ -63,5 +63,5 @@
 // convention) so the bus stays decoupled from any concrete payload type. NewData
 // JSON-encodes params (nil for a payload-less event) and returns an error;
 // MustData panics instead, for static types that cannot fail to encode. A
-// handler reconstructs the payload with the generic Decode[T].
+// handler reconstructs the payload with the generic Data.Decode[T].
 package eventbus

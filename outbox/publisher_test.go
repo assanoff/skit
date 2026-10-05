@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -45,7 +45,7 @@ type widgetCreated struct {
 // setup in the success-path tests stays a single line.
 func mustRegister[T any](t *testing.T, r *Registry, eventType, topic string, opts ...RouteOption) {
 	t.Helper()
-	if err := Register[T](r, eventType, topic, opts...); err != nil {
+	if err := r.Register[T](eventType, topic, opts...); err != nil {
 		t.Fatalf("register %s: %v", eventType, err)
 	}
 }
@@ -197,7 +197,7 @@ func TestRegisterDuplicateErrors(t *testing.T) {
 	reg := NewRegistry()
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 
-	err := Register[widgetCreated](reg, "widget.created", "widgets")
+	err := reg.Register[widgetCreated]("widget.created", "widgets")
 	if err == nil || !strings.Contains(err.Error(), "already registered") {
 		t.Fatalf("expected duplicate-registration error, got %v", err)
 	}
@@ -205,10 +205,10 @@ func TestRegisterDuplicateErrors(t *testing.T) {
 
 func TestRegisterValidationErrors(t *testing.T) {
 	reg := NewRegistry()
-	if err := Register[widgetCreated](reg, "", "widgets"); err == nil {
+	if err := reg.Register[widgetCreated]("", "widgets"); err == nil {
 		t.Error("expected an error for an empty event type")
 	}
-	if err := Register[widgetCreated](reg, "widget.created", ""); err == nil {
+	if err := reg.Register[widgetCreated]("widget.created", ""); err == nil {
 		t.Error("expected an error for an empty topic")
 	}
 }

@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/logger"
@@ -190,7 +190,7 @@ func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}.QueryFilter, 
 	if len(rows) > cur.Limit() {
 		rows = rows[:cur.Limit()]
 		last := rows[len(rows)-1]
-		next = page.EncodeCursor(encodeCursor(last.CreatedAt, last.ID))
+		next = page.EncodeCursor(encodeCursor(last.CreatedAt, uuid.UUID(last.ID)))
 	}
 	return toCoreSlice(rows), next, nil
 }

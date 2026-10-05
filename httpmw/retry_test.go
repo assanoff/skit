@@ -19,16 +19,15 @@ func fastBackoff(maxAttempts int) retry.Backoff {
 
 func TestRetryEventuallySucceeds(t *testing.T) {
 	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) < 3 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
 
-	client := &http.Client{Transport: NewRetryTransport(nil, RetryConfig{
+	client := &http.Client{Transport: NewRetryTransport(srv.Client().Transport, RetryConfig{
 		Backoff: fastBackoff(5),
 		Rand:    func() float64 { return 0 },
 	})}
@@ -48,13 +47,12 @@ func TestRetryEventuallySucceeds(t *testing.T) {
 
 func TestRetryExhaustsAndReturnsLastResponse(t *testing.T) {
 	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
-	defer srv.Close()
 
-	client := &http.Client{Transport: NewRetryTransport(nil, RetryConfig{
+	client := &http.Client{Transport: NewRetryTransport(srv.Client().Transport, RetryConfig{
 		Backoff: fastBackoff(3),
 		Rand:    func() float64 { return 0 },
 	})}
@@ -74,13 +72,12 @@ func TestRetryExhaustsAndReturnsLastResponse(t *testing.T) {
 
 func TestRetryNonRetryableStatusNotRetried(t *testing.T) {
 	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 	}))
-	defer srv.Close()
 
-	client := &http.Client{Transport: NewRetryTransport(nil, RetryConfig{Backoff: fastBackoff(5)})}
+	client := &http.Client{Transport: NewRetryTransport(srv.Client().Transport, RetryConfig{Backoff: fastBackoff(5)})}
 	resp, err := client.Get(srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -94,7 +91,7 @@ func TestRetryNonRetryableStatusNotRetried(t *testing.T) {
 func TestRetryReplaysBody(t *testing.T) {
 	var calls atomic.Int32
 	var bodies []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, string(b))
 		if calls.Add(1) < 2 {
@@ -103,9 +100,8 @@ func TestRetryReplaysBody(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
 
-	client := &http.Client{Transport: NewRetryTransport(nil, RetryConfig{
+	client := &http.Client{Transport: NewRetryTransport(srv.Client().Transport, RetryConfig{
 		Backoff: fastBackoff(3),
 		Rand:    func() float64 { return 0 },
 	})}
@@ -127,7 +123,7 @@ func TestRetryReplaysBody(t *testing.T) {
 
 func TestRetryHonorsRetryAfterSeconds(t *testing.T) {
 	var first atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if !first.Swap(true) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -135,11 +131,10 @@ func TestRetryHonorsRetryAfterSeconds(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
 
 	// Max clamps the 1s Retry-After down so the test stays fast; the point is
 	// that the header path is taken rather than the backoff delay.
-	client := &http.Client{Transport: NewRetryTransport(nil, RetryConfig{
+	client := &http.Client{Transport: NewRetryTransport(srv.Client().Transport, RetryConfig{
 		Backoff: retry.Backoff{Base: time.Hour, Max: 5 * time.Millisecond, MaxAttempts: 3},
 		Rand:    func() float64 { return 0 },
 	})}

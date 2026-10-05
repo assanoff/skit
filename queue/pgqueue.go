@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/dbx"
@@ -86,7 +86,7 @@ VALUES (:name, :kind, :payload, :run_at)
 ON CONFLICT (name) DO NOTHING`
 	name := p.Name
 	if name == "" {
-		name = uuid.NewString()
+		name = uuid.New().String()
 	}
 	args := struct {
 		Name    string    `db:"name"`
@@ -130,7 +130,7 @@ RETURNING t.id, t.name, t.kind, t.payload, t.created_at, t.run_at,
 		LeaseCutoff time.Time `db:"lease_cutoff"`
 		LeaseID     string    `db:"lease_id"`
 		Limit       int       `db:"limit"`
-	}{Now: now, LeaseCutoff: now.Add(-q.leaseTimeout), LeaseID: uuid.NewString(), Limit: limit}
+	}{Now: now, LeaseCutoff: now.Add(-q.leaseTimeout), LeaseID: uuid.New().String(), Limit: limit}
 
 	var rows []taskRow
 	if err := dbx.NamedQuerySlice(ctx, q.log, q.db, query, args, &rows); err != nil {

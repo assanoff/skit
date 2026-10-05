@@ -2,8 +2,8 @@ package httpmw
 
 import (
 	"net/http"
-
-	"github.com/google/uuid"
+	"slices"
+	"uuid"
 )
 
 // Middleware wraps an http.RoundTripper, returning one that adds behavior around
@@ -25,9 +25,9 @@ func Chain(base http.RoundTripper, mws ...Middleware) http.RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	for i := len(mws) - 1; i >= 0; i-- {
-		if mws[i] != nil {
-			base = mws[i](base)
+	for _, mw := range slices.Backward(mws) {
+		if mw != nil {
+			base = mw(base)
 		}
 	}
 	return base
@@ -79,7 +79,7 @@ func IdempotencyKey(header string) Middleware {
 		return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			if r.Header.Get(header) == "" {
 				r = cloneReq(r)
-				r.Header.Set(header, uuid.NewString())
+				r.Header.Set(header, uuid.New().String())
 			}
 			return next.RoundTrip(r)
 		})

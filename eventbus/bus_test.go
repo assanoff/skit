@@ -86,7 +86,7 @@ func TestDataRoundTrip(t *testing.T) {
 	d := New(nil)
 	var got deletedParams
 	d.Register(domUser, actionDeleted, func(_ context.Context, data Data) error {
-		p, err := Decode[deletedParams](data)
+		p, err := data.Decode[deletedParams]()
 		got = p
 		return err
 	})
@@ -100,7 +100,7 @@ func TestDataRoundTrip(t *testing.T) {
 }
 
 func TestDecodeEmptyParamsYieldsZeroValue(t *testing.T) {
-	p, err := Decode[deletedParams](MustData(domUser, actionDeleted, nil))
+	p, err := MustData(domUser, actionDeleted, nil).Decode[deletedParams]()
 	if err != nil {
 		t.Fatalf("Decode nil params: %v", err)
 	}

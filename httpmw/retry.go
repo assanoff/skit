@@ -97,8 +97,9 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		delay := t.delay(attempt, resp)
-		// Drain and close so the connection can be reused for the retry.
-		drain(resp)
+		// Close lets the connection be reused for the retry: since Go 1.27
+		// net/http drains a small unread HTTP/1 body on Close by itself.
+		_ = resp.Body.Close()
 
 		select {
 		case <-req.Context().Done():
@@ -140,16 +141,6 @@ func rewindable(req *http.Request) (func() (io.ReadCloser, error), error) {
 	return func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(buf)), nil
 	}, nil
-}
-
-// drain consumes and closes a response body so the underlying connection is
-// returned to the pool for reuse.
-func drain(resp *http.Response) {
-	if resp == nil || resp.Body == nil {
-		return
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
 }
 
 // retryAfter parses an RFC 7231 Retry-After value, either delta-seconds or an

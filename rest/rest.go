@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/assanoff/skit/errs"
 )
@@ -79,9 +80,9 @@ type Handle func(pattern string, h HandlerFunc, mids ...MidFunc)
 
 // ChainMiddleware wraps h with mw in order, so mw[0] is the outermost layer.
 func ChainMiddleware(h HandlerFunc, mw ...MidFunc) HandlerFunc {
-	for i := len(mw) - 1; i >= 0; i-- {
-		if mw[i] != nil {
-			h = mw[i](h)
+	for _, m := range slices.Backward(mw) {
+		if m != nil {
+			h = m(h)
 		}
 	}
 	return h

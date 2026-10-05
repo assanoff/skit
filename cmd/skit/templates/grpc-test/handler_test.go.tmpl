@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 	"testing"
+	"uuid"
 
 	"github.com/brianvoe/gofakeit/v7"
-	"github.com/google/uuid"
 	"github.com/matryer/is"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -90,7 +90,7 @@ func TestGRPC_Get{{.Type}}_NotFound_Integration(t *testing.T) {
 	}
 	client := newTestClient(t, store)
 
-	_, err := client.Get{{.Type}}(context.Background(), {{.Pkg}}v1.Get{{.Type}}Request_builder{Id: uuid.NewString()}.Build())
+	_, err := client.Get{{.Type}}(context.Background(), {{.Pkg}}v1.Get{{.Type}}Request_builder{Id: uuid.New().String()}.Build())
 	is.Equal(status.Code(err), codes.NotFound) // errs.NotFound mapped to a gRPC status
 }
 

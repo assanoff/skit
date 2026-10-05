@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 )
@@ -112,8 +113,7 @@ func (g *Group) stopAll() {
 	}
 
 	// Stop in reverse registration order (LIFO), mirroring closer semantics.
-	for i := len(g.runnables) - 1; i >= 0; i-- {
-		r := g.runnables[i]
+	for _, r := range slices.Backward(g.runnables) {
 		if err := r.Stop(stopCtx); err != nil {
 			g.logf("worker: stop failed", "name", r.Name(), "err", err)
 		}

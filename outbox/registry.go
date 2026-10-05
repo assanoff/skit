@@ -69,7 +69,7 @@ func WithMarshaler(m Marshaler) RouteOption {
 // It returns an error — it never panics — on a wiring mistake (empty name/topic
 // or a duplicate type), so the caller surfaces it at startup where the
 // registration is wired.
-func Register[T any](r *Registry, eventType, topic string, opts ...RouteOption) error {
+func (r *Registry) Register[T any](eventType, topic string, opts ...RouteOption) error {
 	if eventType == "" {
 		return errors.New("outbox: register: event type name is required")
 	}

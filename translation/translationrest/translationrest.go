@@ -63,7 +63,7 @@ func middleware(log *logger.Logger, t *translation.Translator, langOf func(conte
 			var err error
 			switch v := enc.(type) {
 			case translation.TranslatableList:
-				err = translation.TranslateSlice(ctx, t, v.Translatables(), lang)
+				err = t.TranslateSlice(ctx, v.Translatables(), lang)
 			case translation.Translatable:
 				err = t.Translate(ctx, v, lang)
 			}

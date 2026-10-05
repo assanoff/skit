@@ -146,7 +146,7 @@ tr.Delete(ctx, translation.LanguageKk, &Product{ID: "123"})
 tr.Translate(ctx, product, translation.LanguageKk)
 
 // Batch (one query per model type), type-safe:
-translation.TranslateSlice(ctx, tr, products, translation.LanguageKk)
+tr.TranslateSlice(ctx, products, translation.LanguageKk)
 ```
 
 ## Validation

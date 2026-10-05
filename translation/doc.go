@@ -62,7 +62,7 @@
 //	// Single model:
 //	err := tr.Translate(ctx, product, translation.LanguageKk)
 //	// Batch, type-safe:
-//	err := translation.TranslateSlice(ctx, tr, products, translation.LanguageKk)
+//	err := tr.TranslateSlice(ctx, products, translation.LanguageKk)
 //	// CRUD on the stored translations:
 //	err := tr.Save(ctx, translation.LanguageKk, product)
 //	err := tr.Get(ctx, translation.LanguageKk, product)

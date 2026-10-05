@@ -6,10 +6,18 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
+// The pool tests run in a synctest bubble: the jobs' time.Sleep advances a fake
+// clock, so the tests are instant and the interleavings deterministic.
+
 func TestPoolBoundsConcurrency(t *testing.T) {
+	synctest.Test(t, testPoolBoundsConcurrency)
+}
+
+func testPoolBoundsConcurrency(t *testing.T) {
 	const limit = 3
 	p := NewPool(limit)
 
@@ -47,15 +55,18 @@ func TestPoolBoundsConcurrency(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if peak > limit {
-		t.Errorf("peak concurrency %d exceeded limit %d", peak, limit)
-	}
-	if peak == 0 {
-		t.Error("no jobs ran")
+	// Every slot fills at the same fake instant, so the peak is exactly the
+	// limit: never above it, and the pool did run jobs in parallel.
+	if peak != limit {
+		t.Errorf("peak concurrency %d, want exactly the limit %d", peak, limit)
 	}
 }
 
 func TestPoolShutdownDrainsAndRejects(t *testing.T) {
+	synctest.Test(t, testPoolShutdownDrainsAndRejects)
+}
+
+func testPoolShutdownDrainsAndRejects(t *testing.T) {
 	p := NewPool(2)
 
 	var done atomic.Int64
@@ -66,6 +77,14 @@ func TestPoolShutdownDrainsAndRejects(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("submit %d: %v", i, err)
 		}
+	}
+
+	// The last two Submits each waited for a slot, so jobs 1-2 have finished and
+	// jobs 3-4 are mid-sleep. Advance the clock and let the bubble settle: they
+	// are still in flight, so Shutdown below has something to drain.
+	synctest.Sleep(5 * time.Millisecond)
+	if got, running := done.Load(), p.Running(); got != 2 || running != 2 {
+		t.Fatalf("before shutdown: done=%d running=%d, want 2 and 2", got, running)
 	}
 
 	if err := p.Shutdown(context.Background()); err != nil {
@@ -106,6 +125,10 @@ func TestPoolShutdownCancelsJobContext(t *testing.T) {
 }
 
 func TestPoolCancelStopsSingleJob(t *testing.T) {
+	synctest.Test(t, testPoolCancelStopsSingleJob)
+}
+
+func testPoolCancelStopsSingleJob(t *testing.T) {
 	p := NewPool(2)
 
 	canceled := make(chan struct{})
@@ -118,9 +141,10 @@ func TestPoolCancelStopsSingleJob(t *testing.T) {
 	}
 
 	p.Cancel(key)
+	synctest.Wait() // the job either observed the cancel or is stuck for good
 	select {
 	case <-canceled:
-	case <-time.After(time.Second):
+	default:
 		t.Error("Cancel did not stop the job")
 	}
 	if err := p.Shutdown(context.Background()); err != nil {

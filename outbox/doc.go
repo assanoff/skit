@@ -66,7 +66,7 @@
 // Register each event type, then build the store and the workers:
 //
 //	reg := outbox.NewRegistry()
-//	if err := outbox.Register[widget.Created](reg, "widget.created", "widgets",
+//	if err := reg.Register[widget.Created]("widget.created", "widgets",
 //	    outbox.WithKey("created")); err != nil {
 //	    return err
 //	}
@@ -97,7 +97,7 @@
 // route and override it per publish with As (and optionally OnTopic /
 // WithRouteKey). The routing-by-condition stays domain logic:
 //
-//	// Register[PushPayload](reg, "promo.created", "push-gateway", WithKey("push-gateway.send"))
+//	// reg.Register[PushPayload]("promo.created", "push-gateway", WithKey("push-gateway.send"))
 //	for _, batch := range batches { // fan-out: N events, one transaction
 //	    if err := pub.Publish(ctx, PushPayload{...}, outbox.As(eventType)); err != nil {
 //	        return err // any failure rolls back the whole unit of work

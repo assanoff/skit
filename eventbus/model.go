@@ -53,7 +53,7 @@ func MustData(domain, action string, params any) Data {
 
 // Decode unmarshals an event's JSON params into T. Handlers use it to recover
 // the typed payload the producer encoded with NewData/MustData.
-func Decode[T any](d Data) (T, error) {
+func (d Data) Decode[T any]() (T, error) {
 	var out T
 	if len(d.RawParams) == 0 {
 		return out, nil

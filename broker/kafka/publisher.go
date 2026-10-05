@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	kgo "github.com/segmentio/kafka-go"
 
 	"github.com/assanoff/skit/broker"
@@ -53,7 +53,7 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 
 	// Fill CloudEvents defaults the producer left blank.
 	if m.ID == "" {
-		m.ID = uuid.NewString()
+		m.ID = uuid.New().String()
 	}
 	if m.Source == "" {
 		m.Source = p.source

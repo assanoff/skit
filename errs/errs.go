@@ -125,8 +125,7 @@ func From(err error) *Error {
 	if err == nil {
 		return nil
 	}
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e
 	}
 	return New(Internal, err)
@@ -134,8 +133,7 @@ func From(err error) *Error {
 
 // Is reports whether err is (or wraps) an *Error with the given code.
 func Is(err error, code Code) bool {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Code == code
 	}
 	return false

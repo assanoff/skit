@@ -31,10 +31,9 @@ func TestNewServesRegisteredRoutes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = gw.Close() })
 
-	srv := httptest.NewServer(gw)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, gw)
 
-	resp, err := http.Get(srv.URL + "/ping")
+	resp, err := srv.Client().Get(srv.URL + "/ping")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

@@ -19,8 +19,7 @@ func serve(t *testing.T, store *mocks.StoreMock) *httptest.Server {
 	core := auditlog.NewCore(nil, store)
 	r := router.New()
 	auditrest.NewHandlers(core).Routes(r.HandleApp)
-	srv := httptest.NewServer(r)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, r)
 	return srv
 }
 
@@ -35,7 +34,7 @@ func TestHistoryEndpoint(t *testing.T) {
 	}
 	srv := serve(t, store)
 
-	resp, err := http.Get(srv.URL + "/auditlog/widget/1")
+	resp, err := srv.Client().Get(srv.URL + "/auditlog/widget/1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +63,7 @@ func TestDiffEndpoint(t *testing.T) {
 	}
 	srv := serve(t, store)
 
-	resp, err := http.Get(srv.URL + "/auditlog/widget/1/diff?current=1&target=2")
+	resp, err := srv.Client().Get(srv.URL + "/auditlog/widget/1/diff?current=1&target=2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +82,7 @@ func TestDiffEndpoint(t *testing.T) {
 
 func TestDiffMissingVersionParam(t *testing.T) {
 	srv := serve(t, &mocks.StoreMock{})
-	resp, err := http.Get(srv.URL + "/auditlog/widget/1/diff?current=1")
+	resp, err := srv.Client().Get(srv.URL + "/auditlog/widget/1/diff?current=1")
 	if err != nil {
 		t.Fatal(err)
 	}

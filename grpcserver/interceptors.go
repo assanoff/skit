@@ -93,8 +93,7 @@ func toStatus(err error) error {
 	if _, ok := status.FromError(err); ok {
 		return err // already a status (or nil)
 	}
-	var e *errs.Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*errs.Error](err); ok {
 		return status.Error(codes.Code(e.Code), errs.Sanitize(e.Message))
 	}
 	return status.Error(codes.Internal, "internal error")
