@@ -51,6 +51,7 @@ type Config struct {
 	// Headers are static headers set on every request.
 	Headers map[string]string
 	// Base is the innermost (wire) transport (default http.DefaultTransport).
+	// Business requests and the OAuth2 token fetch both go over it.
 	Base http.RoundTripper
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/matryer/is"
@@ -71,31 +72,31 @@ func TestOAuth2ConfigValidation(t *testing.T) {
 }
 
 // TestOAuth2AttachesBearerToken checks the OAuth2 transport fetches a token from
-// the token endpoint and attaches it as a bearer on the business request.
+// the token endpoint and attaches it as a bearer on the business request. Both
+// endpoints live on one in-memory server reachable only through Config.Base, so
+// the test also pins that the token fetch goes over Base: the .invalid hosts
+// never resolve on a real network.
 func TestOAuth2AttachesBearerToken(t *testing.T) {
-	// Real loopback servers: OAuth2Transport fetches the token with its own
-	// client over http.DefaultTransport (Config.Base is not used for it), so
-	// the token endpoint cannot live on an httptest.NewTestServer fake network.
 	is := is.New(t)
 
-	var tokenHits int
-	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tokenHits++
+	var tokenHits atomic.Int32
+	var gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, _ *http.Request) {
+		tokenHits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"tok-123","token_type":"Bearer","expires_in":3600}`))
-	}))
-	defer tokenSrv.Close()
-
-	var gotAuth string
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})
+	mux.HandleFunc("GET /api", func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer apiSrv.Close()
+	})
+	srv := httptest.NewTestServer(t, mux)
 
 	c, err := httpclient.New(httpclient.Config{
+		Base: srv.Client().Transport,
 		OAuth2: &httpclient.OAuth2Config{
-			TokenURL:     tokenSrv.URL,
+			TokenURL:     "http://idp.invalid/token",
 			ClientID:     "id",
 			ClientSecret: "secret",
 			Scopes:       []string{"read"},
@@ -103,9 +104,9 @@ func TestOAuth2AttachesBearerToken(t *testing.T) {
 	})
 	is.NoErr(err)
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, apiSrv.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://api.invalid/api", nil)
 	is.NoErr(httpclient.DoJSON(c, req, nil))
 
-	is.Equal(gotAuth, "Bearer tok-123") // bearer attached from the token endpoint
-	is.True(tokenHits >= 1)             // token was fetched
+	is.Equal(gotAuth, "Bearer tok-123")  // bearer attached from the token endpoint
+	is.Equal(tokenHits.Load(), int32(1)) // token fetched once, over Base
 }

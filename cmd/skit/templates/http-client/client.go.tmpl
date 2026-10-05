@@ -33,6 +33,9 @@ type Config struct {
 	BaseURL string
 	// Timeout is the per-request timeout, retries included (default 30s).
 	Timeout time.Duration
+	// Base is the wire transport (default http.DefaultTransport){{if .OAuth}}; the token
+	// fetch goes over it too{{end}}. Tests pass an httptest server's Client().Transport.
+	Base http.RoundTripper
 {{if .OAuth}}
 	// OAuth2 client_credentials — all three required.
 	TokenURL     string
@@ -53,6 +56,7 @@ type Client struct {
 func New(cfg Config) (*Client, error) {
 	hc, err := httpclient.New(httpclient.Config{
 		Timeout:   cfg.Timeout,
+		Base:      cfg.Base,
 		UserAgent: "{{.Pkg}}-client",
 		Retry: &httpmw.RetryConfig{
 			Backoff: retry.Backoff{

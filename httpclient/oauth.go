@@ -26,8 +26,8 @@ type OAuth2Config struct {
 	ClientSecret string
 	// Scopes are requested with the token; may be empty.
 	Scopes []string
-	// TokenTimeout bounds each token fetch (default 10s). The token fetch uses
-	// its own client, separate from the business request transport.
+	// TokenTimeout bounds each token fetch (default 10s). The token fetch runs
+	// on its own client over the same wire transport as business requests.
 	TokenTimeout time.Duration
 }
 
@@ -47,11 +47,12 @@ func (c OAuth2Config) validate() error {
 // client_credentials bearer token to every request, refreshing and caching it
 // automatically, then delegates to base (or http.DefaultTransport when nil).
 //
-// base is the transport for business requests — pass the wire transport here and
-// compose retries/headers ABOVE this in the chain (httpmw.Chain), so a retried
-// request re-attaches the current token. Token fetches go through their own
-// small client (TokenTimeout), never through base, so they are not themselves
-// retried or wrapped.
+// base is the wire transport — pass it here and compose retries/headers ABOVE
+// this in the chain (httpmw.Chain), so a retried request re-attaches the current
+// token. Token fetches use base too, so the TLS, proxy, dialer and
+// instrumentation configured on it apply to the token endpoint as well; they run
+// on a separate client bounded by TokenTimeout, outside the middleware layered
+// above, so they are not themselves retried or wrapped.
 func OAuth2Transport(cfg OAuth2Config, base http.RoundTripper) (http.RoundTripper, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -64,7 +65,7 @@ func OAuth2Transport(cfg OAuth2Config, base http.RoundTripper) (http.RoundTrippe
 		timeout = defaultTokenTimeout
 	}
 
-	tokenClient := &http.Client{Timeout: timeout}
+	tokenClient := &http.Client{Timeout: timeout, Transport: base}
 	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, tokenClient)
 
 	cc := &clientcredentials.Config{

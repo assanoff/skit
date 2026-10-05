@@ -9,29 +9,41 @@ import (
 	"github.com/matryer/is"
 )
 
-// TestGet{{.Type}} drives the example method against an httptest upstream{{if .OAuth}} and a
-// fake OAuth2 token endpoint{{end}}, verifying the request/response round-trip through
-// the configured transport. Adapt it as you replace the example method.
+// TestGet{{.Type}} drives the example method against an in-memory httptest upstream{{if .OAuth}}
+// that also serves a fake OAuth2 token endpoint{{end}}, verifying the request/response
+// round-trip through the configured transport. The server is reachable only via
+// Config.Base, and the .invalid hosts never resolve, so nothing leaves the test.
+// Adapt it as you replace the example method.
 func TestGet{{.Type}}(t *testing.T) {
 	is := is.New(t)
 
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		is.Equal(r.URL.Path, "/{{.Pkg}}/42") // baseURL + path assembled correctly
+	mux := http.NewServeMux()
+	// The route pattern pins baseURL + path: any other path is a 404 error.
+	mux.HandleFunc("GET /{{.Pkg}}/42", func(w http.ResponseWriter, r *http.Request) {
+{{- if .OAuth}}
+		is.Equal(r.Header.Get("Authorization"), "Bearer tok") // bearer from the token endpoint
+{{- end}}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"42","name":"answer"}`))
-	}))
-	defer api.Close()
-{{if .OAuth}}
-	token := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})
+{{- if .OAuth}}
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"Bearer","expires_in":3600}`))
-	}))
-	defer token.Close()
+	})
+{{- end}}
+	srv := httptest.NewTestServer(t, mux)
 
-	c, err := New(Config{BaseURL: api.URL, TokenURL: token.URL, ClientID: "id", ClientSecret: "secret"})
-{{else}}
-	c, err := New(Config{BaseURL: api.URL})
-{{end}}	is.NoErr(err)
+	c, err := New(Config{
+		BaseURL: "http://upstream.invalid",
+		Base:    srv.Client().Transport,
+{{- if .OAuth}}
+		TokenURL:     "http://idp.invalid/token",
+		ClientID:     "id",
+		ClientSecret: "secret",
+{{- end}}
+	})
+	is.NoErr(err)
 
 	got, err := c.Get{{.Type}}(context.Background(), "42")
 	is.NoErr(err)
