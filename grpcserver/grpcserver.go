@@ -36,9 +36,6 @@ type Config struct {
 	// NumStreamWorkers bounds the pool of goroutines serving streams; 0 spawns
 	// one goroutine per stream (the gRPC default).
 	NumStreamWorkers uint32
-	// SharedWriteBuffer reuses transport write buffers across RPCs to cut
-	// allocations under load.
-	SharedWriteBuffer bool
 	// Keepalive tunes connection liveness; zero values fall back to gRPC defaults.
 	Keepalive KeepaliveConfig
 }
@@ -165,9 +162,6 @@ func buildTuningOptions(cfg Config) []grpc.ServerOption {
 	}
 	if cfg.NumStreamWorkers > 0 {
 		opts = append(opts, grpc.NumStreamWorkers(cfg.NumStreamWorkers))
-	}
-	if cfg.SharedWriteBuffer {
-		opts = append(opts, grpc.SharedWriteBuffer(true))
 	}
 
 	k := cfg.Keepalive

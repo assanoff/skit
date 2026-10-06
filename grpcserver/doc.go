@@ -34,7 +34,8 @@
 //   - EnableReflection: turns on server reflection (handy for grpcurl in dev).
 //   - MetricsNamespace: prefixes the gRPC metric names (default "grpc").
 //   - MaxRecvMsgSize / MaxSendMsgSize: override the 4 MiB defaults.
-//   - NumStreamWorkers / SharedWriteBuffer: stream-serving tuning.
+//   - NumStreamWorkers: stream-serving tuning (shared write buffers are
+//     gRPC's default since v1.84).
 //   - Keepalive (KeepaliveConfig): server keepalive parameters and enforcement
 //     policy; zero values fall back to gRPC defaults.
 //

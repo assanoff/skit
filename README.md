@@ -304,10 +304,10 @@ supervised by `worker.Group`, toggled independently by config. It ships:
 - messages use the protobuf **Opaque API** via Protobuf **Editions** (`edition = "2023"`,
   `api_level = API_OPAQUE`) — Google's official path to faster, lower-allocation, lazy-decoding
   generated code (replaces the third-party vtprotobuf; no extra dependency or codec);
-- transport tuning (`MaxRecvMsgSize`, `SharedWriteBuffer`, `NumStreamWorkers`, keepalive);
+- transport tuning (`MaxRecvMsgSize`, `NumStreamWorkers`, keepalive);
 - gRPC health service and optional reflection.
 
-Code is generated with **buf v2** (config lives with the app in `skit-x`). gRPC `v1.81` /
+Code is generated with **buf v2** (config lives with the app in `skit-x`). gRPC `v1.84` /
 protobuf `v1.36`.
 
 ```bash
