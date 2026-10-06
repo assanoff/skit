@@ -202,25 +202,15 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 
 	// dest path -> embedded template. Writing is idempotent: existing files are
 	// skipped (never overwritten), so re-running fills in only what is missing.
-	corePkgDir := filepath.Join(dir, "core", pkg)
-	dbPkgDir := filepath.Join(corePkgDir, pkg+"db")
+	if err := generateCore(out, dir, pkg, data); err != nil {
+		return err
+	}
 	apiPkgDir := filepath.Join(dir, "api", pkg)
 	files := []struct{ dest, tmpl string }{
-		{filepath.Join(corePkgDir, pkg+".go"), "templates/rest/core.go.tmpl"},
-		{filepath.Join(corePkgDir, "model.go"), "templates/rest/core_model.go.tmpl"},
-		{filepath.Join(corePkgDir, "filter.go"), "templates/rest/core_filter.go.tmpl"},
-		{filepath.Join(corePkgDir, "order.go"), "templates/rest/core_order.go.tmpl"},
-		{filepath.Join(dbPkgDir, pkg+"db.go"), "templates/rest/db.go.tmpl"},
-		{filepath.Join(dbPkgDir, "model.go"), "templates/rest/db_model.go.tmpl"},
-		{filepath.Join(dbPkgDir, "order.go"), "templates/rest/db_order.go.tmpl"},
-		{filepath.Join(dbPkgDir, "filter.go"), "templates/rest/db_filter.go.tmpl"},
 		{filepath.Join(apiPkgDir, pkg+".go"), "templates/rest/api.go.tmpl"},
 		{filepath.Join(apiPkgDir, "model.go"), "templates/rest/api_model.go.tmpl"},
 		{filepath.Join(apiPkgDir, "order.go"), "templates/rest/api_order.go.tmpl"},
 		{filepath.Join(apiPkgDir, "filter.go"), "templates/rest/api_filter.go.tmpl"},
-		// Declares the mocks package so its import resolves before the first
-		// `make generate`; moq writes StoreMock alongside this file.
-		{filepath.Join(corePkgDir, "mocks", "doc.go"), "templates/rest/mocks_doc.go.tmpl"},
 	}
 
 	for _, f := range files {
@@ -282,10 +272,15 @@ func addRESTTest(out io.Writer, opts addRESTOpts) error {
 		Plural: plural,
 	}
 
-	// The tests target an existing module; fail early with a clear pointer if it
-	// hasn't been scaffolded yet.
-	if _, err := os.Stat(filepath.Join(dir, "core", pkg)); os.IsNotExist(err) {
-		return fmt.Errorf("no core/%s in %s — run `skit add rest %s` first", pkg, dir, opts.Name)
+	// The tests target an existing REST module: the store tests need the core,
+	// the API and HTTP suites the api package (absent for a gRPC-only entity).
+	// Fail early with a clear pointer instead of generating code that won't build.
+	hint := "skit add rest " + opts.Name
+	if err := requireDir(dir, filepath.Join("core", pkg), hint); err != nil {
+		return err
+	}
+	if err := requireDir(dir, filepath.Join("api", pkg), hint); err != nil {
+		return err
 	}
 
 	if err := generateRESTTests(out, dir, data); err != nil {
@@ -316,6 +311,44 @@ func generateRESTTests(out io.Writer, dir string, data restData) error {
 		}
 	}
 	return nil
+}
+
+// generateCore writes one entity's Core + Postgres store, transport-agnostic:
+// core/<pkg>, core/<pkg>/<pkg>db and core/<pkg>/mocks. Idempotent (existing
+// files are skipped). Shared by `add rest` and `add grpc`; the templates use
+// only Module/Pkg/Type/Recv/Plural, so either command's data renders them.
+func generateCore(out io.Writer, dir, pkg string, data any) error {
+	corePkgDir := filepath.Join(dir, "core", pkg)
+	dbPkgDir := filepath.Join(corePkgDir, pkg+"db")
+	files := []struct{ dest, tmpl string }{
+		{filepath.Join(corePkgDir, pkg+".go"), "templates/rest/core.go.tmpl"},
+		{filepath.Join(corePkgDir, "model.go"), "templates/rest/core_model.go.tmpl"},
+		{filepath.Join(corePkgDir, "filter.go"), "templates/rest/core_filter.go.tmpl"},
+		{filepath.Join(corePkgDir, "order.go"), "templates/rest/core_order.go.tmpl"},
+		{filepath.Join(dbPkgDir, pkg+"db.go"), "templates/rest/db.go.tmpl"},
+		{filepath.Join(dbPkgDir, "model.go"), "templates/rest/db_model.go.tmpl"},
+		{filepath.Join(dbPkgDir, "order.go"), "templates/rest/db_order.go.tmpl"},
+		{filepath.Join(dbPkgDir, "filter.go"), "templates/rest/db_filter.go.tmpl"},
+		// Declares the mocks package so its import resolves before the first
+		// `make generate`; moq writes StoreMock alongside this file.
+		{filepath.Join(corePkgDir, "mocks", "doc.go"), "templates/rest/mocks_doc.go.tmpl"},
+	}
+	for _, f := range files {
+		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireDir is the precondition of a generator that extends an existing module:
+// it fails with a pointer to the scaffolding command (cmd) when dir/rel is missing.
+func requireDir(dir, rel, cmd string) error {
+	_, err := os.Stat(filepath.Join(dir, rel))
+	if os.IsNotExist(err) {
+		return fmt.Errorf("no %s in %s — run `%s` first", rel, dir, cmd)
+	}
+	return err
 }
 
 // writeIfAbsent renders tmpl to dest unless dest already exists — the idempotent
@@ -941,11 +974,12 @@ Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic)
 }
 
 // addGRPCCommand scaffolds a gRPC module for one entity: a .proto contract plus
-// a thin handler that adapts the generated service to the entity's Core.
+// a thin handler that adapts the generated service to the entity's Core. It
+// generates core/<name> + store when missing.
 type addGRPCCommand struct {
 	Dir    string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
 	Module string `long:"module" description:"module path (default: read from go.mod)"`
-	Plural string `long:"plural" description:"List RPC / list-field plural (default: <name>+\"s\")"`
+	Plural string `long:"plural" description:"List RPC / list-field plural, also the table name when the core is generated (default: <name>+\"s\")"`
 	Args   struct {
 		Name string `positional-arg-name:"name" description:"entity name, e.g. widget or order-line"`
 	} `positional-args:"yes" required:"yes"`
@@ -971,7 +1005,8 @@ type grpcData struct {
 	PluralType string // Widgets   — List RPC / list builder field (pascal of Plural)
 }
 
-// addGRPC generates a .proto contract and a gRPC handler adapting it to the Core.
+// addGRPC generates a .proto contract and a gRPC handler adapting it to the Core;
+// it generates core/<name> + store when missing.
 func addGRPC(out io.Writer, opts addRESTOpts) error {
 	if !nameRE.MatchString(opts.Name) {
 		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
@@ -1021,6 +1056,20 @@ func addGRPC(out io.Writer, opts addRESTOpts) error {
 		}
 	}
 
+	// The handler adapts the entity's Core. Generate Core + store only when the
+	// entity has none: an existing core (from `add rest`, or hand-written) is
+	// adapted as is, never mixed with generated files.
+	_, err := os.Stat(filepath.Join(dir, "core", pkg))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	fresh := os.IsNotExist(err)
+	if fresh {
+		if err := generateCore(out, dir, pkg, data); err != nil {
+			return err
+		}
+	}
+
 	for _, f := range files {
 		if err := renderFile(f.dest, f.tmpl, data); err != nil {
 			return err
@@ -1041,23 +1090,27 @@ func addGRPC(out io.Writer, opts addRESTOpts) error {
 		}
 	}
 
-	printGRPCNextSteps(out, data)
+	printGRPCNextSteps(out, data, fresh)
 	return nil
 }
 
 // printGRPCNextSteps prints the codegen and wiring a developer must run by hand:
 // the generated gen/ code and the server registration are app-specific.
-func printGRPCNextSteps(out io.Writer, d grpcData) {
+func printGRPCNextSteps(out io.Writer, d grpcData, fresh bool) {
 	fmt.Fprintf(out, `
-Scaffolded the %[1]q gRPC stack (service + gateway + swagger + protovalidate). The handler adapts %[1]s.Core, so run "skit add rest %[1]s" first if that module does not exist yet. Also generated once (idempotent): internal/app/server/grpc.go and internal/app/docs/docs.go. Next:
-
+Scaffolded the %[1]q gRPC stack (service + gateway + swagger + protovalidate). The handler adapts %[1]s.Core (the d.%[2]sCore provider in deps). Also generated once (idempotent): internal/app/server/grpc.go and internal/app/docs/docs.go. Next:
+`, d.Pkg, d.Type)
+	if fresh {
+		fmt.Fprintf(out, grpcCoreSteps, d.Pkg, d.Type, d.Module, d.Plural, tableDDL(d.Plural))
+	}
+	fmt.Fprintf(out, `
 1. Generate proto -> gRPC + gateway + swagger (needs buf). Run this BEFORE "go mod tidy" — the handler and docs package import the generated code:
 
    make proto      # buf dep update && buf lint proto && buf generate proto
 
 2. Wire the %[1]s service into the two seams in internal/app/server/grpc.go:
    - installGRPC:      gs.Install(%[1]sgrpc.New(d.%[2]sCore(ctx)))
-     import %[1]sgrpc "%[3]s/internal/app/handlers/%[1]sgrpc"  (build the Core the same way the REST wiring does)
+     import %[1]sgrpc "%[3]s/internal/app/handlers/%[1]sgrpc"
    - gatewayRegistrars: %[1]sv1.Register%[2]sServiceHandler,
      import %[1]sv1 "%[3]s/gen/%[1]s/v1"
 
@@ -1077,6 +1130,27 @@ Scaffolded the %[1]q gRPC stack (service + gateway + swagger + protovalidate). T
 Add tests for the gRPC handler with:  skit add grpc-test %[1]s
 `, d.Pkg, d.Type, d.Module, d.Plural)
 }
+
+// grpcCoreSteps is the extra step `add grpc` prints when it generated the Core +
+// store: the migration and the Core provider (the REST wiring minus Handler).
+// [1]=Pkg [2]=Type [3]=Module [4]=Plural [5]=tableDDL.
+const grpcCoreSteps = `
+0. Generated core/%[1]s (Core + %[1]sdb Postgres store, no REST api/; add it any time with "skit add rest %[1]s"). Add by hand:
+
+   a) migration internal/migrations/NNNN_%[4]s.sql:
+
+%[5]s
+   b) internal/app/deps/deps.go: add  %[2]sCore dim.Provider[*%[1]s.Core]  and init%[2]s to Initializers;
+      new file internal/app/deps/%[1]s.go:
+
+      var init%[2]s = func(c *Deps) (dim.CleanupFunc, error) {
+          c.%[2]sCore = dim.Once(func(ctx context.Context) (*%[1]s.Core, error) {
+              return %[1]s.NewCore(c.Logger, %[1]sdb.NewStore(c.Logger, c.DB(ctx))), nil
+          })
+          return nil, nil
+      }
+      // imports: "%[3]s/core/%[1]s", "%[3]s/core/%[1]s/%[1]sdb"
+`
 
 // addGRPCTestCommand scaffolds tests for an existing gRPC module: fast unit
 // tests over a mocked Store plus bufconn integration tests through the real
@@ -1137,7 +1211,14 @@ func addGRPCTest(out io.Writer, opts addRESTOpts) error {
 		PluralType: pascal(splitWords(plural)),
 	}
 
-	dest := filepath.Join(dir, "internal", "app", "handlers", pkg+"grpc", pkg+"grpc_test.go")
+	// The tests sit next to the handler and drive it over its Core; both come
+	// from `add grpc`, so fail early instead of generating code that won't build.
+	handlerDir := filepath.Join("internal", "app", "handlers", pkg+"grpc")
+	if err := requireDir(dir, handlerDir, "skit add grpc "+opts.Name); err != nil {
+		return err
+	}
+
+	dest := filepath.Join(dir, handlerDir, pkg+"grpc_test.go")
 	if err := writeIfAbsent(out, dest, "templates/grpc-test/handler_test.go.tmpl", data); err != nil {
 		return err
 	}
@@ -1280,15 +1361,7 @@ Scaffolded the %[1]q module. Next:
 1. Add a migration for the table (e.g. internal/migrations/NNNN_%[2]s.sql). The
    composite index backs the keyset (cursor) listing — GET /%[2]s/cursor:
 
-   CREATE TABLE %[2]s (
-       id          UUID PRIMARY KEY,
-       name        TEXT NOT NULL,
-       description TEXT NOT NULL DEFAULT '',
-       created_at  TIMESTAMPTZ NOT NULL,
-       updated_at  TIMESTAMPTZ NOT NULL
-   );
-   CREATE INDEX %[2]s_created_at_id_desc_idx ON %[2]s (created_at DESC, id DESC);
-`, d.Pkg, d.Plural)
+%[3]s`, d.Pkg, d.Plural, tableDDL(d.Plural))
 
 	// Step 2 — wiring, tailored to the project shape.
 	if full {
@@ -1352,6 +1425,21 @@ Scaffolded the %[1]q module. Next:
    go test ./tests/...       # needs docker
 `, d.Pkg)
 	}
+}
+
+// tableDDL is the migration for one entity's table, as the generated store
+// expects it; the composite index backs the keyset (cursor) listing. Shared by
+// the `add rest` and `add grpc` next-steps.
+func tableDDL(plural string) string {
+	return fmt.Sprintf(`   CREATE TABLE %[1]s (
+       id          UUID PRIMARY KEY,
+       name        TEXT NOT NULL,
+       description TEXT NOT NULL DEFAULT '',
+       created_at  TIMESTAMPTZ NOT NULL,
+       updated_at  TIMESTAMPTZ NOT NULL
+   );
+   CREATE INDEX %[1]s_created_at_id_desc_idx ON %[1]s (created_at DESC, id DESC);
+`, plural)
 }
 
 // moduleFromGoMod reads the module path from dir/go.mod.

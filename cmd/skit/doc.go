@@ -59,10 +59,12 @@
 // Scaffolds a gRPC module for one entity: a protobuf-editions .proto contract
 // (proto/<name>/v1/) and a thin handler (internal/app/handlers/<name>grpc/) that
 // adapts the generated service to the entity's Core, returning *errs.Error so the
-// server interceptor maps it to a gRPC status. It adapts core/<name>, so run
-// `skit add rest <name>` first. The proto uses edition 2023 with the Opaque
-// Go API; the command prints the codegen (make proto / buf generate) and server
-// registration to run by hand. Existing files are never overwritten.
+// server interceptor maps it to a gRPC status. It adapts core/<name>; when that
+// package is missing it also generates the Core + Postgres store (the same files
+// as add rest, without the REST api/). The proto uses edition 2023 with the
+// Opaque Go API; the command prints the codegen (make proto / buf generate) and
+// server registration to run by hand. It refuses to run if the .proto or handler
+// already exists.
 //
 // Usage:
 //
@@ -72,7 +74,8 @@
 //
 //	--dir     service root containing go.mod (default: current directory)
 //	--module  module path (default: read from go.mod)
-//	--plural  List RPC / list-field plural (default: <name>+"s")
+//	--plural  List RPC / list-field plural, also the table name when the core
+//	          is generated (default: <name>+"s")
 //
 // # Examples
 //

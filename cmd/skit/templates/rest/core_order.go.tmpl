@@ -5,7 +5,7 @@ import (
 )
 
 // Order-by field names the offset listing accepts (the cursor listing is fixed to
-// the keyset order). The api layer allowlists these for ?order_by (see
+// the keyset order). The transport allowlists these for ?order_by (e.g.
 // api/{{.Pkg}}/order.go) and the store maps them to columns (see {{.Pkg}}db/order.go).
 const (
 	OrderByCreatedAt = "created_at"

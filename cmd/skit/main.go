@@ -103,17 +103,17 @@ func main() {
 		os.Exit(1)
 	}
 	if _, err := add.AddCommand("rest-test", "scaffold tests for a REST module",
-		"Generate API (mocked-store) tests and an integration suite for one entity.", &addRestTestCommand{}); err != nil {
+		"Generate API (mocked-store) tests and an integration suite for one entity. Requires the module from `skit add rest`.", &addRestTestCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	if _, err := add.AddCommand("grpc", "scaffold a gRPC stack",
-		"Generate a .proto contract + gRPC handler + gRPC-gateway (REST) + OpenAPI/swagger + protovalidate for one entity.", &addGRPCCommand{}); err != nil {
+		"Generate a .proto contract + gRPC handler + gRPC-gateway (REST) + OpenAPI/swagger + protovalidate for one entity. Generates core/<name> + store if missing.", &addGRPCCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	if _, err := add.AddCommand("grpc-test", "scaffold tests for a gRPC module",
-		"Generate unit (mocked-Core) + bufconn integration tests for one gRPC entity.", &addGRPCTestCommand{}); err != nil {
+		"Generate unit (mocked-Core) + bufconn integration tests for one gRPC entity. Requires the handler from `skit add grpc`.", &addGRPCTestCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

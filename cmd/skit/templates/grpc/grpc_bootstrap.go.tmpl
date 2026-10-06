@@ -50,7 +50,7 @@ func buildGRPCServer(ctx context.Context, a *App, addr string) *grpcserver.Serve
 
 // installGRPC registers every gRPC feature handler. `skit add grpc <entity>`
 // adds one line here per entity — each handler implements grpcserver.Service.
-// Build the handler from its Core the same way the REST wiring does, e.g.:
+// Build the handler from its Core provider in deps, e.g.:
 //
 //	gs.Install({{.Pkg}}grpc.New(d.{{.Type}}Core(ctx)))
 func installGRPC(ctx context.Context, gs *grpcserver.Server, d *deps.Deps) {

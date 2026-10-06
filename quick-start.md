@@ -125,7 +125,8 @@ go test ./core/widget/...     # listing test; needs Docker, skipped under -short
 
 ## 4. Add a gRPC module (optional)
 
-Adapts an existing `core/<name>`, so run `skit add rest <name>` first.
+Works on its own (it generates `core/<name>` + store when missing) or on top of
+`skit add rest <name>`.
 
 ```bash
 skit add grpc widget
@@ -136,6 +137,7 @@ This generates a protobuf-editions contract and a thin handler:
 ```
 proto/widget/v1/widget.proto                    # edition 2023, Opaque Go API
 internal/app/handlers/widgetgrpc/widgetgrpc.go  # adapts widget.Core
+core/widget/...                                 # Core + store, only when missing
 ```
 
 Then generate the code and register the service (the CLI prints these):
@@ -145,7 +147,7 @@ make proto      # buf lint + generate (commits to gen/widget/v1/)
 ```
 
 ```go
-gs.Install(widgetgrpc.New(core))   // where you build the gRPC server
+gs.Install(widgetgrpc.New(d.WidgetCore(ctx)))   // installGRPC in internal/app/server/grpc.go
 go build ./...
 ```
 
@@ -156,7 +158,7 @@ go build ./...
 | `skit new <module>` | Scaffold a new service module |
 | `skit new <module> --template <tmpl>` | Scaffold via a gonew template |
 | `skit add rest <name>` | Core + Postgres store + REST transport for one entity |
-| `skit add grpc <name>` | `.proto` contract + gRPC handler adapting one entity's Core |
+| `skit add grpc <name>` | `.proto` + gRPC handler (+ Core + store if missing) |
 | `skit version` | Print the CLI version |
 
 Common flags for `add`: `--dir` (service root, default `.`), `--module` (default
