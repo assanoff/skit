@@ -320,6 +320,7 @@ make proto         # buf lint + generate in ../skit-x (proto -> gen)
 ```bash
 make build      # build the SDK
 make test       # unit tests
+make check      # everything CI checks: tidy, go fix, lint, govulncheck, tests
 ```
 
 See [`skit-x`](https://github.com/assanoff/skit-x) for a full application wired with

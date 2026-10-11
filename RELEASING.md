@@ -8,7 +8,15 @@ SDK from GitHub — it is not part of this module and is never tagged here.
 
 ## Tooling
 
-Install the dev tools (golangci-lint, gonew, gorelease, gofumpt, + proto):
+The gate tools (golangci-lint, govulncheck, gorelease) are pinned in the
+`Makefile` and run via `go run`, so there is nothing to install. Run everything
+CI checks with:
+
+```bash
+make check
+```
+
+Optional convenience tools (gonew, tparse, + proto):
 
 ```bash
 make tools

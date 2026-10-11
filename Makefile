@@ -1,17 +1,21 @@
 .DEFAULT_GOAL := help
 
 GO          ?= go
-MODULES     := .
-LINT        ?= golangci-lint
 # The runnable showcase app (full CRUD, integration tests, proto codegen) lives
 # in a sibling repo that imports this SDK; some targets below drive it there.
 SHOWCASE    ?= ../skit-x
 
-# Dev tool versions (override to pin, e.g. GORELEASE=...@v0.0.0-20240...).
-GOLANGCI    ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+# Gate and CI tools are pinned and run via `go run pkg@version`, nothing to
+# install. GOLANGCI matches the golangci-lint version in .github/workflows/ci.yml.
+GOLANGCI    ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
+GORELEASE   ?= golang.org/x/exp/cmd/gorelease@v0.0.0-20261009195045-ca0d7ba23607
+# Plain `=`, not `?=`: GNU make 3.81 (macOS) predefines LINT = lint, which `?=`
+# does not override. A local binary still works: make lint LINT=golangci-lint.
+LINT         = $(GO) run $(GOLANGCI)
+
+# Convenience tools outside any gate; latest is fine.
 GONEW       ?= golang.org/x/tools/cmd/gonew@latest
-GORELEASE   ?= golang.org/x/exp/cmd/gorelease@latest
-GOFUMPT     ?= mvdan.cc/gofumpt@latest
 TPARSE      ?= github.com/mfridman/tparse@latest
 
 # COVERDIR is the gitignored directory all coverage artifacts live in, so they
@@ -26,13 +30,21 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
+.PHONY: check
+check: tidy-check fix-check lint vuln test ## Everything CI checks
+
 .PHONY: tidy
-tidy: ## Run go mod tidy in all modules
-	@for m in $(MODULES); do echo ">> tidy $$m"; (cd $$m && $(GO) mod tidy); done
+tidy: ## Run go mod tidy
+	$(GO) mod tidy
+
+.PHONY: tidy-check
+tidy-check: ## go.mod and go.sum are tidy, the module cache is untampered
+	$(GO) mod tidy -diff
+	$(GO) mod verify
 
 .PHONY: build
-build: ## Build all modules
-	@for m in $(MODULES); do echo ">> build $$m"; (cd $$m && $(GO) build ./...); done
+build: ## Build the SDK
+	$(GO) build ./...
 
 # Build the CLI into bin/ (gitignored), NEVER bare `go build ./cmd/skit`,
 # which would drop a `skit` binary at the repo root.
@@ -42,28 +54,28 @@ build-cli: ## Build the skit CLI into bin/ (gitignored)
 	@echo "built bin/skit"
 
 .PHONY: vet
-vet: ## go vet all modules
-	@for m in $(MODULES); do echo ">> vet $$m"; (cd $$m && $(GO) vet ./...); done
+vet: ## go vet
+	$(GO) vet ./...
 
 .PHONY: test
-test: ## Run unit tests (short, race) with per-package coverage
-	@for m in $(MODULES); do echo ">> test $$m"; (cd $$m && $(GO) test -race -short -cover ./...); done
+test: ## Unit tests (short, race, random order) with per-package coverage
+	$(GO) test -race -short -shuffle=on -cover ./...
 
 .PHONY: test-json
 test-json: ## Unit tests with a pretty pass/fail + coverage summary (tparse)
-	@bash -o pipefail -c '$(GO) test -short -race -cover ./... -json | $(GO) run $(TPARSE) -all'
+	@bash -o pipefail -c '$(GO) test -short -race -shuffle=on -cover ./... -json | $(GO) run $(TPARSE) -all'
 
 .PHONY: cover
 cover: ## Write a coverage profile, print the total, and render the HTML
 	@mkdir -p $(COVERDIR)
-	@for m in $(MODULES); do (cd $$m && $(GO) test -short -covermode=atomic -coverprofile=$(COVERPROFILE) ./...); done
+	@$(GO) test -short -covermode=atomic -coverprofile=$(COVERPROFILE) ./...
 	@$(GO) tool cover -func=$(COVERPROFILE) | tail -n1
 	@$(GO) tool cover -html=$(COVERPROFILE) -o $(COVERHTML) && echo ">> wrote $(COVERHTML)"
 
 .PHONY: cover-check
 cover-check: ## Fail if total unit-test coverage is below THRESHOLD% (CI gate; override THRESHOLD=NN)
 	@mkdir -p $(COVERDIR)
-	@for m in $(MODULES); do (cd $$m && $(GO) test -short -covermode=atomic -coverprofile=$(COVERPROFILE) ./...); done
+	@$(GO) test -short -covermode=atomic -coverprofile=$(COVERPROFILE) ./...
 	@total=$$($(GO) tool cover -func=$(COVERPROFILE) | awk '/^total:/ {print $$3}' | tr -d '%'); \
 	if awk "BEGIN { exit !($$total + 0 >= $(THRESHOLD)) }"; then \
 		echo ">> coverage $$total% >= $(THRESHOLD)% — OK"; \
@@ -76,17 +88,32 @@ test-integration: ## Run integration tests in the showcase app (requires docker 
 	cd $(SHOWCASE) && $(GO) test -race -count=1 ./internal/tests/...
 
 .PHONY: lint
-lint: ## Run golangci-lint in all modules
-	@for m in $(MODULES); do echo ">> lint $$m"; (cd $$m && $(LINT) run); done
+lint: ## Run golangci-lint
+	$(LINT) run
+
+.PHONY: fmt
+fmt: ## Format with the .golangci.yml formatters (gofumpt, goimports)
+	$(LINT) fmt
+
+.PHONY: fix
+fix: ## Apply go fix, linter autofixes and formatting
+	$(GO) fix ./...
+	$(LINT) run --fix
+	$(LINT) fmt
+
+.PHONY: fix-check
+fix-check: ## go fix -diff: modernizations and //go:fix inline are applied
+	$(GO) fix -diff ./...
+
+.PHONY: vuln
+vuln: ## Known vulnerabilities in reachable code
+	$(GO) run $(GOVULNCHECK) ./...
 
 .PHONY: tools
-tools: proto-tools ## Install all dev tools (lint, fmt, scaffold, release, proto)
-	$(GO) install $(GOLANGCI)
+tools: proto-tools ## Install convenience dev tools (scaffold, test output, proto)
 	$(GO) install $(GONEW)
-	$(GO) install $(GORELEASE)
-	$(GO) install $(GOFUMPT)
 	$(GO) install $(TPARSE)
-	@echo "installed: golangci-lint, gonew, gorelease, gofumpt, tparse (+ proto tools)"
+	@echo "installed: gonew, tparse (+ proto tools)"
 
 .PHONY: proto-tools
 proto-tools: ## Install protobuf codegen tools (buf, protoc-gen-go, protoc-gen-go-grpc, grpc-gateway)
@@ -100,10 +127,6 @@ proto: ## Generate gRPC + gateway code in the showcase app (run proto-tools firs
 	# Workspace mode (no path arg) so buf.yaml deps (googleapis) resolve for the
 	# google.api.http annotations the gateway plugin needs.
 	cd $(SHOWCASE) && buf dep update && buf lint && buf generate
-
-.PHONY: fmt
-fmt: ## Format code
-	@for m in $(MODULES); do (cd $$m && $(GO) tool gofumpt -w . 2>/dev/null || gofmt -w .); done
 
 # gorelease analyzes the committed tree, so a release must start from a clean
 # working tree. This also keeps the tag pointing at exactly what was verified.

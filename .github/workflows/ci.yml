@@ -8,35 +8,39 @@ on:
 permissions:
   contents: read
 
+# Go comes from the go directive in go.mod; check-latest picks the newest patch
+# release, so stdlib fixes arrive without a toolchain bump. Actions are pinned
+# by commit SHA; Dependabot keeps the SHAs and version comments current.
 jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.27"
-          cache-dependency-path: go.sum
+          go-version-file: go.mod
+          check-latest: true
       - name: Build
         run: go build ./...
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test -race -short ./...
+        run: make test
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.27"
-      # v7+ installs golangci-lint v2 (v6 shipped v1, built with an older Go that
-      # rejects a go 1.27 module and our version: "2" config). Keep in sync with
-      # the v2 binary the Makefile installs via `make tools`.
-      - uses: golangci/golangci-lint-action@v7
+          go-version-file: go.mod
+          check-latest: true
+      # Keep version in sync with GOLANGCI in the Makefile.
+      - uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7.0.1
         with:
-          version: v2.13.2
+          version: v2.14.0
+      - name: go fix and go.mod checks
+        run: make fix-check tidy-check
 
   # Verify semantic-version compatibility of the public module against the
   # latest release tag. Skipped on the first release (no tag yet).
@@ -47,15 +51,16 @@ jobs:
   gorelease:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # tags needed for the base comparison
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.27"
+          go-version-file: go.mod
+          check-latest: true
       - name: gorelease
         # gorelease infers the base from the latest tag (or "none" before the
         # first release) and prints the suggested next version. On v1+ it exits
         # non-zero if there are incompatible API changes without a major bump;
         # on v0.x incompatible changes are reported but do not fail the build.
-        run: go run golang.org/x/exp/cmd/gorelease@latest
+        run: make gorelease
