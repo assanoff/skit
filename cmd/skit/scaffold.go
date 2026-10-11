@@ -165,6 +165,8 @@ func fullOutputPath(rel string) string {
 		dest = filepath.Join(filepath.Dir(dest), ".gitignore")
 	case "env.example":
 		dest = filepath.Join(filepath.Dir(dest), ".env.example")
+	case "golangci.yml":
+		dest = filepath.Join(filepath.Dir(dest), ".golangci.yml")
 	}
 	return dest
 }

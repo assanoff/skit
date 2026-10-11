@@ -280,7 +280,7 @@ func TestAddWorkerClaimVariant(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "photoimport.go", src, parser.AllErrors); err != nil {
 		t.Errorf("photoimport.go does not parse: %v", err)
 	}
-	for _, want := range []string{"const Kind =", "func (w *Worker) Handle(ctx context.Context, t queue.Task) error", "PhotoImportTask"} {
+	for _, want := range []string{"const Kind =", "func (w *Worker) Handle(ctx context.Context, t queue.Task) error", "type Task struct"} {
 		if !strings.Contains(src, want) {
 			t.Errorf("claim worker missing %q:\n%s", want, src)
 		}

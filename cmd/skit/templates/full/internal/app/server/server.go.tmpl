@@ -134,7 +134,7 @@ func addOutboxWorkers(ctx context.Context, a *App) {
 // initConsumers registers the queue consumers — the receiving half of the
 // pipeline whose sending half (the outbox workers) belongs to initWorkers.
 // Competing consumers, so more than one replica is safe.
-func initConsumers(ctx context.Context, a *App) error {
+func initConsumers(ctx context.Context, a *App) error { //nolint:revive // ctx is for the consumers wired here
 	// Wire queue consumers here; a RabbitMQ one goes behind Broker.Enabled, e.g.:
 	//   if a.d.Opts.Broker.Enabled {
 	//   	c, err := rabbitmq.NewConsumer(a.d.BrokerConn(ctx), a.d.Logger, cfg, handler)

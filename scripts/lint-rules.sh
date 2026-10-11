@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
 # Project rules that golangci-lint has no linter for. Checks tracked files and
-# new files that are not ignored yet, so a fresh file fails before `git add`.
-# httplog is vendored third-party code and is not checked.
+# new files that are not ignored yet, so a fresh file fails before `git add`;
+# outside a git repository (a just-generated service) it checks every file.
+# Generated code is skipped. The optional argument is a regexp of paths to skip.
+#
+# Usage: lint-rules.sh [exclude-regexp]
 set -euo pipefail
 
-files=$(git ls-files --cached --others --exclude-standard '*.go' '*.go.tmpl' |
-	grep -v '^httplog/')
+exclude=${1:-'^$'}
+
+list() {
+	git ls-files --cached --others --exclude-standard '*.go' '*.go.tmpl' 2>/dev/null ||
+		find . -type f \( -name '*.go' -o -name '*.go.tmpl' \) | sed 's|^\./||'
+}
+
+files=$(list | grep -Ev "$exclude" |
+	xargs grep -L '^// Code generated .* DO NOT EDIT\.$' || true)
+if [ -z "$files" ]; then
+	exit 0
+fi
 fail=0
 
 # No else: use an early return.
-if grep -nE '\}[[:space:]]*else\b' $files; then
+if grep -HnE '\}[[:space:]]*else\b' $files; then
 	echo 'lint-rules: else — replace it with an early return'
 	fail=1
 fi

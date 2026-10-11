@@ -10,7 +10,10 @@ import (
 )
 
 // db{{.Type}} is the database representation of a {{.Type}}. The id is a
-// dbx.UUID: the stdlib uuid.UUID has no sql.Scanner / driver.Valuer.
+// dbx.UUID: the stdlib uuid.UUID has no sql.Scanner / driver.Valuer. Every
+// field must be mapped in toDB: a forgotten one fails the lint (exhaustruct).
+//
+//exhaustruct:enforce
 type db{{.Type}} struct {
 	ID          dbx.UUID  `db:"id"`
 	Name        string    `db:"name"`
@@ -30,6 +33,7 @@ func toDB(v {{.Pkg}}.{{.Type}}) db{{.Type}} {
 }
 
 func toCore(r db{{.Type}}) {{.Pkg}}.{{.Type}} {
+	//exhaustruct:enforce
 	return {{.Pkg}}.{{.Type}}{
 		ID:          uuid.UUID(r.ID),
 		Name:        r.Name,

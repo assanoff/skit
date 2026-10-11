@@ -66,7 +66,7 @@ func (r *kafkaRunnable) Name() string { return r.name }
 // Start runs conc readers in the consumer group until ctx is canceled.
 func (r *kafkaRunnable) Start(ctx context.Context) error {
 	var wg sync.WaitGroup
-	for i := 0; i < r.conc; i++ {
+	for range r.conc {
 		reader := kgo.NewReader(kgo.ReaderConfig{Brokers: r.brokers, GroupID: r.group, Topic: r.topic})
 		r.mu.Lock()
 		r.readers = append(r.readers, reader)

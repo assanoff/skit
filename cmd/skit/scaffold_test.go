@@ -125,10 +125,36 @@ func TestScaffoldFullWithReplace(t *testing.T) {
 	}
 
 	// Dotfiles that go:embed cannot carry with a leading dot are restored.
-	for _, dotfile := range []string{".gitignore", ".env.example"} {
+	for _, dotfile := range []string{".gitignore", ".env.example", ".golangci.yml"} {
 		if _, err := os.Stat(filepath.Join(dir, dotfile)); err != nil {
 			t.Errorf("%s not generated: %v", dotfile, err)
 		}
+	}
+
+	// The lint config scopes wrapcheck and goimports to the new module.
+	lintCfg := readFile(t, filepath.Join(dir, ".golangci.yml"))
+	if !strings.Contains(lintCfg, "local-prefixes: [github.com/me/svc]") {
+		t.Errorf(".golangci.yml not scoped to the module:\n%s", lintCfg)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "scripts", "lint-rules.sh")); err != nil {
+		t.Errorf("scripts/lint-rules.sh not generated: %v", err)
+	}
+}
+
+// The full template ships a copy of the SDK's project-rules script: go:embed
+// cannot reach scripts/ above cmd/skit. The two must stay identical.
+func TestLintRulesScriptMatchesSDK(t *testing.T) {
+	sdk, err := os.ReadFile(filepath.Join("..", "..", "scripts", "lint-rules.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := templatesFS.ReadFile("templates/full/scripts/lint-rules.sh.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(sdk, tmpl) {
+		t.Error("templates/full/scripts/lint-rules.sh.tmpl differs from scripts/lint-rules.sh:" +
+			" copy the SDK script over the template")
 	}
 }
 

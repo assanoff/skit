@@ -1328,7 +1328,7 @@ Scaffolded the %[1]q upstream client (%[2]s transport). Next:
 3. Depend on it from the consumer side — declare a narrow interface in the core
    that uses it and inject *%[1]s.Client:
 
-   type %[4]sGateway interface { Get%[4]s(ctx context.Context, id string) (%[1]s.%[4]sItem, error) }
+   type %[4]sGateway interface { Get%[4]s(ctx context.Context, id string) (%[1]s.Item, error) }
    // build it in deps/wiring: %[1]s.New(%[1]s.Config{BaseURL: ...%[5]s})
 
 4. go test ./internal/clients/%[1]s/...

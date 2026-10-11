@@ -1,10 +1,20 @@
 SHELL := /bin/bash
 GO ?= go
 
-.PHONY: help run run-http run-worker run-consumer build test tidy lint generate proto migrate-up migrate-down migrate-status compose-up compose-down
+# Gate tools are pinned and run via `go run pkg@version`, nothing to install.
+GOLANGCI    ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
+DEADCODE    ?= golang.org/x/tools/cmd/deadcode@v0.52.0
+# Plain `=`, not `?=`: GNU make 3.81 (macOS) predefines LINT = lint, which `?=`
+# does not override. A local binary still works: make lint LINT=golangci-lint.
+LINT         = $(GO) run $(GOLANGCI)
+
+.PHONY: help check run run-http run-worker run-consumer build test tidy tidy-check lint lint-rules fmt fix fix-check vuln deadcode generate proto migrate-up migrate-down migrate-status compose-up compose-down
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}'
+
+check: tidy-check fix-check lint lint-rules vuln test ## Everything CI should check
 
 run: ## Run everything in one process (serve). Ctrl+C shuts down gracefully (not a make error).
 	@trap 'exit 0' INT; $(GO) run . serve
@@ -21,11 +31,15 @@ run-consumer: ## Run the queue consumers only, debug port shifted
 build: ## Build the binary into bin/
 	$(GO) build -o bin/{{.Name}} .
 
-test: ## Run unit tests (short, race)
-	$(GO) test -short -race ./...
+test: ## Run unit tests (short, race, random order)
+	$(GO) test -short -race -shuffle=on ./...
 
 tidy: ## go mod tidy
 	$(GO) mod tidy
+
+tidy-check: ## go.mod and go.sum are tidy, the module cache is untampered
+	$(GO) mod tidy -diff
+	$(GO) mod verify
 
 generate: ## Generate code: mocks (moq) via //go:generate directives
 	$(GO) generate ./...
@@ -36,7 +50,31 @@ proto: ## Lint protos and generate gRPC + gateway + swagger into gen/ (needs `bu
 	buf generate proto
 
 lint: ## Run golangci-lint
-	golangci-lint run ./...
+	$(LINT) run
+
+lint-rules: ## Project rules: no else, one-line functions fit in 80 columns
+	@bash scripts/lint-rules.sh
+
+fmt: ## Format with the .golangci.yml formatters (gofumpt, goimports)
+	$(LINT) fmt
+
+# `run --fix` exits non-zero while findings without an autofix remain; the
+# leading `-` lets formatting still run. Review the diff before committing.
+fix: ## Apply go fix, linter autofixes and formatting
+	$(GO) fix ./...
+	-$(LINT) run --fix
+	$(LINT) fmt
+
+fix-check: ## go fix -diff: modernizations and //go:fix inline are applied
+	$(GO) fix -diff ./...
+
+vuln: ## Known vulnerabilities in reachable code
+	$(GO) run $(GOVULNCHECK) ./...
+
+# A report, not a gate: modules that `skit add` generates stay unreachable
+# until you wire them, and test-only helpers count as dead from main.
+deadcode: ## Report functions main never reaches
+	$(GO) run $(DEADCODE) ./...
 
 migrate-up: ## Apply all pending migrations
 	$(GO) run . migrate up

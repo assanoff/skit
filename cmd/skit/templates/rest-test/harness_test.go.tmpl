@@ -61,10 +61,3 @@ func testOpts(db dbx.Config) config.ServerOpts {
 		Broker: config.Broker{Enabled: false},
 	}
 }
-
-// run is a named subtest — the orchestrator style: one Test_<Entity> boots the
-// server, seeds, then runs case functions in order via run(...).
-func run(t *testing.T, name string, fn func(t *testing.T)) {
-	t.Helper()
-	t.Run(name, fn)
-}

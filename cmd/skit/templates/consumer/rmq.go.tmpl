@@ -2,6 +2,7 @@ package {{.Pkg}}
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	rmq "github.com/wagslane/go-rabbitmq"
@@ -41,7 +42,8 @@ func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (work
 		keys = []string{"#"} // bind to everything on the exchange by default
 	}
 
-	rmqOpts := []func(*rmq.ConsumerOptions){
+	rmqOpts := make([]func(*rmq.ConsumerOptions), 0, 7+len(keys))
+	rmqOpts = append(rmqOpts,
 		rmq.WithConsumerOptionsConsumerName(name),
 		rmq.WithConsumerOptionsQueueDurable,
 		rmq.WithConsumerOptionsConcurrency(concurrency),
@@ -49,14 +51,14 @@ func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (work
 		rmq.WithConsumerOptionsExchangeKind("topic"),
 		rmq.WithConsumerOptionsExchangeDeclare,
 		rmq.WithConsumerOptionsExchangeDurable,
-	}
+	)
 	for _, k := range keys {
 		rmqOpts = append(rmqOpts, rmq.WithConsumerOptionsRoutingKey(k))
 	}
 
 	rc, err := rmq.NewConsumer(conn.Conn, opts.Group, rmqOpts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: new rabbitmq consumer: %w", name, err)
 	}
 	return &rmqRunnable{log: c.log, rc: rc, h: c.Handle, name: name}, nil
 }
@@ -81,7 +83,7 @@ func (r *rmqRunnable) Start(ctx context.Context) error {
 		return rabbitmq.ToAction(action)
 	})
 	if err != nil && ctx.Err() == nil {
-		return err // a context-driven shutdown is graceful, not an error
+		return fmt.Errorf("%s: consume: %w", r.name, err) // a ctx shutdown is graceful
 	}
 	return nil
 }

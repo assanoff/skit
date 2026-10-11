@@ -2,6 +2,7 @@
 // (like order.go) so it is the obvious place to add a predicate when the model
 // grows: each optional column becomes a nil-checked field on QueryFilter that
 // binds a named param and appends one condition, all joined under a single WHERE.
+
 package {{.Pkg}}db
 
 import (

@@ -44,6 +44,7 @@ func newTestHandler(store *mocks.StoreMock) *Handler {
 // newTestClient starts an in-memory server (real interceptors) over a mocked
 // Store and returns a client stub.
 func newTestClient(t *testing.T, store *mocks.StoreMock) {{.Pkg}}v1.{{.Type}}ServiceClient {
+	t.Helper()
 	h := New({{.Pkg}}.NewCore(testLogger(), store))
 	srv := grpctest.New(t, []grpcserver.Service{h})
 	return {{.Pkg}}v1.New{{.Type}}ServiceClient(srv.Conn)

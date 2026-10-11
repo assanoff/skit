@@ -110,7 +110,11 @@ fix-check: ## go fix -diff: modernizations and //go:fix inline are applied
 
 .PHONY: lint-rules
 lint-rules: ## Project rules: no else, one-line functions fit in 80 columns
-	@scripts/lint-rules.sh
+	@scripts/lint-rules.sh '^httplog/'
+
+.PHONY: gen-check
+gen-check: ## Scaffold a service with every `skit add` module and run its make check (needs buf)
+	@scripts/gen-check.sh
 
 .PHONY: vuln
 vuln: ## Known vulnerabilities in reachable code

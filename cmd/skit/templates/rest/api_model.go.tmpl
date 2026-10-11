@@ -2,6 +2,7 @@ package {{.Pkg}}
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/assanoff/skit/errs"
@@ -18,13 +19,16 @@ type Create{{.Type}}Req struct {
 
 // Decode implements rest.Decoder.
 func (req *Create{{.Type}}Req) Decode(data []byte) error {
-	return json.Unmarshal(data, req)
+	if err := json.Unmarshal(data, req); err != nil {
+		return fmt.Errorf("decode create {{.Pkg}}: %w", err)
+	}
+	return nil
 }
 
 // Validate validates the request. By default it checks the `validate:` struct
 // tags via errs.Check (returns an *errs.Error → HTTP 400). Replace the body with
 // custom checks, or combine both, as the rules grow.
-func (req Create{{.Type}}Req) Validate() error {
+func (req *Create{{.Type}}Req) Validate() error {
 	return errs.Check(req)
 }
 
@@ -37,16 +41,22 @@ type Update{{.Type}}Req struct {
 
 // Decode implements rest.Decoder.
 func (req *Update{{.Type}}Req) Decode(data []byte) error {
-	return json.Unmarshal(data, req)
+	if err := json.Unmarshal(data, req); err != nil {
+		return fmt.Errorf("decode update {{.Pkg}}: %w", err)
+	}
+	return nil
 }
 
 // Validate checks the struct tags; extend with custom rules as needed.
-func (req Update{{.Type}}Req) Validate() error {
+func (req *Update{{.Type}}Req) Validate() error {
 	return errs.Check(req)
 }
 
 // Response is the REST representation of a {{.Pkg}}. It implements
-// rest.ResponseEncoder (Encode), so a handler can return it directly.
+// rest.ResponseEncoder (Encode), so a handler can return it directly. Every
+// field must be mapped in toResponse (exhaustruct).
+//
+//exhaustruct:enforce
 type Response struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
@@ -58,7 +68,10 @@ type Response struct {
 // Encode implements rest.ResponseEncoder.
 func (r Response) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(r)
-	return data, "application/json", err
+	if err != nil {
+		return nil, "", fmt.Errorf("encode {{.Pkg}}: %w", err)
+	}
+	return data, "application/json", nil
 }
 
 func toResponse(v {{.Pkg}}core.{{.Type}}) Response {

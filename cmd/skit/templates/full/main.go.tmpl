@@ -1,8 +1,12 @@
 // Command {{.Name}} is a skit-based HTTP service scaffolded by `skit new --full`.
 package main
 
-import "{{.Module}}/internal/cmd"
+import (
+	"os"
+
+	"{{.Module}}/internal/cmd"
+)
 
 func main() {
-	cmd.Execute()
+	os.Exit(cmd.Execute())
 }

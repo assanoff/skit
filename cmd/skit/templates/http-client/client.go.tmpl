@@ -10,7 +10,7 @@
 // interfaces, return structs"), e.g.
 //
 //	type {{.Type}}Gateway interface {
-//		Get{{.Type}}(ctx context.Context, id string) ({{.Pkg}}.{{.Type}}Item, error)
+//		Get{{.Type}}(ctx context.Context, id string) ({{.Pkg}}.Item, error)
 //	}
 //
 // *{{.Pkg}}.Client satisfies it; tests inject a fake.
@@ -18,6 +18,7 @@ package {{.Pkg}}
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -82,8 +83,8 @@ func New(cfg Config) (*Client, error) {
 
 // --- API methods: replace the example below with the endpoints you need ---
 
-// {{.Type}}Item is an example response shape. Replace it with the real contract.
-type {{.Type}}Item struct {
+// Item is an example response shape. Replace it with the real contract.
+type Item struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
@@ -91,16 +92,17 @@ type {{.Type}}Item struct {
 // Get{{.Type}} shows the method pattern: build a request against baseURL, then
 // decode the 2xx JSON body with httpclient.DoJSON (a non-2xx becomes a
 // *httpclient.StatusError the caller can branch on). Replace it with real calls.
-func ({{.Recv}} *Client) Get{{.Type}}(ctx context.Context, id string) ({{.Type}}Item, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, {{.Recv}}.baseURL+"/{{.Pkg}}/"+id, nil)
+func ({{.Recv}} *Client) Get{{.Type}}(ctx context.Context, id string) (Item, error) {
+	url := {{.Recv}}.baseURL + "/{{.Pkg}}/" + id
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
-		return {{.Type}}Item{}, err
+		return Item{}, fmt.Errorf("{{.Pkg}}: new request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 
-	var out {{.Type}}Item
+	var out Item
 	if err := httpclient.DoJSON({{.Recv}}.http, req, &out); err != nil {
-		return {{.Type}}Item{}, err
+		return Item{}, err
 	}
 	return out, nil
 }

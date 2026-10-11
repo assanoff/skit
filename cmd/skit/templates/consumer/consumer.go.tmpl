@@ -23,9 +23,9 @@ func New(log *logger.Logger) *Consumer {
 	return &Consumer{log: log}
 }
 
-// {{.Type}}Event is the business payload carried in the CloudEvent Data field.
+// Event is the business payload carried in the CloudEvent Data field.
 // Shape it to match the producer's contract.
-type {{.Type}}Event struct {
+type Event struct {
 	// TODO: event fields, e.g.
 	// ID string `json:"id"`
 }
@@ -41,7 +41,7 @@ type {{.Type}}Event struct {
 //   - broker.Requeue — transient failure (DB down, timeout); redeliver later
 //   - broker.Discard — permanent failure (bad payload); drop / dead-letter
 func (c *Consumer) Handle(ctx context.Context, m broker.Message) broker.Action {
-	var evt {{.Type}}Event
+	var evt Event
 	if err := json.Unmarshal(m.Data, &evt); err != nil {
 		c.log.Error(ctx, "decode {{.Pkg}} event", "type", m.Type, "id", m.ID, "err", err)
 		return broker.Discard // malformed payload: requeue would loop forever

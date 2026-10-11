@@ -2,6 +2,7 @@
 // gRPC server (the full skit interceptor chain + protovalidate request checks)
 // and the gRPC-gateway REST proxy route set with the OpenAPI docs. Wire both
 // into the commands as the next-steps describe.
+
 package server
 
 import (
@@ -54,8 +55,7 @@ func buildGRPCServer(ctx context.Context, a *App, addr string) *grpcserver.Serve
 //
 //	gs.Install({{.Pkg}}grpc.New(d.{{.Type}}Core(ctx)))
 func installGRPC(ctx context.Context, gs *grpcserver.Server, d *deps.Deps) {
-	_, _, _ = ctx, gs, d
-	// gs.Install({{.Pkg}}grpc.New(d.{{.Type}}Core(ctx)))
+	_, _, _ = ctx, gs, d // one gs.Install per entity, as in the example above
 }
 
 // GRPCGateway is the gRPC-gateway REST proxy (/v1/...) to the gRPC server on
