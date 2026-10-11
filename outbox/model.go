@@ -16,6 +16,8 @@ import (
 // It is deliberately separate from the core Event (outbox.go): Event is the
 // pure type callers see, rowDB owns the db tags and NULL handling. The two are
 // bridged by toCoreRow / toDBRow so neither leaks into the other.
+//
+//exhaustruct:enforce
 type rowDB struct {
 	ID            dbx.UUID           `db:"id"`
 	Type          string             `db:"type"`
@@ -60,9 +62,10 @@ func toDBRow(e Event) rowDB {
 
 // toCoreRow converts a DB row back into a core Event. NULL columns become zero
 // values ("" for LastError, time.Time{} for SentAt/LeasedAt, uuid.Nil() for
-// LeaseID); timestamps are normalized to UTC.
+// LeaseID): a NULL scans into a zero Time/V; timestamps are normalized to UTC.
 func toCoreRow(r rowDB) Event {
-	e := Event{
+	//exhaustruct:enforce
+	return Event{
 		ID:            uuid.UUID(r.ID),
 		Type:          r.Type,
 		ContentType:   r.ContentType,
@@ -76,17 +79,10 @@ func toCoreRow(r rowDB) Event {
 		LastError:     r.LastError.String,
 		NextAttemptAt: r.NextAttemptAt.UTC(),
 		CreatedAt:     r.CreatedAt.UTC(),
+		SentAt:        r.SentAt.Time.UTC(),
+		LeasedAt:      r.LeasedAt.Time.UTC(),
+		LeaseID:       uuid.UUID(r.LeaseID.V),
 	}
-	if r.SentAt.Valid {
-		e.SentAt = r.SentAt.Time.UTC()
-	}
-	if r.LeasedAt.Valid {
-		e.LeasedAt = r.LeasedAt.Time.UTC()
-	}
-	if r.LeaseID.Valid {
-		e.LeaseID = uuid.UUID(r.LeaseID.V)
-	}
-	return e
 }
 
 func toCoreRows(rows []rowDB) []Event {

@@ -25,6 +25,7 @@ type taskRow struct {
 // toTask converts a DB row into a core Task. NULL columns become zero values
 // ("" for LeaseID/LastError); timestamps are normalized to UTC.
 func toTask(r taskRow) Task {
+	//exhaustruct:enforce
 	return Task{
 		ID:        r.ID,
 		Name:      r.Name,

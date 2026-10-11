@@ -8,8 +8,10 @@ import (
 
 // auditLogDB is the database representation of an auditlog.AuditLog row. Payload
 // maps to a JSONB column as raw bytes.
+//
+//exhaustruct:enforce
 type auditLogDB struct {
-	ID        int       `db:"id"`
+	ID        int       `db:"id"` //exhaustruct:optional // serial, set by the database
 	ModelType string    `db:"model_type"`
 	ModelID   string    `db:"model_id"`
 	Version   int       `db:"version"`
@@ -34,6 +36,7 @@ func toDBAuditLog(al auditlog.AuditLog) auditLogDB {
 }
 
 func toCoreAuditLog(r auditLogDB) auditlog.AuditLog {
+	//exhaustruct:enforce
 	return auditlog.AuditLog{
 		ID:        r.ID,
 		ModelID:   r.ModelID,
