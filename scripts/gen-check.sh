@@ -21,11 +21,13 @@ add() {
 	"$skit" add "$@" > /dev/null
 }
 # Entity names double as collision checks: note once clashed with template
-# locals, page with the skit/page import, item with the handler variables.
+# locals, page with the skit/page import, order with the order.go helper file,
+# item with the handler variables.
 add rest widget
 add rest note --no-tests
 add rest-test note
 add rest page
+add rest order
 add grpc item
 add grpc-test item
 add consumer order

@@ -31,7 +31,7 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 	}
 
 	want := []string{
-		"core/widget/widget.go",
+		"core/widget/core.go",
 		"core/widget/model.go",
 		"core/widget/filter.go",
 		"core/widget/order.go",
@@ -39,13 +39,13 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 		"core/widget/widgetdb/model.go",
 		"core/widget/widgetdb/order.go",
 		"core/widget/widgetdb/filter.go",
-		"api/widget/widget.go",
+		"api/widget/handler.go",
 		"api/widget/model.go",
 		"api/widget/order.go",
 		"api/widget/filter.go",
 		// Tests are generated alongside the module (no --no-tests): the mocked
 		// API test lives with the code, the integration suites in tests/.
-		"api/widget/widget_test.go",
+		"api/widget/handler_test.go",
 		"tests/widget_store_test.go",
 		"tests/widget_test.go",
 		"tests/harness_test.go",
@@ -60,7 +60,7 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 	}
 
 	// The generated code references the module path read from go.mod.
-	api := readFile(t, filepath.Join(dir, "api/widget/widget.go"))
+	api := readFile(t, filepath.Join(dir, "api/widget/handler.go"))
 	if !strings.Contains(api, `widgetcore "github.com/me/svc/core/widget"`) {
 		t.Errorf("api import does not use the module path:\n%s", api)
 	}
@@ -136,7 +136,7 @@ func TestAddRESTCamelAndKebabNames(t *testing.T) {
 			if !strings.Contains(model, tc.wantPkg) || !strings.Contains(model, tc.wantType) {
 				t.Errorf("model.go missing %q/%q:\n%s", tc.wantPkg, tc.wantType, model)
 			}
-			api := readFile(t, filepath.Join(dir, "api/orderline/orderline.go"))
+			api := readFile(t, filepath.Join(dir, "api/orderline/handler.go"))
 			if !strings.Contains(api, tc.wantRoute) {
 				t.Errorf("api missing route %q:\n%s", tc.wantRoute, api)
 			}
@@ -150,9 +150,59 @@ func TestAddRESTPluralOverride(t *testing.T) {
 	if err := addREST(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "category", Plural: "categories"}); err != nil {
 		t.Fatalf("addREST: %v", err)
 	}
-	api := readFile(t, filepath.Join(dir, "api/category/category.go"))
+	api := readFile(t, filepath.Join(dir, "api/category/handler.go"))
 	if !strings.Contains(api, "GET /categories") {
 		t.Errorf("expected overridden plural /categories:\n%s", api)
+	}
+}
+
+// The REST main files have fixed names, so an entity named like a helper file
+// (order.go, filter.go, model.go) gets both files instead of losing one.
+func TestAddRESTEntityNamedLikeHelperFile(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+	if err := addREST(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "order"}); err != nil {
+		t.Fatalf("addREST: %v", err)
+	}
+	for _, f := range []string{
+		"core/order/core.go", "core/order/order.go",
+		"api/order/handler.go", "api/order/order.go",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s not generated: %v", f, err)
+		}
+	}
+}
+
+func TestCheckNameRejectsWhatGoRulesOut(t *testing.T) {
+	for _, name := range []string{"case", "Type", "main", "init"} {
+		if err := checkName(name, nil); err == nil {
+			t.Errorf("checkName(%q) accepted a name Go rules out for a package", name)
+		}
+	}
+}
+
+func TestCheckNameRejectsEntityNames(t *testing.T) {
+	for _, name := range []string{"store", "Core", "mocks", "harness", "uuid"} {
+		if err := checkName(name, entityNames); err == nil {
+			t.Errorf("checkName(%q, entityNames) accepted a reserved name", name)
+		}
+		// Only the entity commands reserve them; a worker may be called store.
+		if err := checkName(name, nil); err != nil {
+			t.Errorf("checkName(%q, nil): %v", name, err)
+		}
+	}
+}
+
+func TestAddRESTRejectsReservedNameBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+	err := addREST(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "store"})
+	if err == nil || !strings.Contains(err.Error(), "Store interface") {
+		t.Fatalf("addREST(store) error = %v, want the Store interface reason", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "core")); !os.IsNotExist(err) {
+		t.Errorf("addREST(store) wrote core/ before rejecting the name (stat err: %v)", err)
 	}
 }
 
@@ -305,7 +355,7 @@ func TestAddRESTIdempotent(t *testing.T) {
 	}
 
 	// Mark a production file so we can prove the re-run does not overwrite it.
-	coreFile := filepath.Join(dir, "core/widget/widget.go")
+	coreFile := filepath.Join(dir, "core/widget/core.go")
 	if err := os.WriteFile(coreFile, []byte("// edited by hand\npackage widget\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +625,7 @@ func TestAddRESTTestAfterRESTModule(t *testing.T) {
 	if err := addRESTTest(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err != nil {
 		t.Fatalf("addRESTTest: %v", err)
 	}
-	for _, f := range []string{"api/widget/widget_test.go", "tests/widget_store_test.go", "tests/widget_test.go"} {
+	for _, f := range []string{"api/widget/handler_test.go", "tests/widget_store_test.go", "tests/widget_test.go"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s not generated: %v", f, err)
 		}
@@ -720,7 +770,7 @@ func TestAddGRPCGeneratesProtoAndParsableHandler(t *testing.T) {
 	// No core/widget yet, so the Core + store (+ mocks package) is generated
 	// from the shared rest templates with grpcData — every file must parse.
 	for _, f := range []string{
-		"core/widget/widget.go",
+		"core/widget/core.go",
 		"core/widget/model.go",
 		"core/widget/filter.go",
 		"core/widget/order.go",
@@ -774,8 +824,8 @@ func TestAddGRPCKeepsExistingCore(t *testing.T) {
 		t.Fatalf("addGRPC: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "core/widget/widget.go")); !os.IsNotExist(err) {
-		t.Errorf("core/widget/widget.go generated into an existing core (stat err: %v)", err)
+	if _, err := os.Stat(filepath.Join(dir, "core/widget/core.go")); !os.IsNotExist(err) {
+		t.Errorf("core/widget/core.go generated into an existing core (stat err: %v)", err)
 	}
 	if got := readFile(t, custom); got != body {
 		t.Errorf("custom.go changed:\n%s", got)

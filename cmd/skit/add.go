@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
@@ -165,10 +166,46 @@ type restData struct {
 
 var nameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
+// goPackageNames are names Go itself rules out for a generated package, on top
+// of the keywords.
+var goPackageNames = map[string]string{
+	"main": "a main package is a program and cannot be imported",
+	"init": "init cannot be a package name",
+}
+
+// entityNames are the names the core, REST and gRPC templates already use for
+// something else; `skit add rest|rest-test|grpc|grpc-test` rejects them.
+var entityNames = map[string]string{
+	"store":   "the core already declares a Store interface",
+	"core":    "the core already declares a Core type",
+	"mocks":   "the core keeps its mocks in core/<name>/mocks",
+	"harness": "the REST tests share tests/harness_test.go",
+	"uuid":    "go generate (moq) fails on a package named like the uuid import",
+}
+
+// checkName validates a name that becomes a Go package: the name pattern, what
+// Go rules out for a package, then the command's reserved names (nil if none).
+func checkName(name string, reserved map[string]string) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	}
+	pkg := strings.ToLower(strings.Join(splitWords(name), ""))
+	if token.IsKeyword(pkg) {
+		return fmt.Errorf("invalid name %q: %s is a Go keyword", name, pkg)
+	}
+	if why, ok := goPackageNames[pkg]; ok {
+		return fmt.Errorf("invalid name %q: %s", name, why)
+	}
+	if why, ok := reserved[pkg]; ok {
+		return fmt.Errorf("invalid name %q: %s; pick another name", name, why)
+	}
+	return nil
+}
+
 // addREST generates the core, store and REST transport for one entity.
 func addREST(out io.Writer, opts addRESTOpts) error {
-	if !nameRE.MatchString(opts.Name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	if err := checkName(opts.Name, entityNames); err != nil {
+		return err
 	}
 
 	dir := opts.Dir
@@ -205,7 +242,7 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 	}
 	apiPkgDir := filepath.Join(dir, "api", pkg)
 	files := []struct{ dest, tmpl string }{
-		{filepath.Join(apiPkgDir, pkg+".go"), "templates/rest/api.go.tmpl"},
+		{filepath.Join(apiPkgDir, "handler.go"), "templates/rest/api.go.tmpl"},
 		{filepath.Join(apiPkgDir, "model.go"), "templates/rest/api_model.go.tmpl"},
 		{filepath.Join(apiPkgDir, "order.go"), "templates/rest/api_order.go.tmpl"},
 		{filepath.Join(apiPkgDir, "filter.go"), "templates/rest/api_filter.go.tmpl"},
@@ -238,8 +275,8 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 // Store) in the entity's api package, an integration suite in tests/, and a
 // shared tests/ harness (created once, reused by later suites).
 func addRESTTest(out io.Writer, opts addRESTOpts) error {
-	if !nameRE.MatchString(opts.Name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	if err := checkName(opts.Name, entityNames); err != nil {
+		return err
 	}
 
 	dir := opts.Dir
@@ -291,13 +328,13 @@ func addRESTTest(out io.Writer, opts addRESTOpts) error {
 // generateRESTTests writes the test suite for one entity, idempotently (existing
 // files are skipped, never overwritten). It is shared by `add rest` (which runs
 // it unless --no-tests) and `add rest-test`:
-//   - api/<pkg>/<pkg>_test.go   — fast API tests over a mocked Store (moq)
+//   - api/<pkg>/handler_test.go — fast API tests over a mocked Store (moq)
 //   - tests/<pkg>_store_test.go — store integration tests (testcontainers)
 //   - tests/<pkg>_test.go       — HTTP integration suite driving the real handler
 //   - tests/harness_test.go     — shared harness, created once and reused
 func generateRESTTests(out io.Writer, dir string, data restData) error {
 	files := []struct{ dest, tmpl string }{
-		{filepath.Join(dir, "api", data.Pkg, data.Pkg+"_test.go"), "templates/rest-test/api_test.go.tmpl"},
+		{filepath.Join(dir, "api", data.Pkg, "handler_test.go"), "templates/rest-test/api_test.go.tmpl"},
 		{filepath.Join(dir, "tests", data.Pkg+"_store_test.go"), "templates/rest-test/store_test.go.tmpl"},
 		{filepath.Join(dir, "tests", data.Pkg+"_test.go"), "templates/rest-test/integration_test.go.tmpl"},
 		{filepath.Join(dir, "tests", "harness_test.go"), "templates/rest-test/harness_test.go.tmpl"},
@@ -318,7 +355,7 @@ func generateCore(out io.Writer, dir, pkg string, data any) error {
 	corePkgDir := filepath.Join(dir, "core", pkg)
 	dbPkgDir := filepath.Join(corePkgDir, pkg+"db")
 	files := []struct{ dest, tmpl string }{
-		{filepath.Join(corePkgDir, pkg+".go"), "templates/rest/core.go.tmpl"},
+		{filepath.Join(corePkgDir, "core.go"), "templates/rest/core.go.tmpl"},
 		{filepath.Join(corePkgDir, "model.go"), "templates/rest/core_model.go.tmpl"},
 		{filepath.Join(corePkgDir, "filter.go"), "templates/rest/core_filter.go.tmpl"},
 		{filepath.Join(corePkgDir, "order.go"), "templates/rest/core_order.go.tmpl"},
@@ -418,8 +455,8 @@ func (c *addConsumerCommand) Execute([]string) error {
 // internal/app/consumers/<name> that depends only on skit/broker (so the
 // transport is a wiring choice), plus the shared config.ConsumerOpts.
 func addConsumer(out io.Writer, opts addRESTOpts) error {
-	if !nameRE.MatchString(opts.Name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	if err := checkName(opts.Name, nil); err != nil {
+		return err
 	}
 
 	dir := opts.Dir
@@ -591,8 +628,8 @@ func (c *addWorkerCommand) Execute([]string) error {
 // a periodic worker.Loop (Tick) by default, or a queue.JobFunc (Handle) driven
 // by a worker.Processor when opts.Claim is set.
 func addWorker(out io.Writer, opts addRESTOpts) error {
-	if !nameRE.MatchString(opts.Name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	if err := checkName(opts.Name, nil); err != nil {
+		return err
 	}
 
 	dir := opts.Dir
@@ -727,8 +764,8 @@ func (c *addCronCommand) Execute([]string) error {
 // on schedule via a cron.Scheduler; with lockBackend != "none" each tick is
 // gated on a lock.Locker so the job fires on one replica at a time.
 func addCron(out io.Writer, dir, module, name, schedule, lockBackend string, noTests bool) error {
-	if !nameRE.MatchString(name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	if err := checkName(name, nil); err != nil {
+		return err
 	}
 	if dir == "" {
 		dir = "."
@@ -857,8 +894,8 @@ func (c *addEventCommand) Execute([]string) error {
 // service-wide, event-agnostic relay bootstrap (internal/app/events/relay.go),
 // created once and skipped on re-run.
 func addEvent(out io.Writer, opts addRESTOpts) error {
-	if !nameRE.MatchString(opts.Name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	if err := checkName(opts.Name, nil); err != nil {
+		return err
 	}
 
 	dir := opts.Dir
@@ -1005,8 +1042,8 @@ type grpcData struct {
 // addGRPC generates a .proto contract and a gRPC handler adapting it to the Core;
 // it generates core/<name> + store when missing.
 func addGRPC(out io.Writer, opts addRESTOpts) error {
-	if !nameRE.MatchString(opts.Name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	if err := checkName(opts.Name, entityNames); err != nil {
+		return err
 	}
 
 	dir := opts.Dir
@@ -1172,8 +1209,8 @@ func (c *addGRPCTestCommand) Execute([]string) error {
 // to its handler (internal/app/handlers/<pkg>grpc/<pkg>grpc_test.go). Idempotent:
 // an existing test file is skipped.
 func addGRPCTest(out io.Writer, opts addRESTOpts) error {
-	if !nameRE.MatchString(opts.Name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	if err := checkName(opts.Name, entityNames); err != nil {
+		return err
 	}
 
 	dir := opts.Dir
@@ -1262,8 +1299,8 @@ func (c *addHTTPClientCommand) Execute([]string) error {
 // a Config + New that builds the skit/httpclient transport (retry, optionally
 // OAuth2) and an example typed method. Idempotent (existing files skipped).
 func addHTTPClient(out io.Writer, dir, module, name string, oauth, noTests bool) error {
-	if !nameRE.MatchString(name) {
-		return fmt.Errorf("invalid name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	if err := checkName(name, nil); err != nil {
+		return err
 	}
 	if dir == "" {
 		dir = "."

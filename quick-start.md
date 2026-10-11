@@ -77,15 +77,24 @@ skit add rest category --plural categories   # override the route/table plural
 This generates, following the skit conventions:
 
 ```
-core/widget/widget.go          # domain Core, depends only on a Store interface
-core/widget/model.go           # domain model
+core/widget/core.go                # domain Core, depends only on a Store interface
+core/widget/model.go               # domain model
+core/widget/filter.go, order.go    # query filter, default order
+core/widget/mocks/                 # StoreMock (moq, via go generate)
 core/widget/widgetdb/widgetdb.go   # Postgres implementation of Store
 core/widget/widgetdb/model.go      # rowDB + scanning
-core/widget/widgetdb/order.go      # allowlisted ORDER BY columns
-core/widget/widgetdb/listing_test.go   # integration test (testcontainers)
-api/widget/widget.go           # REST handlers: create/list/get/update/delete
-api/widget/model.go            # App DTOs + transforms
+core/widget/widgetdb/filter.go, order.go   # WHERE clauses, allowlisted ORDER BY
+api/widget/handler.go              # REST handlers: create/list/get/update/delete
+api/widget/model.go                # App DTOs + transforms
+api/widget/filter.go, order.go     # query params -> filter and order
+api/widget/handler_test.go         # API tests over the mocked Store
+tests/widget_test.go, widget_store_test.go   # integration tests (testcontainers)
 ```
+
+File names inside an entity's directories do not depend on the entity, so any
+name works except what Go rules out for a package (keywords, `main`, `init`)
+and the few the templates already use (`store`, `core`, `mocks`, `harness`,
+`uuid`); the CLI rejects those with the reason.
 
 The list endpoint ships the full skit listing set out of the box: offset
 pagination (`?page`/`?rows`), keyset cursor pagination (`GET /widgets/cursor`), a
