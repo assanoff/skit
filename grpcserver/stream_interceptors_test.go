@@ -17,6 +17,7 @@ import (
 // is exercised; the embedded nil interface makes unused methods a clear panic.
 type fakeStream struct {
 	grpc.ServerStream
+
 	ctx context.Context
 }
 
@@ -66,7 +67,7 @@ func TestTraceStreamWrapsContext(t *testing.T) {
 
 	var seen context.Context
 	handler := func(srv any, ss grpc.ServerStream) error {
-		seen = ss.Context()
+		seen = ss.Context() //nolint:fatcontext // captured once to assert on, not nested
 		return nil
 	}
 	err := interceptor(nil, &fakeStream{ctx: base}, &grpc.StreamServerInfo{}, handler)

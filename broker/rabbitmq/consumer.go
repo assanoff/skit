@@ -2,6 +2,7 @@ package rabbitmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -64,7 +65,7 @@ func New(conn *Conn, log *logger.Logger, sub broker.Subscription, h broker.Handl
 // worker.Group like any other Runnable.
 func NewConsumer(conn *Conn, log *logger.Logger, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
 	if cfg.Queue == "" {
-		return nil, fmt.Errorf("rabbitmq: new consumer: queue is required")
+		return nil, errors.New("rabbitmq: new consumer: queue is required")
 	}
 	if cfg.Name == "" {
 		cfg.Name = "consumer"

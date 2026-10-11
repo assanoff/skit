@@ -2,6 +2,7 @@ package httpmw
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
@@ -136,7 +137,7 @@ func rewindable(req *http.Request) (func() (io.ReadCloser, error), error) {
 	buf, err := io.ReadAll(req.Body)
 	_ = req.Body.Close()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("httpmw: buffer request body: %w", err)
 	}
 	return func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(buf)), nil

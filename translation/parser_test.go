@@ -184,7 +184,7 @@ func TestSetFieldValue_Pointer(t *testing.T) {
 	}
 }
 
-// Test models for nested struct support
+// Test models for nested struct support.
 type label struct {
 	Title      string `jsonapi:"attr,title" json:"title" translate:"label_title"`
 	Background string `jsonapi:"attr,background" json:"background"`
@@ -321,7 +321,7 @@ func TestSetFieldValue_NestedStruct(t *testing.T) {
 	}
 }
 
-// PointerNestedModel for testing pointer to nested struct
+// PointerNestedModel for testing pointer to nested struct.
 type PointerNestedModel struct {
 	ID    string `translate:"primary"`
 	Title string `translate:"title"`

@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 	"uuid"
@@ -28,10 +29,10 @@ var _ broker.Publisher = (*Publisher)(nil)
 // stamped on messages that don't carry their own.
 func NewPublisher(cfg Config, source string, log *logger.Logger) (*Publisher, error) {
 	if source == "" {
-		return nil, fmt.Errorf("kafka: new publisher: source is required")
+		return nil, errors.New("kafka: new publisher: source is required")
 	}
 	if len(cfg.Brokers) == 0 {
-		return nil, fmt.Errorf("kafka: new publisher: brokers are required")
+		return nil, errors.New("kafka: new publisher: brokers are required")
 	}
 	w := &kgo.Writer{
 		Addr: kgo.TCP(cfg.Brokers...),
@@ -48,7 +49,7 @@ func NewPublisher(cfg Config, source string, log *logger.Logger) (*Publisher, er
 // record and blocks until the brokers acknowledge it.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Topic == "" {
-		return fmt.Errorf("kafka publish: topic is required")
+		return errors.New("kafka publish: topic is required")
 	}
 
 	// Fill CloudEvents defaults the producer left blank.
@@ -90,5 +91,8 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 
 // Close flushes and closes the underlying writer.
 func (p *Publisher) Close() error {
-	return p.w.Close()
+	if err := p.w.Close(); err != nil {
+		return fmt.Errorf("kafka: close publisher: %w", err)
+	}
+	return nil
 }

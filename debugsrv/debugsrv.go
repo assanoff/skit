@@ -41,6 +41,7 @@ type Config struct {
 // implements http.Handler, so it can run standalone or be reused as a handler.
 type Server struct {
 	*httpserver.Server
+
 	handler http.Handler
 }
 

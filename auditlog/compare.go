@@ -72,7 +72,7 @@ func payloadsEqual(a, b []byte) (bool, error) {
 	return cmp.Equal(na, nb), nil
 }
 
-// removeKeys recursively traverses the map and removes any specified keys
+// removeKeys recursively traverses the map and removes any specified keys.
 func removeKeys(data any, keyToRemove string) {
 	switch v := data.(type) {
 	case map[string]any:
@@ -99,13 +99,13 @@ func diff(curVer, prevVer []byte) (string, error) {
 	var resultCur compMap
 	err = json.Unmarshal(curVer, &resultCur)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("auditlog: decode current version: %w", err)
 	}
 
 	var resultPrev compMap
 	err = json.Unmarshal(prevVer, &resultPrev)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("auditlog: decode previous version: %w", err)
 	}
 
 	if cmp.Equal(resultCur, resultPrev) {
@@ -117,7 +117,7 @@ func diff(curVer, prevVer []byte) (string, error) {
 }
 
 // NormalizeDiff save line only contains the + sing and minus sign in the begiiing of the lines
-// all other lines are removed
+// all other lines are removed.
 func (c *Core) NormalizeDiff(diff string) string {
 	var result strings.Builder
 	for line := range strings.SplitSeq(diff, "\n") {
@@ -136,7 +136,7 @@ func unmarshalJSON(data string) (payloadData, error) {
 	var result payloadData
 	err := json.Unmarshal([]byte(data), &result)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("auditlog: decode payload: %w", err)
 	}
 	return result, nil
 }

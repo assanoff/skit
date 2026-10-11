@@ -2,6 +2,7 @@ package query
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/page"
@@ -70,7 +71,10 @@ func numPages(total, rowsPerPage int) int {
 // Encode implements the rest.ResponseEncoder interface (data, contentType, error).
 func (r Result[T]) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(r)
-	return data, contentTypeJSON, err
+	if err != nil {
+		return nil, "", fmt.Errorf("query: encode result: %w", err)
+	}
+	return data, contentTypeJSON, nil
 }
 
 // ResultItem is the response envelope for a single-object query: an error_code and
@@ -91,7 +95,10 @@ func NewResultItem[T any](data T) ResultItem[T] {
 // Encode implements the rest.ResponseEncoder interface.
 func (r ResultItem[T]) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(r)
-	return data, contentTypeJSON, err
+	if err != nil {
+		return nil, "", fmt.Errorf("query: encode result: %w", err)
+	}
+	return data, contentTypeJSON, nil
 }
 
 // CursorData is the payload of a cursor-paginated list envelope: the page's items
@@ -124,5 +131,8 @@ func NewCursorResult[T any](items []T, next, prev string) CursorResult[T] {
 // Encode implements the rest.ResponseEncoder interface.
 func (r CursorResult[T]) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(r)
-	return data, contentTypeJSON, err
+	if err != nil {
+		return nil, "", fmt.Errorf("query: encode result: %w", err)
+	}
+	return data, contentTypeJSON, nil
 }

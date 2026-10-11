@@ -2,6 +2,7 @@ package rabbitmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 	"uuid"
@@ -59,7 +60,7 @@ func WithTopicMapper(m TopicMapper) PublisherOption {
 // source stamped on messages that don't carry their own.
 func NewPublisher(conn *Conn, source string, log *logger.Logger, opts ...PublisherOption) (*Publisher, error) {
 	if source == "" {
-		return nil, fmt.Errorf("rabbitmq: new publisher: source is required")
+		return nil, errors.New("rabbitmq: new publisher: source is required")
 	}
 	p, err := rmq.NewPublisher(
 		conn.Conn,
@@ -81,7 +82,7 @@ func NewPublisher(conn *Conn, source string, log *logger.Logger, opts ...Publish
 // confirmation.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Topic == "" {
-		return fmt.Errorf("rabbitmq publish: topic is required")
+		return errors.New("rabbitmq publish: topic is required")
 	}
 	exchange, routingKey := p.mapper(m.Topic, m.Key)
 	if exchange == "" || routingKey == "" {
@@ -129,14 +130,14 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	// means confirms are not actually enabled; treat as a hard error rather
 	// than silently dropping the at-least-once guarantee.
 	if len(confirms) == 0 || confirms[0] == nil {
-		return fmt.Errorf("rabbitmq publish: broker returned no confirmation channel")
+		return errors.New("rabbitmq publish: broker returned no confirmation channel")
 	}
 	ok, err := confirms[0].WaitContext(ctx)
 	if err != nil {
 		return fmt.Errorf("rabbitmq publish: wait confirm: %w", err)
 	}
 	if !ok {
-		return fmt.Errorf("rabbitmq publish: broker nacked the message")
+		return errors.New("rabbitmq publish: broker nacked the message")
 	}
 	return nil
 }

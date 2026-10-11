@@ -12,6 +12,7 @@ import (
 // Server wraps an httptest.Server with JSON request and assertion helpers.
 type Server struct {
 	*httptest.Server
+
 	t *testing.T
 }
 
@@ -55,7 +56,7 @@ func (s *Server) Do(method, path, body string, opts ...Option) *Response {
 	if body != "" {
 		rdr = bytes.NewBufferString(body)
 	}
-	req, err := http.NewRequest(method, s.URL+path, rdr)
+	req, err := http.NewRequestWithContext(s.t.Context(), method, s.URL+path, rdr)
 	if err != nil {
 		s.t.Fatalf("apitest: new request %s %s: %v", method, path, err)
 	}

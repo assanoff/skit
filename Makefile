@@ -95,10 +95,13 @@ lint: ## Run golangci-lint
 fmt: ## Format with the .golangci.yml formatters (gofumpt, goimports)
 	$(LINT) fmt
 
+# `run --fix` exits non-zero while findings without an autofix remain; the
+# leading `-` lets formatting still run. Review the diff: an autofix can be
+# wrong (errorlint on a recover() value, fatcontext shadowing a variable).
 .PHONY: fix
 fix: ## Apply go fix, linter autofixes and formatting
 	$(GO) fix ./...
-	$(LINT) run --fix
+	-$(LINT) run --fix
 	$(LINT) fmt
 
 .PHONY: fix-check

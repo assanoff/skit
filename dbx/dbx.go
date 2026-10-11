@@ -185,7 +185,10 @@ func StatusCheck(ctx context.Context, db *sqlx.DB) error {
 
 	var tmp bool
 	const q = `SELECT true`
-	return db.QueryRowContext(ctx, q).Scan(&tmp)
+	if err := db.QueryRowContext(ctx, q).Scan(&tmp); err != nil {
+		return fmt.Errorf("dbx: status check: %w", err)
+	}
+	return nil
 }
 
 // ExecContext runs a parameterless statement.
@@ -207,7 +210,11 @@ func NamedExecContextRowsAffected(ctx context.Context, log *logger.Logger, db sq
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("dbx: rows affected: %w", err)
+	}
+	return n, nil
 }
 
 func namedExec(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any) (sql.Result, error) {
@@ -249,7 +256,7 @@ func NamedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContex
 		return ErrDBNotFound
 	}
 	if err := rows.StructScan(dest); err != nil {
-		return err
+		return fmt.Errorf("dbx: scan: %w", err)
 	}
 	return nil
 }
@@ -275,7 +282,7 @@ func NamedQuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.Ext
 	for rows.Next() {
 		var v T
 		if err := rows.StructScan(&v); err != nil {
-			return err
+			return fmt.Errorf("dbx: scan: %w", err)
 		}
 		out = append(out, v)
 	}

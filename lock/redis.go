@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -66,7 +67,7 @@ func (r *Redis) TryLock(ctx context.Context, key string, ttl time.Duration) (Rel
 	release := func() {
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := releaseScript.Run(rctx, r.client, []string{key}, token).Err(); err != nil && err != redis.Nil {
+		if err := releaseScript.Run(rctx, r.client, []string{key}, token).Err(); err != nil && !errors.Is(err, redis.Nil) {
 			r.log.Warn("lock: redis release failed", "key", key, "error", err)
 		}
 	}

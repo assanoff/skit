@@ -15,6 +15,7 @@ import (
 // interface combination.
 type Writer struct {
 	http.ResponseWriter
+
 	tee         io.Writer
 	code        int
 	bytes       int

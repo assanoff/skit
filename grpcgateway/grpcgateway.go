@@ -44,6 +44,7 @@ type Config struct {
 // Close on shutdown to release a dialed connection.
 type Gateway struct {
 	http.Handler
+
 	conn    *grpc.ClientConn
 	ownConn bool
 }
@@ -89,7 +90,9 @@ func New(ctx context.Context, cfg Config, register ...HandlerRegistrar) (*Gatewa
 // with the caller).
 func (g *Gateway) Close() error {
 	if g.ownConn && g.conn != nil {
-		return g.conn.Close()
+		if err := g.conn.Close(); err != nil {
+			return fmt.Errorf("grpcgateway: close client conn: %w", err)
+		}
 	}
 	return nil
 }

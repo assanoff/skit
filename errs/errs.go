@@ -116,7 +116,10 @@ func (e *Error) Encode() ([]byte, string, error) {
 	out := *e
 	out.Message = Sanitize(out.Message)
 	data, err := json.Marshal(out)
-	return data, "application/json", err
+	if err != nil {
+		return nil, "", fmt.Errorf("errs: encode: %w", err)
+	}
+	return data, "application/json", nil
 }
 
 // From normalizes any error into an *Error. If err already is (or wraps) an

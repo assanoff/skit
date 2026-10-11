@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jmoiron/sqlx"
 
@@ -27,7 +28,7 @@ func NamedQuerySliceUsingIn[T any](ctx context.Context, log *logger.Logger, db s
 	for rows.Next() {
 		var v T
 		if err := rows.StructScan(&v); err != nil {
-			return err
+			return fmt.Errorf("dbx: scan: %w", err)
 		}
 		out = append(out, v)
 	}
@@ -57,7 +58,10 @@ func NamedQueryStructUsingIn(ctx context.Context, log *logger.Logger, db sqlx.Ex
 		}
 		return ErrDBNotFound
 	}
-	return rows.StructScan(dest)
+	if err := rows.StructScan(dest); err != nil {
+		return fmt.Errorf("dbx: scan: %w", err)
+	}
+	return nil
 }
 
 // namedInQuery turns a named query plus data into a positional query with its
@@ -66,11 +70,15 @@ func NamedQueryStructUsingIn(ctx context.Context, log *logger.Logger, db sqlx.Ex
 func namedInQuery(ctx context.Context, db sqlx.ExtContext, query string, data any) (*sqlx.Rows, error) {
 	named, args, err := sqlx.Named(query, data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dbx: bind named: %w", err)
 	}
 	expanded, args, err := sqlx.In(named, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dbx: expand in: %w", err)
 	}
-	return db.QueryxContext(ctx, db.Rebind(expanded), args...)
+	rows, err := db.QueryxContext(ctx, db.Rebind(expanded), args...)
+	if err != nil {
+		return nil, fmt.Errorf("dbx: query: %w", err)
+	}
+	return rows, nil
 }

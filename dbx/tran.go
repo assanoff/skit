@@ -48,7 +48,13 @@ type DBBeginner struct {
 func NewBeginner(db *sqlx.DB) *DBBeginner { return &DBBeginner{db: db} }
 
 // Begin starts a new transaction.
-func (b *DBBeginner) Begin() (CommitRollbacker, error) { return b.db.Beginx() }
+func (b *DBBeginner) Begin() (CommitRollbacker, error) {
+	tx, err := b.db.Beginx()
+	if err != nil {
+		return nil, fmt.Errorf("dbx: begin: %w", err)
+	}
+	return tx, nil
+}
 
 // ExtContext extracts the sqlx.ExtContext (the query surface) from a transaction
 // returned by Begin.

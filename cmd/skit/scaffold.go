@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"go/format"
 	"io"
@@ -41,7 +42,7 @@ type templateData struct {
 // minimal embedded starter into Dir.
 func scaffold(out io.Writer, opts scaffoldOpts) error {
 	if opts.Module == "" {
-		return fmt.Errorf("module path is required")
+		return errors.New("module path is required")
 	}
 	name := opts.Module[strings.LastIndex(opts.Module, "/")+1:]
 	if name == "" {
@@ -56,7 +57,7 @@ func scaffold(out io.Writer, opts scaffoldOpts) error {
 	// replace directive); the minimal starter and the gonew passthrough ignore
 	// it. Fail loudly rather than scaffold a go.mod silently missing the replace.
 	if opts.Replace != "" && !opts.Full {
-		return fmt.Errorf("--replace requires --full: the minimal starter has no replace directive (re-run with --full, or drop --replace)")
+		return errors.New("--replace requires --full: the minimal starter has no replace directive (re-run with --full, or drop --replace)")
 	}
 
 	if opts.Template != "" {

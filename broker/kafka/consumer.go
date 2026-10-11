@@ -3,7 +3,6 @@ package kafka
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -71,13 +70,13 @@ func New(cfg Config, log *logger.Logger, sub broker.Subscription, h broker.Handl
 // NewConsumer builds a Consumer from the Kafka-specific config.
 func NewConsumer(cfg ConsumerConfig, log *logger.Logger, h broker.Handler) (*Consumer, error) {
 	if len(cfg.Brokers) == 0 {
-		return nil, fmt.Errorf("kafka: new consumer: brokers are required")
+		return nil, errors.New("kafka: new consumer: brokers are required")
 	}
 	if cfg.Topic == "" {
-		return nil, fmt.Errorf("kafka: new consumer: topic is required")
+		return nil, errors.New("kafka: new consumer: topic is required")
 	}
 	if cfg.GroupID == "" {
-		return nil, fmt.Errorf("kafka: new consumer: group id is required")
+		return nil, errors.New("kafka: new consumer: group id is required")
 	}
 	if cfg.Name == "" {
 		cfg.Name = "consumer"
@@ -101,7 +100,7 @@ func (c *Consumer) Name() string { return c.cfg.Name }
 // called). It blocks, mirroring the other Runnable transports.
 func (c *Consumer) Start(ctx context.Context) error {
 	var wg sync.WaitGroup
-	for i := 0; i < c.cfg.Concurrency; i++ {
+	for range c.cfg.Concurrency {
 		r := kgo.NewReader(kgo.ReaderConfig{
 			Brokers: c.cfg.Brokers,
 			GroupID: c.cfg.GroupID,

@@ -140,8 +140,8 @@ func (c *Core) QueryDiffByModelID(ctx context.Context, modelType, modelID string
 	return diffs, nil
 }
 
-// QueryDiffAllVersionByModelID finds the diffs between all versions of the model
-func (c *Core) QueryDiffAllVersionByModelID(ctx context.Context, modelType, modelID string, filter QueryFilter) ([]DiffRecord, error) {
+// QueryDiffAllVersionByModelID finds the diffs between all versions of the model.
+func (c *Core) QueryDiffAllVersionByModelID(ctx context.Context, modelType, modelID string) ([]DiffRecord, error) {
 	modelHistory, err := c.QueryHistoryByModelID(ctx, modelType, modelID)
 	if err != nil {
 		return []DiffRecord{}, fmt.Errorf("query auditlog history by modelID[%s], modelType[%s] %w", modelID, modelType, err)

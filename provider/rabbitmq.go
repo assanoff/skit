@@ -19,7 +19,7 @@ import (
 //			Host: opts.Broker.Host, Port: opts.Broker.Port,
 //		}))
 func RabbitMQ(log *logger.Logger, cfg rabbitmq.Config) func(ctx context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
-	return func(ctx context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
+	return func(_ context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
 		conn, err := rabbitmq.Dial(log, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("provider: dial rabbitmq: %w", err)

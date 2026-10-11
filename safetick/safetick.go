@@ -17,7 +17,7 @@ type PanicHandler func(worker, phase string)
 //	    // ... work that must not crash the loop ...
 //	}
 func RecoverTick(log *slog.Logger, worker string, onPanic PanicHandler) {
-	if r := recover(); r != nil {
+	if r := recover(); r != nil { //nolint:revive // RecoverTick is itself the deferred call
 		if onPanic != nil {
 			onPanic(worker, "tick")
 		}

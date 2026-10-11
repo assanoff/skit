@@ -104,7 +104,7 @@ func parseTranslateTags(model Translatable) ([]fieldInfo, error) {
 // schemaForType returns the cached translatable-field schema for t.
 func schemaForType(t reflect.Type) ([]fieldSchema, error) {
 	if cached, ok := schemaCache.Load(t); ok {
-		e := cached.(schemaEntry)
+		e := cached.(schemaEntry) //nolint:forcetypeassert // schemaCache stores only schemaEntry
 		return e.fields, e.err
 	}
 
@@ -258,45 +258,52 @@ func collectNested(model Translatable, visited map[uintptr]bool) []Translatable 
 	var result []Translatable
 	typ := val.Type()
 	for i := range val.NumField() {
-		field := typ.Field(i)
-		if field.Type.Kind() != reflect.Slice {
+		if !isTranslatableSlice(typ.Field(i).Type) {
 			continue
 		}
-
-		elemType := field.Type.Elem()
-		check := elemType
-		if elemType.Kind() != reflect.Pointer {
-			check = reflect.PointerTo(elemType)
-		}
-		if !check.Implements(translatableType) {
-			continue
-		}
-
 		fieldVal := val.Field(i)
-		for j := 0; j < fieldVal.Len(); j++ {
-			elem := fieldVal.Index(j)
-			if elem.Kind() == reflect.Pointer && elem.IsNil() {
-				continue
-			}
-			if !elem.CanInterface() {
-				continue
-			}
-			tr, ok := elem.Interface().(Translatable)
+		for j := range fieldVal.Len() {
+			tr, ok := asTranslatable(fieldVal.Index(j))
 			if !ok {
-				// The interface is satisfied by *T (pointer receiver) while the
-				// slice holds T values; take the element's address. Slice
-				// elements are addressable, so this covers []T + *T Translatable.
-				if !elem.CanAddr() {
-					continue
-				}
-				tr, ok = elem.Addr().Interface().(Translatable)
-				if !ok {
-					continue
-				}
+				continue
 			}
 			result = append(result, tr)
 			result = append(result, collectNested(tr, visited)...)
 		}
 	}
 	return result
+}
+
+// isTranslatableSlice reports whether t is a slice whose elements, or pointers
+// to them, implement Translatable.
+func isTranslatableSlice(t reflect.Type) bool {
+	if t.Kind() != reflect.Slice {
+		return false
+	}
+	elem := t.Elem()
+	if elem.Kind() != reflect.Pointer {
+		elem = reflect.PointerTo(elem)
+	}
+	return elem.Implements(translatableType)
+}
+
+// asTranslatable returns a slice element as a Translatable, or false for a nil
+// pointer or an element that cannot be reached as one.
+func asTranslatable(elem reflect.Value) (Translatable, bool) {
+	if elem.Kind() == reflect.Pointer && elem.IsNil() {
+		return nil, false
+	}
+	if !elem.CanInterface() {
+		return nil, false
+	}
+	if tr, ok := reflect.TypeAssert[Translatable](elem); ok {
+		return tr, true
+	}
+	// The interface is satisfied by *T (pointer receiver) while the slice holds
+	// T values; take the element's address. Slice elements are addressable, so
+	// this covers []T + *T Translatable.
+	if !elem.CanAddr() {
+		return nil, false
+	}
+	return reflect.TypeAssert[Translatable](elem.Addr())
 }

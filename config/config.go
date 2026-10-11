@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/jessevdk/go-flags"
@@ -21,7 +22,7 @@ func LoadDotenv(files ...string) error {
 			continue // ignore missing files
 		}
 		if err := godotenv.Load(f); err != nil {
-			return err
+			return fmt.Errorf("config: load %s: %w", f, err)
 		}
 	}
 	return nil
@@ -46,7 +47,7 @@ func Parse(data any, dotenvFiles ...string) error {
 		return err
 	}
 	_, err := NewParser(data).Parse()
-	return err
+	return err //nolint:wrapcheck // the go-flags message is what the CLI user sees
 }
 
 // IsHelp reports whether err is the benign "help requested" error, which

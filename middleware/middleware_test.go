@@ -3,6 +3,7 @@ package middleware_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -84,7 +85,8 @@ func TestPanicsLeavesAbortToServer(t *testing.T) {
 	}))
 
 	defer func() {
-		if p := recover(); p != http.ErrAbortHandler {
+		p := recover()
+		if err, _ := p.(error); !errors.Is(err, http.ErrAbortHandler) {
 			t.Errorf("recovered %v, want http.ErrAbortHandler panicked again", p)
 		}
 	}()

@@ -41,6 +41,7 @@ func (c Config) amqpURL() string {
 // single Conn is shared by all publishers and consumers in the process.
 type Conn struct {
 	*rmq.Conn
+
 	log *logger.Logger
 }
 
@@ -55,5 +56,8 @@ func Dial(log *logger.Logger, cfg Config) (*Conn, error) {
 
 // Close closes the underlying connection. Safe to register as a closer cleanup.
 func (c *Conn) Close() error {
-	return c.Conn.Close()
+	if err := c.Conn.Close(); err != nil {
+		return fmt.Errorf("rabbitmq: close connection: %w", err)
+	}
+	return nil
 }

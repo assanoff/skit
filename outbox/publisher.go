@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -81,7 +82,7 @@ func Bind(tx sqlx.ExtContext, store Store, reg *Registry) Publisher {
 // Publish implements Publisher.
 func (p *txPublisher) Publish(ctx context.Context, event any, opts ...PublishOption) error {
 	if p.reg == nil {
-		return fmt.Errorf("outbox: publish: no registry configured")
+		return errors.New("outbox: publish: no registry configured")
 	}
 	rt, err := p.reg.lookup(event)
 	if err != nil {

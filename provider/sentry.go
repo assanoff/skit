@@ -32,7 +32,7 @@ var defaultSentryIgnoreErrors = []string{"context canceled"}
 // returns the current Hub. The cleanup flushes buffered events, bounded by
 // FlushTimeout.
 func Sentry(cfg SentryConfig) func(ctx context.Context) (*sentry.Hub, dim.CleanupFunc, error) {
-	return func(ctx context.Context) (*sentry.Hub, dim.CleanupFunc, error) {
+	return func(_ context.Context) (*sentry.Hub, dim.CleanupFunc, error) {
 		ignore := append(append([]string{}, defaultSentryIgnoreErrors...), cfg.IgnoreErrors...)
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:          cfg.DSN,

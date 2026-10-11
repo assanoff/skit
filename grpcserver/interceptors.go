@@ -105,7 +105,8 @@ func toStatus(err error) error {
 // (grpc.ServerStream.Context is read-only otherwise).
 type wrappedStream struct {
 	grpc.ServerStream
-	ctx context.Context
+
+	ctx context.Context //nolint:containedctx // replaces the read-only stream context
 }
 
 func (w *wrappedStream) Context() context.Context { return w.ctx }

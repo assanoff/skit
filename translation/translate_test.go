@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestModel is a test model
+// TestModel is a test model.
 type TestModel struct {
 	ID          string `translate:"primary"`
 	Title       string `translate:"title"`
@@ -517,7 +517,7 @@ func TestTranslator_HelperMethods(t *testing.T) {
 	}
 }
 
-// Test models for nested Translatable objects
+// Test models for nested Translatable objects.
 type Asset struct {
 	ID    string `translate:"primary"`
 	Title string `translate:"asset_title"`
@@ -527,7 +527,7 @@ func (a *Asset) GetTranslationKey() (modelName, keyID string) {
 	return "asset", a.ID
 }
 
-// Tag represents a third level of nesting for testing
+// Tag represents a third level of nesting for testing.
 type Tag struct {
 	ID   string `translate:"primary"`
 	Name string `translate:"tag_name"`
@@ -537,7 +537,7 @@ func (t *Tag) GetTranslationKey() (modelName, keyID string) {
 	return "tag", t.ID
 }
 
-// AssetWithTags extends Asset with tags for testing deep nesting
+// AssetWithTags extends Asset with tags for testing deep nesting.
 type AssetWithTags struct {
 	ID    string `translate:"primary"`
 	Title string `translate:"asset_title"`
@@ -548,7 +548,7 @@ func (a *AssetWithTags) GetTranslationKey() (modelName, keyID string) {
 	return "asset_with_tags", a.ID
 }
 
-// ProductWithDeepNesting has 3 levels: Product -> Assets -> Tags
+// ProductWithDeepNesting has 3 levels: Product -> Assets -> Tags.
 type ProductWithDeepNesting struct {
 	ID     string           `translate:"primary"`
 	Title  string           `translate:"product_title"`
@@ -664,9 +664,10 @@ func TestTranslator_TranslateNestedSlice(t *testing.T) {
 	}
 }
 
-// countingStore wraps MockStore to count batch calls
+// countingStore wraps MockStore to count batch calls.
 type countingStore struct {
 	*MockStore
+
 	batchCalls map[string]int
 	mu         sync.Mutex
 }

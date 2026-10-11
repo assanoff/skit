@@ -19,18 +19,19 @@ func newRPCMetrics(namespace string, reg prometheus.Registerer) *rpcMetrics {
 	if namespace == "" {
 		namespace = "grpc"
 	}
+	labels := []string{"method", "code"}
 	total := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "requests_total",
 		Help:      "Total number of gRPC requests.",
-	}, []string{"method", "code"})
+	}, labels)
 
 	millis := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace,
 		Name:      "request_duration_ms",
 		Help:      "gRPC request latency in milliseconds.",
 		Buckets:   []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500},
-	}, []string{"method", "code"})
+	}, labels)
 
 	// Register tolerantly: if the caller registered equivalent collectors
 	// already, reuse them instead of panicking.
@@ -44,9 +45,8 @@ func (m *rpcMetrics) observe(method, code string, ms float64) {
 	if m == nil {
 		return
 	}
-	labels := prometheus.Labels{"method": method, "code": code}
-	m.total.With(labels).Inc()
-	m.millis.With(labels).Observe(ms)
+	m.total.WithLabelValues(method, code).Inc()
+	m.millis.WithLabelValues(method, code).Observe(ms)
 }
 
 func registerCounterVec(reg prometheus.Registerer, c *prometheus.CounterVec) *prometheus.CounterVec {

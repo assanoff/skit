@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -218,9 +219,10 @@ func (s *Server) Addr() string { return s.cfg.Addr }
 
 // Start binds a TCP listener on the configured address and serves until Stop.
 func (s *Server) Start(ctx context.Context) error {
-	lis, err := net.Listen("tcp", s.cfg.Addr)
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", s.cfg.Addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("grpc server: listen %s: %w", s.cfg.Addr, err)
 	}
 	s.log.Info(ctx, "grpc server listening", "addr", s.cfg.Addr)
 	return s.Serve(lis)
@@ -230,7 +232,10 @@ func (s *Server) Start(ctx context.Context) error {
 // (e.g. a bufconn listener) and for callers that manage their own listener.
 func (s *Server) Serve(lis net.Listener) error {
 	s.health.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-	return s.gs.Serve(lis)
+	if err := s.gs.Serve(lis); err != nil {
+		return fmt.Errorf("grpc server: serve: %w", err)
+	}
+	return nil
 }
 
 // Stop gracefully drains in-flight RPCs, falling back to a hard stop if the

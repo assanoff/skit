@@ -389,6 +389,12 @@ Scaffolded tests for %[1]q. Next:
 `, d.Pkg, d.Type)
 }
 
+// Brokers with an SDK adapter, as named by `add consumer --broker`.
+const (
+	brokerRMQ   = "rmq"
+	brokerKafka = "kafka"
+)
+
 // addConsumerCommand scaffolds a broker-agnostic message consumer: a
 // broker.Handler for one event stream plus the shared ConsumerOpts config.
 type addConsumerCommand struct {
@@ -445,7 +451,7 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 
 	transport := opts.Broker
 	if transport == "" {
-		transport = "rmq"
+		transport = brokerRMQ
 	}
 
 	consumerDir := filepath.Join(dir, "internal", "app", "consumers", pkg)
@@ -458,11 +464,11 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 	// broker swap replaces one file. RabbitMQ and Kafka have SDK adapters; nats
 	// does not yet, so its transport is wired by hand.
 	switch transport {
-	case "rmq":
+	case brokerRMQ:
 		files = append(files, struct{ dest, tmpl string }{
 			filepath.Join(consumerDir, pkg+"_rmq.go"), "templates/consumer/rmq.go.tmpl",
 		})
-	case "kafka":
+	case brokerKafka:
 		files = append(files, struct{ dest, tmpl string }{
 			filepath.Join(consumerDir, pkg+"_kafka.go"), "templates/consumer/kafka.go.tmpl",
 		})
@@ -489,7 +495,7 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 // call; kafka/nats have no SDK adapter yet, so the handler is generated but the
 // transport must be wired by hand.
 func printConsumerNextSteps(out io.Writer, d restData, transport string) {
-	if transport == "rmq" {
+	if transport == brokerRMQ {
 		fmt.Fprintf(out, `
 Scaffolded the %[1]q consumer (RabbitMQ). The handler (%[1]s.go) is broker-agnostic;
 the transport lives in %[1]s_rmq.go. Next:
@@ -519,7 +525,7 @@ the transport lives in %[1]s_rmq.go. Next:
 		return
 	}
 
-	if transport == "kafka" {
+	if transport == brokerKafka {
 		fmt.Fprintf(out, `
 Scaffolded the %[1]q consumer (Kafka). The handler (%[1]s.go) is broker-agnostic;
 the transport lives in %[1]s_kafka.go. Next:

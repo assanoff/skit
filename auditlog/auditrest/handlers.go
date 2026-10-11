@@ -78,7 +78,7 @@ func (h *Handlers) diff(ctx context.Context, r *http.Request) rest.ResponseEncod
 // changes returns each version with the fields that changed since the previous.
 func (h *Handlers) changes(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 	mt, mid := r.PathValue("model_type"), r.PathValue("model_id")
-	recs, err := h.core.QueryDiffAllVersionByModelID(ctx, mt, mid, auditlog.QueryFilter{})
+	recs, err := h.core.QueryDiffAllVersionByModelID(ctx, mt, mid)
 	if err != nil {
 		return toErr(err)
 	}
@@ -90,7 +90,11 @@ func queryInt(r *http.Request, key string) (int, error) {
 	if v == "" {
 		return 0, fmt.Errorf("missing %q", key)
 	}
-	return strconv.Atoi(v)
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%q: %w", key, err)
+	}
+	return n, nil
 }
 
 // toErr maps auditlog sentinel errors to the right HTTP status via *errs.Error.

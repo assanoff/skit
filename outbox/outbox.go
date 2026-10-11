@@ -67,13 +67,13 @@ type Event struct {
 func NewEvent(eventType, topic, key, contentType string, payload []byte, headers map[string]any) (Event, error) {
 	switch {
 	case eventType == "":
-		return Event{}, fmt.Errorf("outbox new event: type is required")
+		return Event{}, errors.New("outbox new event: type is required")
 	case topic == "":
-		return Event{}, fmt.Errorf("outbox new event: topic is required")
+		return Event{}, errors.New("outbox new event: topic is required")
 	case contentType == "":
-		return Event{}, fmt.Errorf("outbox new event: content_type is required")
+		return Event{}, errors.New("outbox new event: content_type is required")
 	case len(payload) == 0:
-		return Event{}, fmt.Errorf("outbox new event: payload is required")
+		return Event{}, errors.New("outbox new event: payload is required")
 	}
 
 	headersJSON := []byte("{}")

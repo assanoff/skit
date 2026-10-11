@@ -105,7 +105,7 @@ func (s *Server) Handler() http.Handler { return s.server.Handler }
 func (s *Server) Start(ctx context.Context) error {
 	s.log.InfoContext(ctx, "http server listening", "name", s.name, "addr", s.server.Addr)
 	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+		return fmt.Errorf("%s: listen and serve: %w", s.name, err)
 	}
 	return nil
 }
@@ -115,7 +115,7 @@ func (s *Server) Start(ctx context.Context) error {
 // listener. ErrServerClosed is treated as a clean shutdown.
 func (s *Server) Serve(lis net.Listener) error {
 	if err := s.server.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+		return fmt.Errorf("%s: serve: %w", s.name, err)
 	}
 	return nil
 }
@@ -126,7 +126,7 @@ func (s *Server) Serve(lis net.Listener) error {
 func (s *Server) Stop(ctx context.Context) error {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), s.shutdownTimeout)
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
 		defer cancel()
 	}
 	s.log.InfoContext(ctx, "http server shutting down", "name", s.name)

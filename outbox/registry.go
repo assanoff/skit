@@ -102,7 +102,7 @@ func (r *Registry) Register[T any](eventType, topic string, opts ...RouteOption)
 // registered type.
 func (r *Registry) lookup(v any) (route, error) {
 	if v == nil {
-		return route{}, fmt.Errorf("outbox: publish: event is nil")
+		return route{}, errors.New("outbox: publish: event is nil")
 	}
 	key := normalize(reflect.TypeOf(v))
 

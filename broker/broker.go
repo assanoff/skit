@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -97,13 +98,13 @@ type cloudEvent struct {
 // publish time.
 func MarshalCloudEvent(m Message) ([]byte, error) {
 	if m.Type == "" {
-		return nil, fmt.Errorf("broker: marshal cloudevent: type is required")
+		return nil, errors.New("broker: marshal cloudevent: type is required")
 	}
 	data := m.Data
 	if len(data) == 0 {
 		data = []byte("null")
 	}
-	return json.Marshal(cloudEvent{
+	body, err := json.Marshal(cloudEvent{
 		SpecVersion:     SpecVersion,
 		ID:              m.ID,
 		Type:            m.Type,
@@ -113,6 +114,10 @@ func MarshalCloudEvent(m Message) ([]byte, error) {
 		DataContentType: m.DataContentType,
 		Data:            data,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("broker: marshal cloudevent: %w", err)
+	}
+	return body, nil
 }
 
 // UnmarshalCloudEvent parses a structured-mode JSON envelope back into a
@@ -124,7 +129,7 @@ func UnmarshalCloudEvent(body []byte) (Message, error) {
 		return Message{}, fmt.Errorf("broker: unmarshal cloudevent: %w", err)
 	}
 	if ce.SpecVersion == "" || ce.ID == "" || ce.Type == "" {
-		return Message{}, fmt.Errorf("broker: unmarshal cloudevent: missing required envelope fields")
+		return Message{}, errors.New("broker: unmarshal cloudevent: missing required envelope fields")
 	}
 	return Message{
 		ID:              ce.ID,

@@ -107,11 +107,12 @@ type StatusError struct {
 	Body       []byte
 }
 
+// Error reports the status and, when present, the body snapshot.
 func (e *StatusError) Error() string {
 	if len(e.Body) > 0 {
 		return fmt.Sprintf("http %s: %s", e.Status, e.Body)
 	}
-	return fmt.Sprintf("http %s", e.Status)
+	return "http " + e.Status
 }
 
 // DoJSON sends req through c, and on a 2xx response decodes the JSON body into
@@ -121,7 +122,7 @@ func (e *StatusError) Error() string {
 func DoJSON(c *http.Client, req *http.Request, out any) error {
 	resp, err := c.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("httpclient: do: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

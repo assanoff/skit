@@ -29,6 +29,7 @@ func Tracer(cfg otel.Config) func(ctx context.Context) (trace.Tracer, dim.Cleanu
 		if err != nil {
 			return nil, nil, err
 		}
-		return tracer, func() error { return shutdown(context.Background()) }, nil
+		stop := func() error { return shutdown(context.WithoutCancel(ctx)) }
+		return tracer, stop, nil
 	}
 }

@@ -2,6 +2,7 @@ package to
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/hashicorp/jsonapi"
 
@@ -37,7 +38,7 @@ type jsonAPIEncoder struct {
 func (e jsonAPIEncoder) Encode() ([]byte, string, error) {
 	var buf bytes.Buffer
 	if err := jsonapi.MarshalPayload(&buf, e.model); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("to: marshal jsonapi: %w", err)
 	}
 
 	return buf.Bytes(), jsonapi.MediaType, nil

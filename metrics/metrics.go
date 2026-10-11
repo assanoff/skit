@@ -26,18 +26,19 @@ func New(namespace string) *Metrics {
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
+	labels := []string{"method", "path", "status"}
 	reqTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "http_requests_total",
 		Help:      "Total number of HTTP requests.",
-	}, []string{"method", "path", "status"})
+	}, labels)
 
 	reqMillis := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace,
 		Name:      "http_request_duration_ms",
 		Help:      "HTTP request latency in milliseconds.",
 		Buckets:   []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500},
-	}, []string{"method", "path", "status"})
+	}, labels)
 
 	reg.MustRegister(reqTotal, reqMillis)
 
@@ -72,9 +73,9 @@ func (m *Metrics) Middleware() func(http.Handler) http.Handler {
 				code = http.StatusOK
 			}
 			status := strconv.Itoa(code)
-			labels := prometheus.Labels{"method": r.Method, "path": pattern, "status": status}
-			m.reqTotal.With(labels).Inc()
-			m.reqMillis.With(labels).Observe(float64(time.Since(start).Milliseconds()))
+			m.reqTotal.WithLabelValues(r.Method, pattern, status).Inc()
+			ms := float64(time.Since(start).Milliseconds())
+			m.reqMillis.WithLabelValues(r.Method, pattern, status).Observe(ms)
 		})
 	}
 }

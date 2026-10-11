@@ -26,7 +26,7 @@ func Compress() Middleware {
 				return
 			}
 
-			gz := gzipPool.Get().(*gzip.Writer)
+			gz := gzipPool.Get().(*gzip.Writer) //nolint:forcetypeassert // gzipPool.New makes *gzip.Writer
 			gz.Reset(w)
 			cw := &gzipResponseWriter{ResponseWriter: w, gz: gz}
 			defer func() {
@@ -49,6 +49,7 @@ func Compress() Middleware {
 // Content-Length.
 type gzipResponseWriter struct {
 	http.ResponseWriter
+
 	gz          *gzip.Writer
 	wroteHeader bool
 	started     bool // gzip is active; false means passthrough

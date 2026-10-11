@@ -117,31 +117,55 @@ func Migrate(ctx context.Context, cfg Config, fsys fs.FS) error {
 func (c *Client) Conn() driver.Conn { return c.conn }
 
 // Ping verifies the connection is alive.
-func (c *Client) Ping(ctx context.Context) error { return c.conn.Ping(ctx) }
+func (c *Client) Ping(ctx context.Context) error {
+	if err := c.conn.Ping(ctx); err != nil {
+		return fmt.Errorf("chx: ping: %w", err)
+	}
+	return nil
+}
 
 // Exec runs a statement with no result set (DDL/DML).
 func (c *Client) Exec(ctx context.Context, query string, args ...any) error {
-	return c.conn.Exec(ctx, query, args...)
+	if err := c.conn.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("chx: exec: %w", err)
+	}
+	return nil
 }
 
 // Select scans a full result set into dest (a pointer to a slice of structs).
 func (c *Client) Select(ctx context.Context, dest any, query string, args ...any) error {
-	return c.conn.Select(ctx, dest, query, args...)
+	if err := c.conn.Select(ctx, dest, query, args...); err != nil {
+		return fmt.Errorf("chx: select: %w", err)
+	}
+	return nil
 }
 
 // Query runs a query returning rows for manual iteration.
 func (c *Client) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
-	return c.conn.Query(ctx, query, args...)
+	rows, err := c.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("chx: query: %w", err)
+	}
+	return rows, nil
 }
 
 // PrepareBatch opens a client-side batch for a bulk INSERT — the primary write
 // path (CH loves large batches).
 func (c *Client) PrepareBatch(ctx context.Context, query string) (driver.Batch, error) {
-	return c.conn.PrepareBatch(ctx, query)
+	batch, err := c.conn.PrepareBatch(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("chx: prepare batch: %w", err)
+	}
+	return batch, nil
 }
 
 // Name identifies this store for lifecycle logging.
 func (c *Client) Name() string { return "ClickHouse" }
 
 // Close releases the connection.
-func (c *Client) Close() error { return c.conn.Close() }
+func (c *Client) Close() error {
+	if err := c.conn.Close(); err != nil {
+		return fmt.Errorf("chx: close: %w", err)
+	}
+	return nil
+}

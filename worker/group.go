@@ -73,7 +73,7 @@ func (g *Group) Run(ctx context.Context) error {
 	}
 	cancel()
 
-	g.stopAll()
+	g.stopAll(ctx)
 
 	if !g.waitForStop(&wg) {
 		g.logf("worker: shutdown timed out waiting for Runnables to stop")
@@ -104,8 +104,9 @@ func (g *Group) waitForStop(wg *sync.WaitGroup) bool {
 	}
 }
 
-func (g *Group) stopAll() {
-	stopCtx := context.Background()
+func (g *Group) stopAll(ctx context.Context) {
+	// ctx is already canceled here: keep its values, drop the cancellation.
+	stopCtx := context.WithoutCancel(ctx)
 	var cancel context.CancelFunc
 	if g.shutdownTimeout > 0 {
 		stopCtx, cancel = context.WithTimeout(stopCtx, g.shutdownTimeout)

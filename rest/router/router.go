@@ -19,6 +19,7 @@ import (
 // sibling files: http.go (net/http) and app.go (typed rest).
 type Router struct {
 	*routegroup.Bundle
+
 	appMids []rest.MidFunc
 }
 

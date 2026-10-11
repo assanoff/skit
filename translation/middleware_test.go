@@ -61,7 +61,7 @@ func TestHTTPMiddleware(t *testing.T) {
 			middleware := translator.HTTPMiddleware(handler)
 
 			// Create request
-			req := httptest.NewRequest("GET", "/test", nil)
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
 			if tt.headerName != "" {
 				req.Header.Set(tt.headerName, tt.headerValue)
 			}
@@ -188,7 +188,7 @@ func TestHTTPMiddleware_XLanguagePriority(t *testing.T) {
 	middleware := translator.HTTPMiddleware(handler)
 
 	// Create request with both headers (X-Language should take priority)
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("X-Language", "kk")
 	req.Header.Set("Accept-Language", "ru")
 

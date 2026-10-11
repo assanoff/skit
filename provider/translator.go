@@ -23,7 +23,7 @@ import (
 //
 // It holds no external resource, so the cleanup is nil.
 func Translator(defaultLang string, fsys fs.FS, files ...string) func(ctx context.Context) (*i18n.Translator, dim.CleanupFunc, error) {
-	return func(ctx context.Context) (*i18n.Translator, dim.CleanupFunc, error) {
+	return func(_ context.Context) (*i18n.Translator, dim.CleanupFunc, error) {
 		tr, err := i18n.New(defaultLang, fsys, files...)
 		if err != nil {
 			return nil, nil, fmt.Errorf("provider: init translator: %w", err)

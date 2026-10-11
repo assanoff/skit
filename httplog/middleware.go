@@ -37,6 +37,13 @@ func isUpgradeRequest(r *http.Request) bool {
 	return false
 }
 
+// isAbortHandler reports whether a recovered panic value is
+// http.ErrAbortHandler.
+func isAbortHandler(rec any) bool {
+	err, ok := rec.(error)
+	return ok && errors.Is(err, http.ErrAbortHandler)
+}
+
 func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Handler {
 	// Work on a copy so filling in defaults never mutates the caller's Options
 	// (or the package-global defaultOptions when o is nil).
@@ -91,14 +98,14 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 						ww.WriteHeader(http.StatusInternalServerError)
 					}
 
-					if rec == http.ErrAbortHandler || !o.RecoverPanics {
+					if isAbortHandler(rec) || !o.RecoverPanics {
 						// Re-panic http.ErrAbortHandler unconditionally, and re-panic other errors if panic recovery is disabled.
 						defer panic(rec)
 					}
 
 					logAttrs = appendAttrs(logAttrs, slog.String(s.ErrorMessage, fmt.Sprintf("panic: %v", rec)))
 
-					if rec != http.ErrAbortHandler {
+					if !isAbortHandler(rec) {
 						pc := make([]uintptr, 10)   // Capture up to 10 stack frames.
 						n := runtime.Callers(3, pc) // Skip 3 frames (this middleware + runtime/panic.go).
 						pc = pc[:n]
@@ -136,7 +143,7 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 					lvl = slog.LevelInfo
 				case statusCode >= 400:
 					lvl = slog.LevelWarn
-				case r.Method == "OPTIONS":
+				case r.Method == http.MethodOptions:
 					lvl = slog.LevelDebug
 				default:
 					lvl = slog.LevelInfo

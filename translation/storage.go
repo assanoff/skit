@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-// Store is the interface for translation storage
+// Store is the interface for translation storage.
 type Store interface {
 	// SaveTranslation saves translation data (should be executed in a transaction)
 	SaveTranslation(ctx context.Context, data Data) error

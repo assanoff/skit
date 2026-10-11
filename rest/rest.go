@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -157,7 +158,10 @@ type jsonResponse struct {
 
 func (j jsonResponse) Encode() (body []byte, contentType string, err error) {
 	body, err = json.Marshal(j.value)
-	return body, "application/json", err
+	if err != nil {
+		return nil, "", fmt.Errorf("rest: encode json: %w", err)
+	}
+	return body, "application/json", nil
 }
 
 func (j jsonResponse) HTTPStatus() int { return j.status }

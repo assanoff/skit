@@ -29,7 +29,11 @@ func (s JSONSlice[T]) Value() (driver.Value, error) {
 	if s == nil {
 		return []byte("[]"), nil
 	}
-	return json.Marshal([]T(s))
+	b, err := json.Marshal([]T(s))
+	if err != nil {
+		return nil, fmt.Errorf("dbx: json slice value: %w", err)
+	}
+	return b, nil
 }
 
 // Scan implements sql.Scanner: unmarshal the JSONB payload back into the slice.
@@ -54,5 +58,8 @@ func (s *JSONSlice[T]) Scan(src any) error {
 		*s = nil
 		return nil
 	}
-	return json.Unmarshal(b, (*[]T)(s))
+	if err := json.Unmarshal(b, (*[]T)(s)); err != nil {
+		return fmt.Errorf("dbx: json slice scan: %w", err)
+	}
+	return nil
 }

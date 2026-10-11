@@ -2,6 +2,7 @@ package query
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/hashicorp/jsonapi"
 
@@ -58,7 +59,7 @@ func NewResultJSONAPI[T any](items []T, total int, pg page.Page) ResultJSONAPI[T
 func (r ResultJSONAPI[T]) Encode() ([]byte, string, error) {
 	payload, err := jsonapi.Marshal(r.Items)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("query: marshal jsonapi: %w", err)
 	}
 	if many, ok := payload.(*jsonapi.ManyPayload); ok && r.Meta != nil {
 		many.Meta = r.Meta
@@ -66,7 +67,7 @@ func (r ResultJSONAPI[T]) Encode() ([]byte, string, error) {
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("query: encode jsonapi: %w", err)
 	}
 	return data, jsonapi.MediaType, nil
 }

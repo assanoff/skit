@@ -31,7 +31,7 @@ func queryString(query string, args any) string {
 	type binding struct{ placeholder, value string }
 	var bindings []binding
 	t := v.Type()
-	for i := 0; i < t.NumField(); i++ {
+	for i := range t.NumField() {
 		tag := t.Field(i).Tag.Get("db")
 		if tag == "" || tag == "-" {
 			continue

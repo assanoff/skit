@@ -54,7 +54,7 @@ type AsyncRecorder struct {
 }
 
 type job struct {
-	ctx   context.Context
+	ctx   context.Context //nolint:containedctx // the producer's ctx travels with the entry to the worker
 	entry NewAuditLog
 }
 

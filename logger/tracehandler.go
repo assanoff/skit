@@ -13,6 +13,7 @@ import (
 // middleware sharing the handler.
 type traceHandler struct {
 	slog.Handler
+
 	fn TraceIDFn
 }
 

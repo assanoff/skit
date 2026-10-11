@@ -56,6 +56,7 @@ func TestAddSpanAtNoTracerNoOp(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	ctx, parent := tp.Tracer("test").Start(context.Background(), "parent")
+	defer parent.End() // after the asserts: the parent must still be open there
 
 	base := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 	_, span := AddSpanAt(ctx, "x", base, base.Add(time.Second))

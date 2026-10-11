@@ -7,21 +7,21 @@ import (
 	"sync"
 )
 
-// MockStore is a mock implementation of Store for testing
+// MockStore is a mock implementation of Store for testing.
 type MockStore struct {
 	mu           sync.RWMutex
 	translations map[string]map[string]string // key: "modelName:keyID:langCode:columnName" -> value
 }
 
-// NewMockStore creates a new mock store
+// NewMockStore creates a new mock store.
 func NewMockStore() *MockStore {
 	return &MockStore{
 		translations: make(map[string]map[string]string),
 	}
 }
 
-// SaveTranslation saves translation data in memory
-func (m *MockStore) SaveTranslation(ctx context.Context, data Data) error {
+// SaveTranslation saves translation data in memory.
+func (m *MockStore) SaveTranslation(_ context.Context, data Data) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -36,8 +36,8 @@ func (m *MockStore) SaveTranslation(ctx context.Context, data Data) error {
 	return nil
 }
 
-// GetTranslations retrieves translations from memory
-func (m *MockStore) GetTranslations(ctx context.Context, modelName, keyID string, lang Language) (map[string]string, error) {
+// GetTranslations retrieves translations from memory.
+func (m *MockStore) GetTranslations(_ context.Context, modelName, keyID string, lang Language) (map[string]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -54,8 +54,8 @@ func (m *MockStore) GetTranslations(ctx context.Context, modelName, keyID string
 	return result, nil
 }
 
-// DeleteTranslations deletes translations from memory
-func (m *MockStore) DeleteTranslations(ctx context.Context, modelName, keyID string, lang Language) error {
+// DeleteTranslations deletes translations from memory.
+func (m *MockStore) DeleteTranslations(_ context.Context, modelName, keyID string, lang Language) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -72,7 +72,7 @@ func (m *MockStore) DeleteTranslations(ctx context.Context, modelName, keyID str
 // languages. When some are missing it returns a *MissingTranslationsError
 // listing them. An empty value counts as no translation, matching the Postgres
 // store.
-func (m *MockStore) CheckTranslationsExist(ctx context.Context, modelName, keyID string, columns []string, langs []Language) error {
+func (m *MockStore) CheckTranslationsExist(_ context.Context, modelName, keyID string, columns []string, langs []Language) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -93,8 +93,8 @@ func (m *MockStore) CheckTranslationsExist(ctx context.Context, modelName, keyID
 	return nil
 }
 
-// GetTranslationsBatch retrieves translations for multiple model instances
-func (m *MockStore) GetTranslationsBatch(ctx context.Context, modelName string, keyIDs []string, lang Language) (map[string]map[string]string, error) {
+// GetTranslationsBatch retrieves translations for multiple model instances.
+func (m *MockStore) GetTranslationsBatch(_ context.Context, modelName string, keyIDs []string, lang Language) (map[string]map[string]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -111,12 +111,12 @@ func (m *MockStore) GetTranslationsBatch(ctx context.Context, modelName string, 
 	return result, nil
 }
 
-// buildKey builds a storage key
+// buildKey builds a storage key.
 func (m *MockStore) buildKey(modelName, keyID, langCode string) string {
 	return fmt.Sprintf("%s:%s:%s", modelName, keyID, langCode)
 }
 
-// NewMockTranslator creates a translator with mock store for testing
+// NewMockTranslator creates a translator with mock store for testing.
 func NewMockTranslator() *Translator {
 	return &Translator{
 		store:          NewMockStore(),

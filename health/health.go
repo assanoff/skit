@@ -20,7 +20,7 @@ type NamedChecker struct {
 // probe so a slow dependency does not cause pod restarts.
 func Liveness() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, report{Status: "ok"})
 	}
 }
 
@@ -53,12 +53,18 @@ func Readiness(checkTimeout time.Duration, checks ...NamedChecker) http.HandlerF
 			status = http.StatusServiceUnavailable
 			overall = "unavailable"
 		}
-		writeJSON(w, status, map[string]any{"status": overall, "checks": results})
+		writeJSON(w, status, report{Status: overall, Checks: results})
 	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
+// report is the JSON body of the health endpoints.
+type report struct {
+	Status string            `json:"status"`
+	Checks map[string]string `json:"checks,omitempty"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, body report) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_ = json.NewEncoder(w).Encode(body) //nolint:errchkjson // a failed write means the client is gone
 }

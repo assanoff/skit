@@ -116,6 +116,7 @@ func (l *Logger) Warn(ctx context.Context, msg string, args ...any) {
 	l.log(ctx, LevelWarn, 0, msg, args...)
 }
 
+// Error logs at error level.
 func (l *Logger) Error(ctx context.Context, msg string, args ...any) {
 	l.log(ctx, LevelError, 0, msg, args...)
 }

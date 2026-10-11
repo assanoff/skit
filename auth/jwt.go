@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -83,7 +84,7 @@ func resolveKey(cfg JWTConfig) (jwt.Keyfunc, []string, error) {
 	case cfg.Keyfunc != nil:
 		methods := cfg.ValidMethods
 		if len(methods) == 0 {
-			return nil, nil, fmt.Errorf("auth: jwt: ValidMethods is required with a custom Keyfunc")
+			return nil, nil, errors.New("auth: jwt: ValidMethods is required with a custom Keyfunc")
 		}
 		return cfg.Keyfunc, methods, nil
 
@@ -109,7 +110,7 @@ func resolveKey(cfg JWTConfig) (jwt.Keyfunc, []string, error) {
 			methodsOr(cfg.ValidMethods, "ES256", "ES384", "ES512"), nil
 
 	default:
-		return nil, nil, fmt.Errorf("auth: jwt: no key configured")
+		return nil, nil, errors.New("auth: jwt: no key configured")
 	}
 }
 
@@ -121,7 +122,7 @@ func (v *JWTVerifier) Verify(_ context.Context, token string) (*Principal, error
 		return nil, fmt.Errorf("auth: jwt: %w", err)
 	}
 	if !parsed.Valid {
-		return nil, fmt.Errorf("auth: jwt: token is invalid")
+		return nil, errors.New("auth: jwt: token is invalid")
 	}
 
 	subject, _ := claims[v.subjectClaim].(string)

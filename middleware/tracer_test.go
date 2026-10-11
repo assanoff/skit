@@ -53,13 +53,13 @@ func TestTraceRequestKeepsServerSpan(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/x", nil).WithContext(ctx)
-	req.Header.Set("traceparent", incoming)
+	req.Header.Set("Traceparent", incoming)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
 	is.Equal(traceID, sc.TraceID().String())      // logs carry the server span's trace
 	is.Equal(parentOfChild.SpanID(), sc.SpanID()) // child spans hang off the server span
-	is.Equal(rec.Header().Get("traceparent"),     // the response points at it
+	is.Equal(rec.Header().Get("Traceparent"),     // the response points at it
 		"00-"+sc.TraceID().String()+"-"+sc.SpanID().String()+"-01")
 }
 
@@ -75,12 +75,12 @@ func TestTraceRequestContinuesIncomingTrace(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	req.Header.Set("traceparent", incoming)
+	req.Header.Set("Traceparent", incoming)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
 	is.Equal(traceID, "0af7651916cd43dd8448eb211c80319c")
-	is.Equal(rec.Header().Get("traceparent"), "")
+	is.Equal(rec.Header().Get("Traceparent"), "")
 }
 
 // With neither a span nor a traceparent header there is still a trace id to log.
@@ -97,5 +97,5 @@ func TestTraceRequestSeedsTraceID(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
 
 	is.True(traceID != "")
-	is.Equal(rec.Header().Get("traceparent"), "")
+	is.Equal(rec.Header().Get("Traceparent"), "")
 }

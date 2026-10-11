@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"uuid"
 )
@@ -39,7 +40,7 @@ func (u *UUID) Scan(src any) error {
 		}
 		return u.parse(string(v))
 	case nil:
-		return fmt.Errorf("dbx: cannot scan NULL into UUID (use sql.Null[dbx.UUID])")
+		return errors.New("dbx: cannot scan NULL into UUID (use sql.Null[dbx.UUID])")
 	}
 	return fmt.Errorf("dbx: cannot scan %T into UUID", src)
 }

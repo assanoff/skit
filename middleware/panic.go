@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"runtime/debug"
 
@@ -24,16 +25,17 @@ func Panics(log *logger.Logger) Middleware {
 			if !ok {
 				rec = httpw.Wrap(w)
 			}
+			ctx := r.Context()
 			defer func() {
 				p := recover()
 				if p == nil {
 					return
 				}
-				if p == http.ErrAbortHandler {
+				if err, ok := p.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 					panic(p)
 				}
 				if log != nil {
-					log.Error(r.Context(), "panic recovered",
+					log.Error(ctx, "panic recovered",
 						"panic", p, "stack", string(debug.Stack()),
 						"method", r.Method, "path", r.URL.Path)
 				}

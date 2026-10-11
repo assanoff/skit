@@ -29,8 +29,8 @@ func TestInjectToResponseWritesOwnSpan(t *testing.T) {
 	InjectToResponse(ctx, h)
 
 	sc := span.SpanContext()
-	is.Equal(h.Get("traceparent"), "00-"+sc.TraceID().String()+"-"+sc.SpanID().String()+"-01")
-	is.Equal(h.Get("baggage"), "") // request-scoped data stays on the server
+	is.Equal(h.Get("Traceparent"), "00-"+sc.TraceID().String()+"-"+sc.SpanID().String()+"-01")
+	is.Equal(h.Get("Baggage"), "") // request-scoped data stays on the server
 }
 
 // A remote parent is the caller's span: echoing it back would point at the

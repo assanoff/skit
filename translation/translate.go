@@ -2,18 +2,19 @@ package translation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
 
-// Translator active object holds all deps
+// Translator active object holds all deps.
 type Translator struct {
 	store          Store
 	defaultLang    Language
 	supportedLangs []Language
 }
 
-// New creates a new Translator instance
+// New creates a new Translator instance.
 func New(cfg Config) (*Translator, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -28,17 +29,17 @@ func New(cfg Config) (*Translator, error) {
 	return t, nil
 }
 
-// DefaultLanguage returns the default language
+// DefaultLanguage returns the default language.
 func (t *Translator) DefaultLanguage() Language {
 	return t.defaultLang
 }
 
-// Languages returns all supported languages by the app
+// Languages returns all supported languages by the app.
 func (t *Translator) Languages() []Language {
 	return t.supportedLangs
 }
 
-// IsDefaultLanguage checks if the given language is the default language
+// IsDefaultLanguage checks if the given language is the default language.
 func (t *Translator) IsDefaultLanguage(lang Language) bool {
 	return lang.Code == t.defaultLang.Code
 }
@@ -53,7 +54,7 @@ func (t *Translator) Match(code string) Language {
 	return t.defaultLang
 }
 
-// ValidateLanguage checks if the language is supported
+// ValidateLanguage checks if the language is supported.
 func (t *Translator) ValidateLanguage(lang Language) error {
 	for _, supported := range t.supportedLangs {
 		if supported.Code == lang.Code {
@@ -64,7 +65,7 @@ func (t *Translator) ValidateLanguage(lang Language) error {
 }
 
 // Translate translates a single model to the specified language
-// Also translates nested Translatable objects in slice fields
+// Also translates nested Translatable objects in slice fields.
 func (t *Translator) Translate(ctx context.Context, model Translatable, lang Language) error {
 	if t.IsDefaultLanguage(lang) {
 		return nil
@@ -78,7 +79,7 @@ func (t *Translator) Translate(ctx context.Context, model Translatable, lang Lan
 	return t.translateMany(ctx, []Translatable{model}, lang)
 }
 
-// TranslateSlice translates a slice of models with type safety using generics
+// TranslateSlice translates a slice of models with type safety using generics.
 func (t *Translator) TranslateSlice[T Translatable](ctx context.Context, models []T, lang Language) error {
 	if len(models) == 0 {
 		return nil
@@ -93,7 +94,7 @@ func (t *Translator) TranslateSlice[T Translatable](ctx context.Context, models 
 }
 
 // TranslateMany translates multiple models to the specified language
-// Also translates nested Translatable objects in slice fields
+// Also translates nested Translatable objects in slice fields.
 func (t *Translator) translateMany(ctx context.Context, models []Translatable, lang Language) error {
 	if t.IsDefaultLanguage(lang) {
 		return nil
@@ -159,7 +160,7 @@ func (t *Translator) translateMany(ctx context.Context, models []Translatable, l
 	return nil
 }
 
-// Save saves translations for a model
+// Save saves translations for a model.
 func (t *Translator) Save(ctx context.Context, lang Language, model Translatable) error {
 	if err := t.ValidateLanguage(lang); err != nil {
 		return err
@@ -191,7 +192,7 @@ func (t *Translator) Save(ctx context.Context, lang Language, model Translatable
 	}
 
 	if len(columns) == 0 {
-		return fmt.Errorf("no translatable fields found")
+		return errors.New("no translatable fields found")
 	}
 
 	now := time.Now().UTC()
@@ -211,7 +212,7 @@ func (t *Translator) Save(ctx context.Context, lang Language, model Translatable
 	return nil
 }
 
-// Get retrieves translations for a model
+// Get retrieves translations for a model.
 func (t *Translator) Get(ctx context.Context, lang Language, model Translatable) error {
 	if err := t.ValidateLanguage(lang); err != nil {
 		return err
@@ -231,7 +232,7 @@ func (t *Translator) Get(ctx context.Context, lang Language, model Translatable)
 	return t.applyTranslations(model, fields, translations)
 }
 
-// Delete deletes translations for a model
+// Delete deletes translations for a model.
 func (t *Translator) Delete(ctx context.Context, lang Language, model Translatable) error {
 	if err := t.ValidateLanguage(lang); err != nil {
 		return err
@@ -246,7 +247,7 @@ func (t *Translator) Delete(ctx context.Context, lang Language, model Translatab
 	return nil
 }
 
-// applyTranslations applies translations to model fields
+// applyTranslations applies translations to model fields.
 func (t *Translator) applyTranslations(model Translatable, fields []fieldInfo, translations map[string]string) error {
 	for _, field := range fields {
 		if field.isPrimary {
