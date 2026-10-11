@@ -19,11 +19,12 @@ GONEW       ?= golang.org/x/tools/cmd/gonew@latest
 TPARSE      ?= github.com/mfridman/tparse@latest
 
 # COVERDIR is the gitignored directory all coverage artifacts live in, so they
-# never clutter the repo root. THRESHOLD is the `cover-check` CI gate.
+# never clutter the repo root. THRESHOLD is the `cover-check` CI gate, measured
+# over the full suite (testcontainers included): 61.4% on 2026-10-11.
 COVERDIR     ?= coverdata
 COVERPROFILE ?= $(COVERDIR)/coverage.out
 COVERHTML    := $(COVERDIR)/coverage.html
-THRESHOLD    ?= 35
+THRESHOLD    ?= 60
 
 .PHONY: help
 help: ## Show this help
@@ -66,16 +67,16 @@ test-json: ## Unit tests with a pretty pass/fail + coverage summary (tparse)
 	@bash -o pipefail -c '$(GO) test -short -race -shuffle=on -cover ./... -json | $(GO) run $(TPARSE) -all'
 
 .PHONY: cover
-cover: ## Write a coverage profile, print the total, and render the HTML
+cover: ## Write a unit-test coverage profile, print the total, and render the HTML
 	@mkdir -p $(COVERDIR)
 	@$(GO) test -short -covermode=atomic -coverprofile=$(COVERPROFILE) ./...
 	@$(GO) tool cover -func=$(COVERPROFILE) | tail -n1
 	@$(GO) tool cover -html=$(COVERPROFILE) -o $(COVERHTML) && echo ">> wrote $(COVERHTML)"
 
 .PHONY: cover-check
-cover-check: ## Fail if total unit-test coverage is below THRESHOLD% (CI gate; override THRESHOLD=NN)
+cover-check: ## Full suite (race; docker for testcontainers); fail if coverage is below THRESHOLD% (CI gate)
 	@mkdir -p $(COVERDIR)
-	@$(GO) test -short -covermode=atomic -coverprofile=$(COVERPROFILE) ./...
+	$(GO) test -race -count=1 -covermode=atomic -coverprofile=$(COVERPROFILE) ./...
 	@total=$$($(GO) tool cover -func=$(COVERPROFILE) | awk '/^total:/ {print $$3}' | tr -d '%'); \
 	if awk "BEGIN { exit !($$total + 0 >= $(THRESHOLD)) }"; then \
 		echo ">> coverage $$total% >= $(THRESHOLD)% — OK"; \

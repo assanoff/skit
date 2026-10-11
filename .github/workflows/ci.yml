@@ -42,6 +42,37 @@ jobs:
       - name: Project rules, go fix and go.mod checks
         run: make lint-rules fix-check tidy-check
 
+  # The full suite: dbx, lock, outbox and translation/postgres start Postgres
+  # via testcontainers (Docker ships with the ubuntu runner; locally these tests
+  # are skipped under -short). The same run gates total coverage.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Integration tests and coverage gate
+        run: make cover-check
+
+  # Scaffold a service with every `skit add` module against this checkout and
+  # run its make check: the templates must build, lint and test clean.
+  gen-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
+        with:
+          version: 1.73.0
+          setup_only: true
+      - name: Generator check
+        run: make gen-check
+
   # Verify semantic-version compatibility of the public module against the
   # latest release tag. Skipped on the first release (no tag yet).
   #
