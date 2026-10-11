@@ -6,7 +6,7 @@ import (
 
 	"github.com/assanoff/skit/dbx"
 
-	"{{.Module}}/core/{{.Pkg}}"
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 )
 
 // db{{.Type}} is the database representation of a {{.Type}}. The id is a
@@ -22,7 +22,7 @@ type db{{.Type}} struct {
 	UpdatedAt   time.Time `db:"updated_at"`
 }
 
-func toDB(v {{.Pkg}}.{{.Type}}) db{{.Type}} {
+func toDB(v {{.Pkg}}core.{{.Type}}) db{{.Type}} {
 	return db{{.Type}}{
 		ID:          dbx.UUID(v.ID),
 		Name:        v.Name,
@@ -32,9 +32,9 @@ func toDB(v {{.Pkg}}.{{.Type}}) db{{.Type}} {
 	}
 }
 
-func toCore(r db{{.Type}}) {{.Pkg}}.{{.Type}} {
+func toCore(r db{{.Type}}) {{.Pkg}}core.{{.Type}} {
 	//exhaustruct:enforce
-	return {{.Pkg}}.{{.Type}}{
+	return {{.Pkg}}core.{{.Type}}{
 		ID:          uuid.UUID(r.ID),
 		Name:        r.Name,
 		Description: r.Description,
@@ -43,8 +43,8 @@ func toCore(r db{{.Type}}) {{.Pkg}}.{{.Type}} {
 	}
 }
 
-func toCoreSlice(rows []db{{.Type}}) []{{.Pkg}}.{{.Type}} {
-	out := make([]{{.Pkg}}.{{.Type}}, len(rows))
+func toCoreSlice(rows []db{{.Type}}) []{{.Pkg}}core.{{.Type}} {
+	out := make([]{{.Pkg}}core.{{.Type}}, len(rows))
 	for i, r := range rows {
 		out[i] = toCore(r)
 	}

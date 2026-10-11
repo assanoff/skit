@@ -46,8 +46,8 @@ func TestRest_Create{{.Type}}_201(t *testing.T) {
 
 	name := gofakeit.ProductName()
 	store := &mocks.StoreMock{
-		CreateFunc: func(ctx context.Context, {{.Recv}} {{.Pkg}}core.{{.Type}}) error {
-			is.Equal({{.Recv}}.Name, name) // handler decoded and forwarded the field
+		CreateFunc: func(ctx context.Context, item {{.Pkg}}core.{{.Type}}) error {
+			is.Equal(item.Name, name) // handler decoded and forwarded the field
 			return nil
 		},
 	}

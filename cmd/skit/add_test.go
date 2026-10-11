@@ -432,7 +432,7 @@ func TestAddHTTPClientPlain(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "payments.go", src, parser.AllErrors); err != nil {
 		t.Errorf("client does not parse: %v", err)
 	}
-	for _, want := range []string{"package payments", "httpclient.New(", "httpmw.RetryConfig", "func (p *Client) GetPayments("} {
+	for _, want := range []string{"package payments", "httpclient.New(", "httpmw.RetryConfig", "func (c *Client) GetPayments("} {
 		if !strings.Contains(src, want) {
 			t.Errorf("plain client missing %q:\n%s", want, src)
 		}
@@ -617,7 +617,7 @@ func TestAddCronPostgresLockVariant(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "dailyreport.go", src, parser.AllErrors); err != nil {
 		t.Errorf("locked cron does not parse: %v", err)
 	}
-	for _, want := range []string{"lock.Locker", "func (d *Cron) guarded(", "TryLock(", "0 3 * * *"} {
+	for _, want := range []string{"lock.Locker", "func (c *Cron) guarded(", "TryLock(", "0 3 * * *"} {
 		if !strings.Contains(src, want) {
 			t.Errorf("postgres-lock cron missing %q:\n%s", want, src)
 		}
@@ -673,11 +673,11 @@ func TestAddGRPCGeneratesProtoAndParsableHandler(t *testing.T) {
 	for _, want := range []string{
 		"package widgetgrpc",
 		`widgetv1 "github.com/me/svc/gen/widget/v1"`,
-		`"github.com/me/svc/core/widget"`,
+		`widgetcore "github.com/me/svc/core/widget"`,
 		"widgetv1.UnimplementedWidgetServiceServer",
 		"func (h *Handler) CreateWidget(",
 		"func (h *Handler) ListWidgets(",
-		"widgetv1.CreateWidgetResponse_builder{Widget: toProto(w)}.Build()",
+		"widgetv1.CreateWidgetResponse_builder{Widget: toProto(item)}.Build()",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("handler missing %q:\n%s", want, src)

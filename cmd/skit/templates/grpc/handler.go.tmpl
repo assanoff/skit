@@ -1,7 +1,7 @@
 // Package {{.Pkg}}grpc is the gRPC transport for the {{.Pkg}} module. Like the
-// REST handler it is a thin adapter over {{.Pkg}}.Core: it maps protobuf messages
-// to the domain and returns *errs.Error values, which the server's interceptor
-// converts into gRPC statuses.
+// REST handler it is a thin adapter over {{.Pkg}}core.Core: it maps protobuf
+// messages to the domain and returns *errs.Error values, which the server's
+// interceptor converts into gRPC statuses.
 package {{.Pkg}}grpc
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/page"
 
-	"{{.Module}}/core/{{.Pkg}}"
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 	{{.Pkg}}v1 "{{.Module}}/gen/{{.Pkg}}/v1"
 )
 
@@ -22,11 +22,13 @@ import (
 type Handler struct {
 	{{.Pkg}}v1.Unimplemented{{.Type}}ServiceServer
 
-	core *{{.Pkg}}.Core
+	core *{{.Pkg}}core.Core
 }
 
 // New builds a Handler.
-func New(core *{{.Pkg}}.Core) *Handler { return &Handler{core: core} }
+func New(core *{{.Pkg}}core.Core) *Handler {
+	return &Handler{core: core}
+}
 
 // Register implements grpcserver.Service: the feature owns its generated
 // registration call, so the server registers it via gs.Install(h) without
@@ -37,18 +39,18 @@ func (h *Handler) Register(reg grpc.ServiceRegistrar) {
 
 // Create{{.Type}} implements the gRPC {{.Type}}Service.
 func (h *Handler) Create{{.Type}}(ctx context.Context, req *{{.Pkg}}v1.Create{{.Type}}Request) (*{{.Pkg}}v1.Create{{.Type}}Response, error) {
-	n := {{.Pkg}}.New{{.Type}}{Name: req.GetName(), Description: req.GetDescription()}
+	n := {{.Pkg}}core.New{{.Type}}{Name: req.GetName(), Description: req.GetDescription()}
 	if err := errs.Check(struct {
 		Name string `validate:"required,max=100"`
 	}{Name: n.Name}); err != nil {
 		return nil, err
 	}
 
-	{{.Recv}}, err := h.core.Create(ctx, n)
+	item, err := h.core.Create(ctx, n)
 	if err != nil {
 		return nil, err
 	}
-	return {{.Pkg}}v1.Create{{.Type}}Response_builder{ {{.Type}}: toProto({{.Recv}}) }.Build(), nil
+	return {{.Pkg}}v1.Create{{.Type}}Response_builder{ {{.Type}}: toProto(item) }.Build(), nil
 }
 
 // Get{{.Type}} implements the gRPC {{.Type}}Service.
@@ -57,24 +59,24 @@ func (h *Handler) Get{{.Type}}(ctx context.Context, req *{{.Pkg}}v1.Get{{.Type}}
 	if err != nil {
 		return nil, err
 	}
-	{{.Recv}}, err := h.core.QueryByID(ctx, id)
+	item, err := h.core.QueryByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return {{.Pkg}}v1.Get{{.Type}}Response_builder{ {{.Type}}: toProto({{.Recv}}) }.Build(), nil
+	return {{.Pkg}}v1.Get{{.Type}}Response_builder{ {{.Type}}: toProto(item) }.Build(), nil
 }
 
 // List{{.PluralType}} implements the gRPC {{.Type}}Service. It lists with an empty
 // filter in the default order; offset paging maps from page/page_size. Add
 // filter/order fields to the proto request to expose the REST list's full set.
 func (h *Handler) List{{.PluralType}}(ctx context.Context, req *{{.Pkg}}v1.List{{.PluralType}}Request) (*{{.Pkg}}v1.List{{.PluralType}}Response, error) {
-	{{.Recv}}s, err := h.core.Query(ctx, {{.Pkg}}.QueryFilter{}, {{.Pkg}}.DefaultOrder, page.New(int(req.GetPage()), int(req.GetPageSize())))
+	items, err := h.core.Query(ctx, {{.Pkg}}core.QueryFilter{}, {{.Pkg}}core.DefaultOrder, page.New(int(req.GetPage()), int(req.GetPageSize())))
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*{{.Pkg}}v1.{{.Type}}, len({{.Recv}}s))
-	for i, {{.Recv}} := range {{.Recv}}s {
-		out[i] = toProto({{.Recv}})
+	out := make([]*{{.Pkg}}v1.{{.Type}}, len(items))
+	for i, item := range items {
+		out[i] = toProto(item)
 	}
 	return {{.Pkg}}v1.List{{.PluralType}}Response_builder{ {{.PluralType}}: out }.Build(), nil
 }
@@ -85,7 +87,7 @@ func (h *Handler) Update{{.Type}}(ctx context.Context, req *{{.Pkg}}v1.Update{{.
 	if err != nil {
 		return nil, err
 	}
-	var u {{.Pkg}}.Update{{.Type}}
+	var u {{.Pkg}}core.Update{{.Type}}
 	if req.HasName() {
 		v := req.GetName()
 		u.Name = &v
@@ -95,11 +97,11 @@ func (h *Handler) Update{{.Type}}(ctx context.Context, req *{{.Pkg}}v1.Update{{.
 		u.Description = &v
 	}
 
-	{{.Recv}}, err := h.core.Update(ctx, id, u)
+	item, err := h.core.Update(ctx, id, u)
 	if err != nil {
 		return nil, err
 	}
-	return {{.Pkg}}v1.Update{{.Type}}Response_builder{ {{.Type}}: toProto({{.Recv}}) }.Build(), nil
+	return {{.Pkg}}v1.Update{{.Type}}Response_builder{ {{.Type}}: toProto(item) }.Build(), nil
 }
 
 // Delete{{.Type}} implements the gRPC {{.Type}}Service.
@@ -122,12 +124,12 @@ func parseID(s string) (uuid.UUID, error) {
 	return id, nil
 }
 
-func toProto({{.Recv}} {{.Pkg}}.{{.Type}}) *{{.Pkg}}v1.{{.Type}} {
+func toProto(item {{.Pkg}}core.{{.Type}}) *{{.Pkg}}v1.{{.Type}} {
 	return {{.Pkg}}v1.{{.Type}}_builder{
-		Id:          {{.Recv}}.ID.String(),
-		Name:        {{.Recv}}.Name,
-		Description: {{.Recv}}.Description,
-		CreatedAt:   timestamppb.New({{.Recv}}.CreatedAt),
-		UpdatedAt:   timestamppb.New({{.Recv}}.UpdatedAt),
+		Id:          item.ID.String(),
+		Name:        item.Name,
+		Description: item.Description,
+		CreatedAt:   timestamppb.New(item.CreatedAt),
+		UpdatedAt:   timestamppb.New(item.UpdatedAt),
 	}.Build()
 }

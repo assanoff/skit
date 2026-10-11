@@ -92,8 +92,8 @@ type Item struct {
 // Get{{.Type}} shows the method pattern: build a request against baseURL, then
 // decode the 2xx JSON body with httpclient.DoJSON (a non-2xx becomes a
 // *httpclient.StatusError the caller can branch on). Replace it with real calls.
-func ({{.Recv}} *Client) Get{{.Type}}(ctx context.Context, id string) (Item, error) {
-	url := {{.Recv}}.baseURL + "/{{.Pkg}}/" + id
+func (c *Client) Get{{.Type}}(ctx context.Context, id string) (Item, error) {
+	url := c.baseURL + "/{{.Pkg}}/" + id
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return Item{}, fmt.Errorf("{{.Pkg}}: new request: %w", err)
@@ -101,7 +101,7 @@ func ({{.Recv}} *Client) Get{{.Type}}(ctx context.Context, id string) (Item, err
 	req.Header.Set("Accept", "application/json")
 
 	var out Item
-	if err := httpclient.DoJSON({{.Recv}}.http, req, &out); err != nil {
+	if err := httpclient.DoJSON(c.http, req, &out); err != nil {
 		return Item{}, err
 	}
 	return out, nil

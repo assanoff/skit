@@ -5,7 +5,7 @@ import (
 
 	"github.com/assanoff/skit/order"
 
-	"{{.Module}}/core/{{.Pkg}}"
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 )
 
 // orderByFields maps {{.Pkg}}'s allowlisted order-by field names to SQL columns —
@@ -13,8 +13,8 @@ import (
 // ORDER BY, so a client cannot inject an arbitrary column even though the field
 // name is interpolated.
 var orderByFields = map[string]string{
-	{{.Pkg}}.OrderByCreatedAt: "created_at",
-	{{.Pkg}}.OrderByName:      "name",
+	{{.Pkg}}core.OrderByCreatedAt: "created_at",
+	{{.Pkg}}core.OrderByName:      "name",
 }
 
 // orderByClause builds the ORDER BY for by, validating its field against

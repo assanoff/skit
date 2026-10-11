@@ -20,11 +20,14 @@ add() {
 	echo ">> skit add $*"
 	"$skit" add "$@" > /dev/null
 }
+# Entity names double as collision checks: note once clashed with template
+# locals, page with the skit/page import, item with the handler variables.
 add rest widget
-add rest label --no-tests
-add rest-test label
-add grpc gadget
-add grpc-test gadget
+add rest note --no-tests
+add rest-test note
+add rest page
+add grpc item
+add grpc-test item
 add consumer order
 add consumer payment --broker kafka
 add consumer audit --broker nats

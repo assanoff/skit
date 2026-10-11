@@ -23,8 +23,8 @@ import (
 // interface; concrete implementations (e.g. {{.Pkg}}db) live elsewhere.
 // Run `make generate` (moq) to (re)generate mocks/StoreMock for tests.
 type Store interface {
-	Create(ctx context.Context, {{.Recv}} {{.Type}}) error
-	Update(ctx context.Context, {{.Recv}} {{.Type}}) error
+	Create(ctx context.Context, item {{.Type}}) error
+	Update(ctx context.Context, item {{.Type}}) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	QueryByID(ctx context.Context, id uuid.UUID) ({{.Type}}, error)
 	Query(ctx context.Context, filter QueryFilter, by order.By, pg page.Page) ([]{{.Type}}, error)
@@ -46,41 +46,41 @@ func NewCore(log *logger.Logger, store Store) *Core {
 // Create validates and persists a new {{.Pkg}}.
 func (c *Core) Create(ctx context.Context, n New{{.Type}}) ({{.Type}}, error) {
 	now := time.Now().UTC()
-	{{.Recv}} := {{.Type}}{
+	item := {{.Type}}{
 		ID:          uuid.New(),
 		Name:        n.Name,
 		Description: n.Description,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := c.store.Create(ctx, {{.Recv}}); err != nil {
+	if err := c.store.Create(ctx, item); err != nil {
 		if errors.Is(err, dbx.ErrDBDuplicatedEntry) {
 			return {{.Type}}{}, errs.Newf(errs.AlreadyExists, "{{.Pkg}} %q already exists", n.Name)
 		}
 		return {{.Type}}{}, errs.New(errs.Internal, err)
 	}
-	return {{.Recv}}, nil
+	return item, nil
 }
 
 // QueryByID returns a {{.Pkg}} or a NotFound error.
 func (c *Core) QueryByID(ctx context.Context, id uuid.UUID) ({{.Type}}, error) {
-	{{.Recv}}, err := c.store.QueryByID(ctx, id)
+	item, err := c.store.QueryByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, dbx.ErrDBNotFound) {
 			return {{.Type}}{}, errs.Newf(errs.NotFound, "{{.Pkg}} %s not found", id)
 		}
 		return {{.Type}}{}, errs.New(errs.Internal, err)
 	}
-	return {{.Recv}}, nil
+	return item, nil
 }
 
 // Query returns one page of {{.Plural}} matching filter, ordered by.
 func (c *Core) Query(ctx context.Context, filter QueryFilter, by order.By, pg page.Page) ([]{{.Type}}, error) {
-	{{.Recv}}s, err := c.store.Query(ctx, filter, by, pg)
+	items, err := c.store.Query(ctx, filter, by, pg)
 	if err != nil {
 		return nil, errs.New(errs.Internal, err)
 	}
-	return {{.Recv}}s, nil
+	return items, nil
 }
 
 // QueryByCursor returns up to cur.Limit() {{.Plural}} matching filter,
@@ -89,11 +89,11 @@ func (c *Core) Query(ctx context.Context, filter QueryFilter, by order.By, pg pa
 // when there are no more rows. Unlike Query (offset), it is stable under
 // concurrent inserts and stays cheap at any depth. Forward-only (no prev).
 func (c *Core) QueryByCursor(ctx context.Context, filter QueryFilter, cur page.Cursor) ([]{{.Type}}, string, error) {
-	{{.Recv}}s, next, err := c.store.QueryByCursor(ctx, filter, cur)
+	items, next, err := c.store.QueryByCursor(ctx, filter, cur)
 	if err != nil {
 		return nil, "", errs.New(errs.Internal, err)
 	}
-	return {{.Recv}}s, next, nil
+	return items, next, nil
 }
 
 // Count returns the number of {{.Plural}} matching filter.
@@ -107,21 +107,21 @@ func (c *Core) Count(ctx context.Context, filter QueryFilter) (int, error) {
 
 // Update applies a partial update and persists it. Nil fields are left unchanged.
 func (c *Core) Update(ctx context.Context, id uuid.UUID, u Update{{.Type}}) ({{.Type}}, error) {
-	{{.Recv}}, err := c.QueryByID(ctx, id)
+	item, err := c.QueryByID(ctx, id)
 	if err != nil {
 		return {{.Type}}{}, err
 	}
 	if u.Name != nil {
-		{{.Recv}}.Name = *u.Name
+		item.Name = *u.Name
 	}
 	if u.Description != nil {
-		{{.Recv}}.Description = *u.Description
+		item.Description = *u.Description
 	}
-	{{.Recv}}.UpdatedAt = time.Now().UTC()
-	if err := c.store.Update(ctx, {{.Recv}}); err != nil {
+	item.UpdatedAt = time.Now().UTC()
+	if err := c.store.Update(ctx, item); err != nil {
 		return {{.Type}}{}, errs.New(errs.Internal, err)
 	}
-	return {{.Recv}}, nil
+	return item, nil
 }
 
 // Delete removes a {{.Pkg}}.

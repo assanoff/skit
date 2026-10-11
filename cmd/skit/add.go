@@ -159,7 +159,6 @@ type restData struct {
 	Module     string // github.com/you/svc
 	Pkg        string // widget      — package name (lower, no separators)
 	Type       string // Widget      — exported Go type
-	Recv       string // w           — short local/var name (first letter of Pkg)
 	Plural     string // widgets     — route path + table name
 	UpperSnake string // ORDER_LINE  — env-namespace fragment (consumer config)
 }
@@ -196,7 +195,6 @@ func addREST(out io.Writer, opts addRESTOpts) error {
 		Module: module,
 		Pkg:    pkg,
 		Type:   pascal(words),
-		Recv:   pkg[:1],
 		Plural: plural,
 	}
 
@@ -268,7 +266,6 @@ func addRESTTest(out io.Writer, opts addRESTOpts) error {
 		Module: module,
 		Pkg:    pkg,
 		Type:   pascal(words),
-		Recv:   pkg[:1],
 		Plural: plural,
 	}
 
@@ -316,7 +313,7 @@ func generateRESTTests(out io.Writer, dir string, data restData) error {
 // generateCore writes one entity's Core + Postgres store, transport-agnostic:
 // core/<pkg>, core/<pkg>/<pkg>db and core/<pkg>/mocks. Idempotent (existing
 // files are skipped). Shared by `add rest` and `add grpc`; the templates use
-// only Module/Pkg/Type/Recv/Plural, so either command's data renders them.
+// only Module/Pkg/Type/Plural, so either command's data renders them.
 func generateCore(out io.Writer, dir, pkg string, data any) error {
 	corePkgDir := filepath.Join(dir, "core", pkg)
 	dbPkgDir := filepath.Join(corePkgDir, pkg+"db")
@@ -445,7 +442,6 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 		Module:     module,
 		Pkg:        pkg,
 		Type:       pascal(words),
-		Recv:       pkg[:1],
 		UpperSnake: strings.ToUpper(strings.Join(words, "_")),
 	}
 
@@ -619,7 +615,6 @@ func addWorker(out io.Writer, opts addRESTOpts) error {
 		Module: module,
 		Pkg:    pkg,
 		Type:   pascal(words),
-		Recv:   pkg[:1],
 	}
 
 	mainTmpl := "templates/worker/tick.go.tmpl"
@@ -705,7 +700,6 @@ type cronData struct {
 	Module   string
 	Pkg      string
 	Type     string
-	Recv     string
 	Schedule string // cron spec, e.g. "@every 1m" or "0 3 * * *"
 	Locked   bool   // true when --lock != none: gate each tick on a lock.Locker
 	Backend  string // lock backend: "postgres" | "redis" | "" (none)
@@ -753,7 +747,6 @@ func addCron(out io.Writer, dir, module, name, schedule, lockBackend string, noT
 		Module:   module,
 		Pkg:      pkg,
 		Type:     pascal(words),
-		Recv:     pkg[:1],
 		Schedule: schedule,
 		Locked:   lockBackend != "none",
 		Backend:  lockBackend,
@@ -892,7 +885,6 @@ func addEvent(out io.Writer, opts addRESTOpts) error {
 		Module: module,
 		Pkg:    pkg,
 		Type:   pascal(words),
-		Recv:   pkg[:1],
 		Plural: plural,
 	}
 
@@ -1005,7 +997,6 @@ type grpcData struct {
 	Module     string // github.com/you/svc
 	Pkg        string // widget    — package name + proto package (lower, no separators)
 	Type       string // Widget    — exported Go type / message name
-	Recv       string // w         — short local/var name
 	Snake      string // widget / order_line — proto singular field (pascalizes back to Type)
 	Plural     string // widgets   — proto list field
 	PluralType string // Widgets   — List RPC / list builder field (pascal of Plural)
@@ -1042,7 +1033,6 @@ func addGRPC(out io.Writer, opts addRESTOpts) error {
 		Module:     module,
 		Pkg:        pkg,
 		Type:       pascal(words),
-		Recv:       pkg[:1],
 		Snake:      strings.ToLower(strings.Join(words, "_")),
 		Plural:     plural,
 		PluralType: pascal(splitWords(plural)),
@@ -1209,7 +1199,6 @@ func addGRPCTest(out io.Writer, opts addRESTOpts) error {
 		Module:     module,
 		Pkg:        pkg,
 		Type:       pascal(words),
-		Recv:       pkg[:1],
 		Snake:      strings.ToLower(strings.Join(words, "_")),
 		Plural:     plural,
 		PluralType: pascal(splitWords(plural)),
@@ -1248,7 +1237,6 @@ type httpClientData struct {
 	Module string
 	Pkg    string
 	Type   string
-	Recv   string
 	OAuth  bool // --oauth: scaffold the OAuth2 client_credentials transport
 }
 
@@ -1294,7 +1282,6 @@ func addHTTPClient(out io.Writer, dir, module, name string, oauth, noTests bool)
 		Module: module,
 		Pkg:    pkg,
 		Type:   pascal(words),
-		Recv:   pkg[:1],
 		OAuth:  oauth,
 	}
 

@@ -53,12 +53,12 @@ func (h *Handler) create(ctx context.Context, r *http.Request) rest.ResponseEnco
 		return errs.From(err)
 	}
 
-	{{.Recv}}, err := h.core.Create(ctx, {{.Pkg}}core.New{{.Type}}{Name: req.Name, Description: req.Description})
+	item, err := h.core.Create(ctx, {{.Pkg}}core.New{{.Type}}{Name: req.Name, Description: req.Description})
 	if err != nil {
 		return errs.From(err)
 	}
 	// {error_code, data:{...}} at 201, sharing the house envelope with reads.
-	return rest.JSONStatus(query.NewResultItem(toResponse({{.Recv}})), http.StatusCreated)
+	return rest.JSONStatus(query.NewResultItem(toResponse(item)), http.StatusCreated)
 }
 
 // query lists one page of {{.Plural}} (?page, ?rows), optionally narrowed by the
@@ -82,7 +82,7 @@ func (h *Handler) query(ctx context.Context, r *http.Request) rest.ResponseEncod
 		return errs.NewFieldErrors("order", errs.FieldError{Field: "order_by", Error: err.Error()})
 	}
 
-	{{.Recv}}s, err := h.core.Query(ctx, filter, by, pg)
+	items, err := h.core.Query(ctx, filter, by, pg)
 	if err != nil {
 		return errs.From(err)
 	}
@@ -90,7 +90,7 @@ func (h *Handler) query(ctx context.Context, r *http.Request) rest.ResponseEncod
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewResult(toResponseList({{.Recv}}s), total, pg)
+	return query.NewResult(toResponseList(items), total, pg)
 }
 
 // queryCursor lists {{.Plural}} with keyset (cursor) pagination: ?cursor=<token>
@@ -110,11 +110,11 @@ func (h *Handler) queryCursor(ctx context.Context, r *http.Request) rest.Respons
 		return errs.From(err)
 	}
 
-	{{.Recv}}s, next, err := h.core.QueryByCursor(ctx, filter, cur)
+	items, next, err := h.core.QueryByCursor(ctx, filter, cur)
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewCursorResult(toResponseList({{.Recv}}s), next, "")
+	return query.NewCursorResult(toResponseList(items), next, "")
 }
 
 // queryByID returns one {{.Pkg}} by id.
@@ -124,11 +124,11 @@ func (h *Handler) queryByID(ctx context.Context, r *http.Request) rest.ResponseE
 		return errs.Newf(errs.InvalidArgument, "invalid id %q", r.PathValue("id"))
 	}
 
-	{{.Recv}}, err := h.core.QueryByID(ctx, id)
+	item, err := h.core.QueryByID(ctx, id)
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewResultItem(toResponse({{.Recv}})) // {error_code, data:{...}}
+	return query.NewResultItem(toResponse(item)) // {error_code, data:{...}}
 }
 
 // update applies a partial update to a {{.Pkg}}.
@@ -143,11 +143,11 @@ func (h *Handler) update(ctx context.Context, r *http.Request) rest.ResponseEnco
 		return errs.From(err)
 	}
 
-	{{.Recv}}, err := h.core.Update(ctx, id, {{.Pkg}}core.Update{{.Type}}{Name: req.Name, Description: req.Description})
+	item, err := h.core.Update(ctx, id, {{.Pkg}}core.Update{{.Type}}{Name: req.Name, Description: req.Description})
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewResultItem(toResponse({{.Recv}})) // {error_code, data:{...}}
+	return query.NewResultItem(toResponse(item)) // {error_code, data:{...}}
 }
 
 // delete removes a {{.Pkg}}.

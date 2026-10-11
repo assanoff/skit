@@ -14,7 +14,7 @@ import (
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 
-	"{{.Module}}/core/{{.Pkg}}"
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 	"{{.Module}}/core/{{.Pkg}}/{{.Pkg}}db"
 )
 
@@ -49,14 +49,14 @@ func new{{.Type}}Store(ctx context.Context, t *testing.T) *{{.Pkg}}db.Store {
 // seed{{.Type}}Rows inserts {{.Plural}} named by names with strictly increasing
 // created_at, so the default (created_at DESC) order is deterministic: the last
 // name is newest.
-func seed{{.Type}}Rows(ctx context.Context, t *testing.T, s *{{.Pkg}}db.Store, names ...string) []{{.Pkg}}.{{.Type}} {
+func seed{{.Type}}Rows(ctx context.Context, t *testing.T, s *{{.Pkg}}db.Store, names ...string) []{{.Pkg}}core.{{.Type}} {
 	t.Helper()
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	out := make([]{{.Pkg}}.{{.Type}}, len(names))
+	out := make([]{{.Pkg}}core.{{.Type}}, len(names))
 	for i, name := range names {
 		at := base.Add(time.Duration(i) * time.Hour)
-		v := {{.Pkg}}.{{.Type}}{
+		v := {{.Pkg}}core.{{.Type}}{
 			ID:          uuid.New(),
 			Name:        name,
 			Description: "",
@@ -93,7 +93,7 @@ func Test{{.Type}}StoreCursor(t *testing.T) {
 	token := ""
 	pages := 0
 	for {
-		items, next, err := s.QueryByCursor(ctx, {{.Pkg}}.QueryFilter{}, page.NewCursor(token, 2))
+		items, next, err := s.QueryByCursor(ctx, {{.Pkg}}core.QueryFilter{}, page.NewCursor(token, 2))
 		is.NoErr(err)
 		for _, it := range items {
 			is.True(!seen[it.ID]) // no row repeats across pages
@@ -129,15 +129,15 @@ func Test{{.Type}}StoreOffsetAndCount(t *testing.T) {
 	s := new{{.Type}}Store(ctx, t)
 	seed{{.Type}}Rows(ctx, t, s, "a", "b", "c", "d", "e")
 
-	total, err := s.Count(ctx, {{.Pkg}}.QueryFilter{})
+	total, err := s.Count(ctx, {{.Pkg}}core.QueryFilter{})
 	is.NoErr(err)
 	is.Equal(total, 5) // unfiltered total
 
-	p1, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, {{.Pkg}}.DefaultOrder, page.New(1, 2))
+	p1, err := s.Query(ctx, {{.Pkg}}core.QueryFilter{}, {{.Pkg}}core.DefaultOrder, page.New(1, 2))
 	is.NoErr(err)
 	is.Equal(len(p1), 2) // full page
 
-	p3, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, {{.Pkg}}.DefaultOrder, page.New(3, 2))
+	p3, err := s.Query(ctx, {{.Pkg}}core.QueryFilter{}, {{.Pkg}}core.DefaultOrder, page.New(3, 2))
 	is.NoErr(err)
 	is.Equal(len(p3), 1) // remainder
 }
@@ -166,7 +166,7 @@ func Test{{.Type}}StoreFilter(t *testing.T) {
 	}
 	for i, r := range rows {
 		at := base.Add(time.Duration(i) * time.Hour)
-		err := s.Create(ctx, {{.Pkg}}.{{.Type}}{
+		err := s.Create(ctx, {{.Pkg}}core.{{.Type}}{
 			ID:          uuid.New(),
 			Name:        r.name,
 			Description: r.desc,
@@ -177,8 +177,8 @@ func Test{{.Type}}StoreFilter(t *testing.T) {
 	}
 
 	// name: case-insensitive substring -> the two "Gadget"s; Count agrees.
-	nameFilter := {{.Pkg}}.QueryFilter{Name: ptr("gadget")}
-	byName, err := s.Query(ctx, nameFilter, {{.Pkg}}.DefaultOrder, page.New(1, 100))
+	nameFilter := {{.Pkg}}core.QueryFilter{Name: ptr("gadget")}
+	byName, err := s.Query(ctx, nameFilter, {{.Pkg}}core.DefaultOrder, page.New(1, 100))
 	is.NoErr(err)
 	is.Equal(len(byName), 2)
 	cnt, err := s.Count(ctx, nameFilter)
@@ -186,8 +186,8 @@ func Test{{.Type}}StoreFilter(t *testing.T) {
 	is.Equal(cnt, 2)
 
 	// combined name + description -> Alpha Gadget only.
-	combined := {{.Pkg}}.QueryFilter{Name: ptr("gadget"), Description: ptr("red")}
-	got, err := s.Query(ctx, combined, {{.Pkg}}.DefaultOrder, page.New(1, 100))
+	combined := {{.Pkg}}core.QueryFilter{Name: ptr("gadget"), Description: ptr("red")}
+	got, err := s.Query(ctx, combined, {{.Pkg}}core.DefaultOrder, page.New(1, 100))
 	is.NoErr(err)
 	is.Equal(len(got), 1)
 	is.Equal(got[0].Name, "Alpha Gadget")
@@ -210,7 +210,7 @@ func Test{{.Type}}StoreOrdering(t *testing.T) {
 	seed{{.Type}}Rows(ctx, t, s, "Banana", "Apple", "Cherry")
 
 	names := func(by order.By) []string {
-		items, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, by, page.New(1, 100))
+		items, err := s.Query(ctx, {{.Pkg}}core.QueryFilter{}, by, page.New(1, 100))
 		is.NoErr(err)
 		out := make([]string, len(items))
 		for i, it := range items {
@@ -219,11 +219,11 @@ func Test{{.Type}}StoreOrdering(t *testing.T) {
 		return out
 	}
 
-	is.Equal(names(order.NewBy({{.Pkg}}.OrderByName, order.ASC)), []string{"Apple", "Banana", "Cherry"})  // name ascending
-	is.Equal(names(order.NewBy({{.Pkg}}.OrderByName, order.DESC)), []string{"Cherry", "Banana", "Apple"}) // name descending
-	is.Equal(names({{.Pkg}}.DefaultOrder), []string{"Cherry", "Apple", "Banana"})                         // default: created_at DESC
+	is.Equal(names(order.NewBy({{.Pkg}}core.OrderByName, order.ASC)), []string{"Apple", "Banana", "Cherry"})  // name ascending
+	is.Equal(names(order.NewBy({{.Pkg}}core.OrderByName, order.DESC)), []string{"Cherry", "Banana", "Apple"}) // name descending
+	is.Equal(names({{.Pkg}}core.DefaultOrder), []string{"Cherry", "Apple", "Banana"})                         // default: created_at DESC
 
 	// A field outside the db allowlist is rejected by the store.
-	_, err := s.Query(ctx, {{.Pkg}}.QueryFilter{}, order.By{Field: "description", Direction: order.ASC}, page.New(1, 100))
+	_, err := s.Query(ctx, {{.Pkg}}core.QueryFilter{}, order.By{Field: "description", Direction: order.ASC}, page.New(1, 100))
 	is.True(err != nil)
 }

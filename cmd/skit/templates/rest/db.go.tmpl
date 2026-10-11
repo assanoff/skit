@@ -1,4 +1,4 @@
-// Package {{.Pkg}}db is the Postgres implementation of {{.Pkg}}.Store. It maps
+// Package {{.Pkg}}db is the Postgres implementation of {{.Pkg}}core.Store. It maps
 // between the domain {{.Type}} and its database representation and uses the
 // skit dbx helpers for query logging and error translation, following the
 // SDK pg-store convention (inline const queries, a model.go row type, a
@@ -21,10 +21,10 @@ import (
 	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/dbx/dialect"
 
-	"{{.Module}}/core/{{.Pkg}}"
+	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 )
 
-// Store implements {{.Pkg}}.Store against Postgres.
+// Store implements {{.Pkg}}core.Store against Postgres.
 type Store struct {
 	log     *logger.Logger
 	db      sqlx.ExtContext
@@ -52,10 +52,10 @@ func NewStore(log *logger.Logger, db *sqlx.DB, opts ...Option) *Store {
 }
 
 // Compile-time check that Store satisfies the domain contract.
-var _ {{.Pkg}}.Store = (*Store)(nil)
+var _ {{.Pkg}}core.Store = (*Store)(nil)
 
-// Create implements {{.Pkg}}.Store.
-func (s *Store) Create(ctx context.Context, v {{.Pkg}}.{{.Type}}) error {
+// Create implements {{.Pkg}}core.Store.
+func (s *Store) Create(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
 	const q = `
 		INSERT INTO {{.Plural}} (id, name, description, created_at, updated_at)
 		VALUES (:id, :name, :description, :created_at, :updated_at)`
@@ -65,8 +65,8 @@ func (s *Store) Create(ctx context.Context, v {{.Pkg}}.{{.Type}}) error {
 	return nil
 }
 
-// Update implements {{.Pkg}}.Store.
-func (s *Store) Update(ctx context.Context, v {{.Pkg}}.{{.Type}}) error {
+// Update implements {{.Pkg}}core.Store.
+func (s *Store) Update(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
 	const q = `
 		UPDATE {{.Plural}}
 		SET name = :name, description = :description, updated_at = :updated_at
@@ -77,7 +77,7 @@ func (s *Store) Update(ctx context.Context, v {{.Pkg}}.{{.Type}}) error {
 	return nil
 }
 
-// Delete implements {{.Pkg}}.Store.
+// Delete implements {{.Pkg}}core.Store.
 func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 	const q = `DELETE FROM {{.Plural}} WHERE id = :id`
 	data := struct {
@@ -89,8 +89,8 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// QueryByID implements {{.Pkg}}.Store.
-func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) ({{.Pkg}}.{{.Type}}, error) {
+// QueryByID implements {{.Pkg}}core.Store.
+func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) ({{.Pkg}}core.{{.Type}}, error) {
 	const q = `SELECT id, name, description, created_at, updated_at FROM {{.Plural}} WHERE id = :id`
 	data := struct {
 		ID string `db:"id"`
@@ -98,14 +98,14 @@ func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) ({{.Pkg}}.{{.Type}}
 
 	var row db{{.Type}}
 	if err := dbx.NamedQueryStruct(ctx, s.log, s.db, q, data, &row); err != nil {
-		return {{.Pkg}}.{{.Type}}{}, fmt.Errorf("querybyid: %w", err)
+		return {{.Pkg}}core.{{.Type}}{}, fmt.Errorf("querybyid: %w", err)
 	}
 	return toCore(row), nil
 }
 
-// Count implements {{.Pkg}}.Store, honoring filter so a filtered total stays
+// Count implements {{.Pkg}}core.Store, honoring filter so a filtered total stays
 // consistent with the filtered page.
-func (s *Store) Count(ctx context.Context, filter {{.Pkg}}.QueryFilter) (int, error) {
+func (s *Store) Count(ctx context.Context, filter {{.Pkg}}core.QueryFilter) (int, error) {
 	data := map[string]any{}
 	buf := bytes.NewBufferString(`SELECT count(*) AS n FROM {{.Plural}}`)
 	s.applyFilter(filter, data, buf)
@@ -119,10 +119,10 @@ func (s *Store) Count(ctx context.Context, filter {{.Pkg}}.QueryFilter) (int, er
 	return row.N, nil
 }
 
-// Query implements {{.Pkg}}.Store: one filtered, ordered page. The WHERE is built
+// Query implements {{.Pkg}}core.Store: one filtered, ordered page. The WHERE is built
 // by applyFilter, the ORDER BY by orderByClause (allowlisted), and the pagination
 // clause via the store's dialect, binding :offset and :rows_per_page below.
-func (s *Store) Query(ctx context.Context, filter {{.Pkg}}.QueryFilter, by order.By, pg page.Page) ([]{{.Pkg}}.{{.Type}}, error) {
+func (s *Store) Query(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by order.By, pg page.Page) ([]{{.Pkg}}core.{{.Type}}, error) {
 	clause, err := orderByClause(by)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
@@ -145,12 +145,12 @@ func (s *Store) Query(ctx context.Context, filter {{.Pkg}}.QueryFilter, by order
 	return toCoreSlice(rows), nil
 }
 
-// QueryByCursor implements {{.Pkg}}.Store with keyset (cursor) pagination, honoring
+// QueryByCursor implements {{.Pkg}}core.Store with keyset (cursor) pagination, honoring
 // filter. It combines filter's predicates with the keyset boundary in one WHERE,
 // fetches one extra row to detect a further page, trims it, and encodes the last
 // row's (created_at, id) into the next token. Back it with a composite index on
 // ({{.Plural}}) (created_at DESC, id DESC) so it stays O(limit) at any depth.
-func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}.QueryFilter, cur page.Cursor) ([]{{.Pkg}}.{{.Type}}, string, error) {
+func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}core.QueryFilter, cur page.Cursor) ([]{{.Pkg}}core.{{.Type}}, string, error) {
 	key, err := cur.Key()
 	if err != nil {
 		return nil, "", fmt.Errorf("querybycursor: %w", err)
