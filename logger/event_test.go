@@ -62,8 +62,10 @@ func TestEventHookFiresOnlyForConfiguredLevel(t *testing.T) {
 	var buf bytes.Buffer
 	var errFired int
 	log := New(&buf, Config{
-		Level:  LevelInfo,
-		Events: Events{Error: func(context.Context, slog.Record) { errFired++ }},
+		Level: LevelInfo,
+		Events: Events{
+			Error: func(context.Context, slog.Record) { errFired++ },
+		},
 	})
 	ctx := context.Background()
 	log.Info(ctx, "hello")

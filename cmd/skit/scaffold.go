@@ -138,9 +138,7 @@ func renderFullStarter(out io.Writer, opts scaffoldOpts, name, dir string) error
 
 	// Refuse before writing anything if a target already exists.
 	for _, j := range jobs {
-		if _, err := os.Stat(j.dest); err == nil {
-			return fmt.Errorf("%s already exists — refusing to overwrite", j.dest)
-		} else if !os.IsNotExist(err) {
+		if err := ensureAbsent(j.dest); err != nil {
 			return err
 		}
 	}
@@ -216,6 +214,19 @@ func renderFile(dest, tmplPath string, data any) error {
 	return nil
 }
 
+// ensureAbsent errors if dest already exists, so a generator never overwrites
+// a file.
+func ensureAbsent(dest string) error {
+	_, err := os.Stat(dest)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%s already exists — refusing to overwrite", dest)
+}
+
 // ensureEmptyDir creates dir if missing and errors if it exists with content,
 // so we never overwrite an existing project.
 func ensureEmptyDir(dir string) error {
@@ -242,13 +253,7 @@ func ensureEmptyDir(dir string) error {
 // runGonew delegates to the gonew tool, preferring an installed binary and
 // falling back to `go run golang.org/x/tools/cmd/gonew@latest`.
 func runGonew(out io.Writer, templateModule, module, dir string) error {
-	var cmd *exec.Cmd
-	if path, err := exec.LookPath("gonew"); err == nil {
-		cmd = exec.Command(path, templateModule, module, dir)
-	} else {
-		fmt.Fprintln(out, "gonew not found in PATH; using `go run golang.org/x/tools/cmd/gonew@latest`")
-		cmd = exec.Command("go", "run", "golang.org/x/tools/cmd/gonew@latest", templateModule, module, dir)
-	}
+	cmd := gonewCmd(out, templateModule, module, dir)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Run(); err != nil {
@@ -256,4 +261,15 @@ func runGonew(out io.Writer, templateModule, module, dir string) error {
 	}
 	fmt.Fprintf(out, "\nScaffolded %q from template %q in %s/\n", module, templateModule, dir)
 	return nil
+}
+
+// gonewCmd is the installed gonew binary, or `go run` of the latest gonew when
+// it is not in PATH.
+func gonewCmd(out io.Writer, args ...string) *exec.Cmd {
+	if path, err := exec.LookPath("gonew"); err == nil {
+		return exec.Command(path, args...)
+	}
+	fmt.Fprintln(out, "gonew not found in PATH; using `go run golang.org/x/tools/cmd/gonew@latest`")
+	goArgs := append([]string{"run", "golang.org/x/tools/cmd/gonew@latest"}, args...)
+	return exec.Command("go", goArgs...)
 }

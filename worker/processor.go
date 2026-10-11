@@ -45,7 +45,9 @@ func (f SourceFunc[T]) Claim(ctx context.Context, now time.Time, limit int) ([]T
 type HandlerFunc[T any] func(ctx context.Context, item T) error
 
 // Handle implements Handler.
-func (f HandlerFunc[T]) Handle(ctx context.Context, item T) error { return f(ctx, item) }
+func (f HandlerFunc[T]) Handle(ctx context.Context, item T) error {
+	return f(ctx, item)
+}
 
 // ProcessorConfig configures a Processor.
 type ProcessorConfig struct {

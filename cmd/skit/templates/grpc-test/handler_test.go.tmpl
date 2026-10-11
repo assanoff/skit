@@ -98,7 +98,9 @@ func TestGRPC_Create{{.Type}}_Integration(t *testing.T) {
 	is := is.New(t)
 
 	store := &mocks.StoreMock{
-		CreateFunc: func(ctx context.Context, {{.Recv}} {{.Pkg}}.{{.Type}}) error { return nil },
+		CreateFunc: func(ctx context.Context, {{.Recv}} {{.Pkg}}.{{.Type}}) error {
+			return nil
+		},
 	}
 	client := newTestClient(t, store)
 

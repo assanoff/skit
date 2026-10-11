@@ -19,7 +19,10 @@ func ceBody(t *testing.T, typ string) []byte {
 func TestProcessMalformedDrops(t *testing.T) {
 	called := false
 	got := broker.Process(context.Background(), nil, "c", []byte("{not-cloudevents"), nil,
-		func(context.Context, broker.Message) broker.Action { called = true; return broker.Requeue })
+		func(context.Context, broker.Message) broker.Action {
+			called = true
+			return broker.Requeue
+		})
 	if got != broker.Ack {
 		t.Errorf("malformed action = %v, want Ack (drop)", got)
 	}
@@ -32,7 +35,10 @@ func TestProcessRoutesAndReturnsHandlerAction(t *testing.T) {
 	var seen broker.Message
 	got := broker.Process(context.Background(), nil, "c", ceBody(t, "widget.created"),
 		func(m *broker.Message) { m.Topic = "widgets"; m.Key = "k" },
-		func(_ context.Context, m broker.Message) broker.Action { seen = m; return broker.Discard })
+		func(_ context.Context, m broker.Message) broker.Action {
+			seen = m
+			return broker.Discard
+		})
 	if got != broker.Discard {
 		t.Errorf("action = %v, want Discard (handler's verdict)", got)
 	}

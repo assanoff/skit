@@ -16,7 +16,9 @@
 //	cl := closer.NewWithWait() // listens for DefaultSignals
 //
 //	srv := startServer()
-//	cl.AddNamed("http", func() error { return srv.Shutdown(context.Background()) })
+//	cl.AddNamed("http", func() error {
+//	    return srv.Shutdown(context.Background())
+//	})
 //	cl.AddNamed("db", db.Close)
 //
 //	cl.Wait()              // block until a signal arrives

@@ -57,7 +57,9 @@ func TestServeAndGracefulStop(t *testing.T) {
 	}
 
 	s := New(Config{Name: "test", Logger: quietLogger()}, http.HandlerFunc(
-		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) },
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusTeapot)
+		},
 	))
 
 	errCh := make(chan error, 1)

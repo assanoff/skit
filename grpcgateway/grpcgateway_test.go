@@ -83,7 +83,9 @@ func TestNewWithClientConnIsNotOwned(t *testing.T) {
 func TestNewRegistrarErrorPropagates(t *testing.T) {
 	sentinel := errors.New("boom")
 	_, err := New(context.Background(), Config{Endpoint: "localhost:0"},
-		func(context.Context, *runtime.ServeMux, *grpc.ClientConn) error { return sentinel })
+		func(context.Context, *runtime.ServeMux, *grpc.ClientConn) error {
+			return sentinel
+		})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("err = %v, want wrapped %v", err, sentinel)
 	}

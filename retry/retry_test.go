@@ -107,9 +107,13 @@ func TestDoStrategyOverridesBackoffAndOnRetryObserves(t *testing.T) {
 	calls := 0
 
 	err := Do(context.Background(), Config{
-		Backoff:  Backoff{MaxAttempts: 3}, // budget only; delay comes from Strategy
-		Strategy: func(attempt int) time.Duration { return time.Duration(attempt) * time.Second },
-		OnRetry:  func(attempt int, _ error) { retries = append(retries, attempt) },
+		Backoff: Backoff{MaxAttempts: 3}, // budget only; delay comes from Strategy
+		Strategy: func(attempt int) time.Duration {
+			return time.Duration(attempt) * time.Second
+		},
+		OnRetry: func(attempt int, _ error) {
+			retries = append(retries, attempt)
+		},
 		Sleep: func(_ context.Context, d time.Duration) error {
 			delays = append(delays, d)
 			return nil

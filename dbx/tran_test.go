@@ -20,9 +20,11 @@ func (tranDriver) Open(string) (driver.Conn, error) { return tranConn{}, nil }
 
 type tranConn struct{}
 
-func (tranConn) Prepare(string) (driver.Stmt, error) { return nil, errors.New("not implemented") }
-func (tranConn) Close() error                        { return nil }
-func (tranConn) Begin() (driver.Tx, error)           { return tranTx{}, nil }
+func (tranConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("not implemented")
+}
+func (tranConn) Close() error              { return nil }
+func (tranConn) Begin() (driver.Tx, error) { return tranTx{}, nil }
 
 type tranTx struct{}
 

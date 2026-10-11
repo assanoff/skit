@@ -44,7 +44,9 @@ func TestErrorMapStream(t *testing.T) {
 
 	interceptor := errorMapStream()
 
-	failing := func(srv any, ss grpc.ServerStream) error { return errs.Newf(errs.InvalidArgument, "bad input") }
+	failing := func(srv any, ss grpc.ServerStream) error {
+		return errs.Newf(errs.InvalidArgument, "bad input")
+	}
 	err := interceptor(nil, &fakeStream{}, &grpc.StreamServerInfo{}, failing)
 	st, _ := status.FromError(err)
 	is.Equal(st.Code(), codes.InvalidArgument)
@@ -63,7 +65,10 @@ func TestTraceStreamWrapsContext(t *testing.T) {
 	interceptor := traceStream(noop.NewTracerProvider().Tracer("test"))
 
 	var seen context.Context
-	handler := func(srv any, ss grpc.ServerStream) error { seen = ss.Context(); return nil }
+	handler := func(srv any, ss grpc.ServerStream) error {
+		seen = ss.Context()
+		return nil
+	}
 	err := interceptor(nil, &fakeStream{ctx: base}, &grpc.StreamServerInfo{}, handler)
 
 	is.NoErr(err)
@@ -84,6 +89,7 @@ func TestWithStreamInterceptorsOption(t *testing.T) {
 	WithStreamInterceptors(mw)(&o)
 
 	is.Equal(len(o.streamExtra), 1)
-	_ = o.streamExtra[0](nil, &fakeStream{}, &grpc.StreamServerInfo{}, func(any, grpc.ServerStream) error { return nil })
+	noop := func(any, grpc.ServerStream) error { return nil }
+	_ = o.streamExtra[0](nil, &fakeStream{}, &grpc.StreamServerInfo{}, noop)
 	is.True(called)
 }

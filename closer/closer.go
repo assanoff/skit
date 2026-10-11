@@ -131,10 +131,10 @@ func (c *Closer) addNamed(name string, fn func() error) {
 		err := fn()
 		if err != nil {
 			slog.Error("failed to close", slog.String("name", name), slog.String("error", err.Error()))
-		} else {
-			slog.Info("closed", slog.String("name", name), slog.Duration("duration", time.Since(start)))
+			return err
 		}
-		return err
+		slog.Info("closed", slog.String("name", name), slog.Duration("duration", time.Since(start)))
+		return nil
 	})
 }
 

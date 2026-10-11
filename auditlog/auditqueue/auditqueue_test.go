@@ -18,8 +18,15 @@ func (f *fakeQueue) Schedule(_ context.Context, p queue.ScheduleParams) (bool, e
 	f.scheduled = append(f.scheduled, p)
 	return true, nil
 }
-func (f *fakeQueue) Claim(context.Context, time.Time, int) ([]queue.Task, error) { return nil, nil }
-func (f *fakeQueue) MarkDone(context.Context, queue.Task, time.Time) error       { return nil }
+
+func (f *fakeQueue) Claim(context.Context, time.Time, int) ([]queue.Task, error) {
+	return nil, nil
+}
+
+func (f *fakeQueue) MarkDone(context.Context, queue.Task, time.Time) error {
+	return nil
+}
+
 func (f *fakeQueue) MarkFailed(context.Context, queue.Task, string, bool, time.Time) error {
 	return nil
 }

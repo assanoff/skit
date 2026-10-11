@@ -285,9 +285,9 @@ func TestTranslator_TranslateSingleWithNestedSlice(t *testing.T) {
 	// Document current behavior - nested slices are NOT translated by Translate()
 	if product.Assets[0].Title == "Актив 1" {
 		t.Log("✓ Translate() DOES translate nested Translatable slices")
-	} else {
-		t.Log("✗ Translate() does NOT translate nested Translatable slices (only TranslateSlice does)")
+		return
 	}
+	t.Log("✗ Translate() does NOT translate nested Translatable slices (only TranslateSlice does)")
 }
 
 func TestTranslator_TranslateDefaultLanguage(t *testing.T) {

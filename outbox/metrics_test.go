@@ -15,7 +15,9 @@ type fakeStats struct {
 	err error
 }
 
-func (f fakeStats) Stats(context.Context, time.Time) (Stats, error) { return f.st, f.err }
+func (f fakeStats) Stats(context.Context, time.Time) (Stats, error) {
+	return f.st, f.err
+}
 
 func TestBacklogCollectorEmitsGauges(t *testing.T) {
 	sr := fakeStats{st: Stats{

@@ -43,7 +43,9 @@
 //	proc := worker.NewProcessor[Job](log, src, handler, sink, worker.ProcessorConfig{
 //	    Name:       "jobs",
 //	    BatchSize:  200,
-//	    IsTerminal: func(err error) bool { return errors.Is(err, ErrBadInput) },
+//	    IsTerminal: func(err error) bool {
+//	        return errors.Is(err, ErrBadInput)
+//	    },
 //	})
 //	loop := worker.NewPacedLoop(log, worker.LoopConfig{
 //	    Name:            "jobs",
@@ -56,8 +58,12 @@
 //	g.Add(loop)
 //	g.Add(worker.RunnableFunc{
 //	    NameValue: "http",
-//	    StartFn:   func(ctx context.Context) error { return srv.ListenAndServe() },
-//	    StopFn:    func(ctx context.Context) error { return srv.Shutdown(ctx) },
+//	    StartFn:   func(ctx context.Context) error {
+//	        return srv.ListenAndServe()
+//	    },
+//	    StopFn:    func(ctx context.Context) error {
+//	        return srv.Shutdown(ctx)
+//	    },
 //	})
 //	if err := g.Run(ctx); err != nil {
 //	    log.Error("group stopped", "err", err)

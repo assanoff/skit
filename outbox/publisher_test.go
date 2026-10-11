@@ -24,8 +24,14 @@ func (s *fakeStore) Insert(_ context.Context, events ...Event) error {
 	return nil
 }
 
-func (s *fakeStore) LeasePending(context.Context, time.Time, int) ([]Event, error) { return nil, nil }
-func (s *fakeStore) MarkSent(context.Context, Event, uuid.UUID, time.Time) error   { return nil }
+func (s *fakeStore) LeasePending(context.Context, time.Time, int) ([]Event, error) {
+	return nil, nil
+}
+
+func (s *fakeStore) MarkSent(context.Context, Event, uuid.UUID, time.Time) error {
+	return nil
+}
+
 func (s *fakeStore) MarkFailed(context.Context, Event, uuid.UUID, string, time.Time) error {
 	return nil
 }
@@ -34,7 +40,9 @@ func (s *fakeStore) SweepExpiredLeases(context.Context, time.Duration, time.Time
 	return 0, nil
 }
 
-func (s *fakeStore) Cleanup(context.Context, time.Duration, time.Time) (int64, error) { return 0, nil }
+func (s *fakeStore) Cleanup(context.Context, time.Duration, time.Time) (int64, error) {
+	return 0, nil
+}
 
 type widgetCreated struct {
 	ID   string `json:"id"`

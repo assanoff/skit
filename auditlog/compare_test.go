@@ -46,20 +46,20 @@ func TestNormalizeJSON(t *testing.T) {
 				if err == nil {
 					t.Errorf("expected an error, but got nil")
 				}
-			} else {
-				if err != nil {
-					t.Errorf("didn't expect an error, but got %v", err)
-				}
-				var expectedMap, outputMap map[string]any
-				if err := json.Unmarshal(tt.expectedOutput, &expectedMap); err != nil {
-					t.Fatalf("failed to unmarshal expected output: %v", err)
-				}
-				if err := json.Unmarshal(output, &outputMap); err != nil {
-					t.Fatalf("failed to unmarshal output: %v", err)
-				}
-				if len(expectedMap) != len(outputMap) {
-					t.Errorf("expected output %v, got %v", expectedMap, outputMap)
-				}
+				return
+			}
+			if err != nil {
+				t.Errorf("didn't expect an error, but got %v", err)
+			}
+			var expectedMap, outputMap map[string]any
+			if err := json.Unmarshal(tt.expectedOutput, &expectedMap); err != nil {
+				t.Fatalf("failed to unmarshal expected output: %v", err)
+			}
+			if err := json.Unmarshal(output, &outputMap); err != nil {
+				t.Fatalf("failed to unmarshal output: %v", err)
+			}
+			if len(expectedMap) != len(outputMap) {
+				t.Errorf("expected output %v, got %v", expectedMap, outputMap)
 			}
 		})
 	}

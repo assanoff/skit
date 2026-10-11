@@ -13,9 +13,12 @@ import (
 // blockingRunnable runs until its context is canceled.
 type blockingRunnable struct{ name string }
 
-func (b blockingRunnable) Name() string                    { return b.name }
-func (b blockingRunnable) Start(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
-func (b blockingRunnable) Stop(context.Context) error      { return nil }
+func (b blockingRunnable) Name() string { return b.name }
+func (b blockingRunnable) Start(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (b blockingRunnable) Stop(context.Context) error { return nil }
 
 func TestRunReturnsNilOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -32,7 +35,10 @@ func TestRunCommandRunsSubsetThenFn(t *testing.T) {
 	d := &deps{}
 
 	inits := []Initializer[deps]{
-		func(d *deps) (dim.CleanupFunc, error) { d.steps = append(d.steps, "store"); return nil, nil },
+		func(d *deps) (dim.CleanupFunc, error) {
+			d.steps = append(d.steps, "store")
+			return nil, nil
+		},
 	}
 
 	ctx := t.Context()

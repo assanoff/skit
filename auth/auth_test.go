@@ -155,7 +155,9 @@ func TestAuthenticateMiddleware(t *testing.T) {
 
 func TestRequireRole(t *testing.T) {
 	handler := func() http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
 	}
 
 	t.Run("unauthenticated -> 401", func(t *testing.T) {

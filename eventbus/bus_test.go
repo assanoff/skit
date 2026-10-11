@@ -19,8 +19,14 @@ type deletedParams struct {
 func TestCallDispatchesInOrder(t *testing.T) {
 	d := New(nil)
 	var order []int
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { order = append(order, 1); return nil })
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { order = append(order, 2); return nil })
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		order = append(order, 1)
+		return nil
+	})
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		order = append(order, 2)
+		return nil
+	})
 
 	if err := d.Call(context.Background(), MustData(domUser, actionDeleted, nil)); err != nil {
 		t.Fatalf("Call: %v", err)
@@ -34,8 +40,14 @@ func TestCallAbortsOnFirstError(t *testing.T) {
 	d := New(nil)
 	boom := errors.New("boom")
 	ran := 0
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { ran++; return boom })
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { ran++; return nil })
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		ran++
+		return boom
+	})
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		ran++
+		return nil
+	})
 
 	err := d.Call(context.Background(), MustData(domUser, actionDeleted, nil))
 	if !errors.Is(err, boom) {
@@ -51,9 +63,18 @@ func TestPublishRunsAllAndJoinsErrors(t *testing.T) {
 	err1 := errors.New("e1")
 	err2 := errors.New("e2")
 	ran := 0
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { ran++; return err1 })
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { ran++; return nil })
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { ran++; return err2 })
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		ran++
+		return err1
+	})
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		ran++
+		return nil
+	})
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		ran++
+		return err2
+	})
 
 	err := d.Publish(context.Background(), MustData(domUser, actionDeleted, nil))
 	if ran != 3 {
@@ -66,7 +87,9 @@ func TestPublishRunsAllAndJoinsErrors(t *testing.T) {
 
 func TestPublishNilWhenAllSucceed(t *testing.T) {
 	d := New(nil)
-	d.Register(domUser, actionDeleted, func(context.Context, Data) error { return nil })
+	d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+		return nil
+	})
 	if err := d.Publish(context.Background(), MustData(domUser, actionDeleted, nil)); err != nil {
 		t.Fatalf("want nil, got %v", err)
 	}
@@ -124,7 +147,9 @@ func TestConcurrentRegisterAndCall(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			d.Register(domUser, actionDeleted, func(context.Context, Data) error { return nil })
+			d.Register(domUser, actionDeleted, func(context.Context, Data) error {
+				return nil
+			})
 		}()
 		go func() { defer wg.Done(); _ = d.Call(context.Background(), MustData(domUser, actionDeleted, nil)) }()
 	}

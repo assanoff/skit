@@ -21,11 +21,11 @@ func Metrics(record func(code string)) rest.MidFunc {
 			if record == nil {
 				return resp
 			}
+			code := "ok"
 			if e, ok := resp.(*errs.Error); ok {
-				record(e.CodeStr)
-			} else {
-				record("ok")
+				code = e.CodeStr
 			}
+			record(code)
 			return resp
 		}
 	}

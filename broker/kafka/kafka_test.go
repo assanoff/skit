@@ -19,7 +19,9 @@ func testLog() *logger.Logger {
 	return logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
 }
 
-func noopHandler(context.Context, broker.Message) broker.Action { return broker.Ack }
+func noopHandler(context.Context, broker.Message) broker.Action {
+	return broker.Ack
+}
 
 func TestNewConsumerValidates(t *testing.T) {
 	cases := []struct {

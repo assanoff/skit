@@ -67,7 +67,9 @@ func buildLogger(cfg config.ServerOpts) *logger.Logger {
 		// With/Named attributes. Keep it fast — offload slow work.
 		//
 		// Events: logger.Events{
-		// 	Error: func(ctx context.Context, r slog.Record) { alert.Capture(ctx, r) },
+		// 	Error: func(ctx context.Context, r slog.Record) {
+		// 		alert.Capture(ctx, r)
+		// 	},
 		// },
 	})
 	slog.SetDefault(log.Slog())

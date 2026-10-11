@@ -14,7 +14,9 @@ type Middleware func(next http.RoundTripper) http.RoundTripper
 // roundTripperFunc adapts a function to http.RoundTripper.
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
-func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 // Chain wraps base (or http.DefaultTransport when nil) with mws, applied so that
 // the FIRST middleware is outermost — it sees the request first and the response

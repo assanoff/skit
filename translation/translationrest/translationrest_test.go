@@ -18,7 +18,9 @@ type product struct {
 	Title string `json:"title" translate:"title"`
 }
 
-func (s *product) GetTranslationKey() (string, string) { return "products", s.ID }
+func (s *product) GetTranslationKey() (string, string) {
+	return "products", s.ID
+}
 
 func (s *product) Encode() ([]byte, string, error) {
 	b, err := json.Marshal(s)

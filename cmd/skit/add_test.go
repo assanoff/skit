@@ -534,7 +534,11 @@ func TestAddRESTTestRequiresRESTModule(t *testing.T) {
 		setup func(t *testing.T, dir string)
 		want  string
 	}{
-		{name: "no module", setup: func(*testing.T, string) {}, want: "no core"},
+		{
+			name:  "no module",
+			setup: func(*testing.T, string) {},
+			want:  "no core",
+		},
 		{name: "gRPC-only entity", setup: func(t *testing.T, dir string) {
 			if err := addGRPC(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "widget"}); err != nil {
 				t.Fatalf("addGRPC: %v", err)

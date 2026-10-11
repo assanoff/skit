@@ -36,7 +36,9 @@ func TestSQLiteDSN(t *testing.T) {
 // sqlx.Open is lazy, so the driver's Open is never called here.
 type fakeDriver struct{}
 
-func (fakeDriver) Open(string) (driver.Conn, error) { return nil, driver.ErrBadConn }
+func (fakeDriver) Open(string) (driver.Conn, error) {
+	return nil, driver.ErrBadConn
+}
 
 func TestOpenSQLiteUsesDriver(t *testing.T) {
 	sql.Register("dbxfakesqlite", fakeDriver{})

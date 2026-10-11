@@ -132,18 +132,21 @@ func (l *Loop) startAdaptive(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			pace := l.runPacedTick(ctx)
 			var next time.Duration
-			if pace == Busy {
-				next = l.cfg.BusyInterval  // 0 = drain again immediately
-				idleDelay = l.cfg.Interval // reset idle backoff
-			} else {
-				next = idleDelay
-				idleDelay = l.growIdle(idleDelay)
-			}
+			next, idleDelay = l.nextDelay(l.runPacedTick(ctx), idleDelay)
 			timer.Reset(next)
 		}
 	}
+}
+
+// nextDelay returns the delay before the next tick and the idle delay to carry
+// on. A busy tick drains again after BusyInterval (0 = immediately) and resets
+// the idle backoff; an idle tick waits the idle delay and grows it.
+func (l *Loop) nextDelay(pace Pace, idle time.Duration) (next, carry time.Duration) {
+	if pace == Busy {
+		return l.cfg.BusyInterval, l.cfg.Interval
+	}
+	return idle, l.growIdle(idle)
 }
 
 // growIdle advances the idle delay for the next consecutive idle tick, doubling

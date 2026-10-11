@@ -80,10 +80,10 @@ func removeKeys(data any, keyToRemove string) {
 		for key, value := range v {
 			if key == keyToRemove {
 				delete(v, key)
-			} else {
-				// If the value is a map or slice, deep dive into it
-				removeKeys(value, keyToRemove)
+				continue
 			}
+			// If the value is a map or slice, deep dive into it
+			removeKeys(value, keyToRemove)
 		}
 	case []any:
 		// If it's an array, recursively process each element

@@ -56,11 +56,11 @@ func parseFilter(qp queryParams) ({{.Pkg}}core.QueryFilter, error) {
 	// Typed-field example — a param that must be parsed/validated adds a field
 	// error instead of a nil check (uncomment and add the field to QueryFilter):
 	// if qp.ID != "" {
-	// 	if id, err := uuid.Parse(qp.ID); err != nil {
+	// 	id, err := uuid.Parse(qp.ID)
+	// 	if err != nil {
 	// 		fieldErrs = append(fieldErrs, errs.FieldError{Field: "id", Error: err.Error()})
-	// 	} else {
-	// 		f.ID = &id
 	// 	}
+	// 	f.ID = &id // unused on error: any field error returns below
 	// }
 
 	if len(fieldErrs) > 0 {

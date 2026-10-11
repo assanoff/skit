@@ -190,7 +190,9 @@ func (c metadataCarrier) Get(key string) string {
 	return v[0]
 }
 
-func (c metadataCarrier) Set(key, value string) { metadata.MD(c).Set(key, value) }
+func (c metadataCarrier) Set(key, value string) {
+	metadata.MD(c).Set(key, value)
+}
 
 func (c metadataCarrier) Keys() []string {
 	keys := make([]string, 0, len(c))

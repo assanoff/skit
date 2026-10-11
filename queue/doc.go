@@ -40,7 +40,9 @@
 //	proc := worker.NewProcessor[queue.Task](log, q, mux, q, worker.ProcessorConfig{
 //	    Name:       "queue",
 //	    BatchSize:  100,
-//	    IsTerminal: func(err error) bool { return errors.Is(err, queue.ErrUnknownKind) },
+//	    IsTerminal: func(err error) bool {
+//	        return errors.Is(err, queue.ErrUnknownKind)
+//	    },
 //	})
 //
 //	group := worker.NewGroup(log, 10*time.Second)

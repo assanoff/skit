@@ -163,10 +163,14 @@ func (j jsonResponse) Encode() (body []byte, contentType string, err error) {
 func (j jsonResponse) HTTPStatus() int { return j.status }
 
 // JSON wraps v as a JSON ResponseEncoder with status 200.
-func JSON(v any) ResponseEncoder { return jsonResponse{value: v, status: http.StatusOK} }
+func JSON(v any) ResponseEncoder {
+	return jsonResponse{value: v, status: http.StatusOK}
+}
 
 // JSONStatus wraps v as a JSON ResponseEncoder with an explicit status.
-func JSONStatus(v any, status int) ResponseEncoder { return jsonResponse{value: v, status: status} }
+func JSONStatus(v any, status int) ResponseEncoder {
+	return jsonResponse{value: v, status: status}
+}
 
 // NoResponse is a ResponseEncoder that tells Respond to write nothing, for handlers
 // that have already written to the ResponseWriter themselves (a redirect, a

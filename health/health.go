@@ -42,9 +42,9 @@ func Readiness(checkTimeout time.Duration, checks ...NamedChecker) http.HandlerF
 			if err := c.Check(ctx); err != nil {
 				healthy = false
 				results[c.Name] = err.Error()
-			} else {
-				results[c.Name] = "ok"
+				continue
 			}
+			results[c.Name] = "ok"
 		}
 
 		status := http.StatusOK

@@ -31,7 +31,7 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: check
-check: tidy-check fix-check lint vuln test ## Everything CI checks
+check: tidy-check fix-check lint lint-rules vuln test ## Everything CI checks
 
 .PHONY: tidy
 tidy: ## Run go mod tidy
@@ -104,6 +104,10 @@ fix: ## Apply go fix, linter autofixes and formatting
 .PHONY: fix-check
 fix-check: ## go fix -diff: modernizations and //go:fix inline are applied
 	$(GO) fix -diff ./...
+
+.PHONY: lint-rules
+lint-rules: ## Project rules: no else, one-line functions fit in 80 columns
+	@scripts/lint-rules.sh
 
 .PHONY: vuln
 vuln: ## Known vulnerabilities in reachable code

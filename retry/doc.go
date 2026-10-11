@@ -15,7 +15,9 @@
 //	    Backoff: retry.Backoff{
 //	        Base: 100 * time.Millisecond, Factor: 2, Max: 2 * time.Second, MaxAttempts: 4,
 //	    },
-//	    IsTerminal: func(err error) bool { return errors.Is(err, ErrBadInput) },
+//	    IsTerminal: func(err error) bool {
+//	        return errors.Is(err, ErrBadInput)
+//	    },
 //	}, func(ctx context.Context) error {
 //	    return callFlakyService(ctx)
 //	})

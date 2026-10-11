@@ -67,11 +67,11 @@ func CORS(cfg CORSConfig) Middleware {
 
 			h := w.Header()
 			h.Add("Vary", "Origin")
+			allowOrigin := origin
 			if wildcard && !cfg.AllowCredentials {
-				h.Set("Access-Control-Allow-Origin", "*")
-			} else {
-				h.Set("Access-Control-Allow-Origin", origin)
+				allowOrigin = "*"
 			}
+			h.Set("Access-Control-Allow-Origin", allowOrigin)
 			if cfg.AllowCredentials {
 				h.Set("Access-Control-Allow-Credentials", "true")
 			}

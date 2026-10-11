@@ -270,10 +270,11 @@ func TestParseTranslateTags_EmptyNestedStruct(t *testing.T) {
 	}
 
 	for _, field := range fields {
+		if field.columnName == "label_title" {
+			t.Errorf("Label.Title should not be included when Label is empty, but found: %+v", field)
+		}
 		if _, expected := expectedFields[field.columnName]; expected {
 			expectedFields[field.columnName] = true
-		} else if field.columnName == "label_title" {
-			t.Errorf("Label.Title should not be included when Label is empty, but found: %+v", field)
 		}
 	}
 

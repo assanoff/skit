@@ -1049,9 +1049,7 @@ func addGRPC(out io.Writer, opts addRESTOpts) error {
 		{handlerFile, "templates/grpc/handler.go.tmpl"},
 	}
 	for _, f := range files {
-		if _, err := os.Stat(f.dest); err == nil {
-			return fmt.Errorf("%s already exists — refusing to overwrite", f.dest)
-		} else if !os.IsNotExist(err) {
+		if err := ensureAbsent(f.dest); err != nil {
 			return err
 		}
 	}
@@ -1364,6 +1362,21 @@ Scaffolded the %[1]q module. Next:
 %[3]s`, d.Pkg, d.Plural, tableDDL(d.Plural))
 
 	// Step 2 — wiring, tailored to the project shape.
+	printRESTWiring(out, d, full)
+
+	// Step 3 — tidy/build (same for both).
+	fmt.Fprintf(out, `
+3. go mod tidy && go build ./...
+`)
+
+	// Step 4 — the generated tests, or a pointer to add them when skipped.
+	printRESTTests(out, d.Pkg, noTests)
+}
+
+// printRESTWiring prints step 2: the full bootstrap wires through
+// internal/app/deps + internal/app/server, the minimal starter directly where
+// the router is built.
+func printRESTWiring(out io.Writer, d restData, full bool) {
 	if full {
 		// [1]=Pkg [2]=Type [3]=Module
 		fmt.Fprintf(out, `
@@ -1392,39 +1405,37 @@ Scaffolded the %[1]q module. Next:
 
       a.d.%[2]sHandler(ctx).Routes(handle)
 `, d.Pkg, d.Type, d.Module)
-	} else {
-		// [1]=Pkg [2]=Module
-		fmt.Fprintf(out, `
+		return
+	}
+	// [1]=Pkg [2]=Module
+	fmt.Fprintf(out, `
 2. Wire it where you build the router:
 
    store := %[1]sdb.NewStore(log, db)
    core  := %[1]s.NewCore(log, store)
    %[1]sapi.New(core).Routes(r.HandleApp)   // import alias: %[1]sapi "%[2]s/api/%[1]s"
 `, d.Pkg, d.Module)
-	}
+}
 
-	// Step 3 — tidy/build (same for both).
-	fmt.Fprintf(out, `
-3. go mod tidy && go build ./...
-`)
-
-	// Step 4 — the generated tests, or a pointer to add them when skipped.
+// printRESTTests prints step 4: the generated tests, or how to add them when
+// they were skipped.
+func printRESTTests(out io.Writer, pkg string, noTests bool) {
 	if noTests {
 		fmt.Fprintf(out, `
 4. Tests were skipped (--no-tests). Add API + integration tests with:
 
    skit add rest-test %[1]s
-`, d.Pkg)
-	} else {
-		fmt.Fprintf(out, `
+`, pkg)
+		return
+	}
+	fmt.Fprintf(out, `
 4. Tests were generated: api/%[1]s (mocked store, no docker) and tests/ (store +
    HTTP integration against a real Postgres via testcontainers, skipped under
    -short). After 'go mod tidy' and 'make generate' (for the moq mock):
 
    go test ./api/%[1]s/...   # no docker
    go test ./tests/...       # needs docker
-`, d.Pkg)
-	}
+`, pkg)
 }
 
 // tableDDL is the migration for one entity's table, as the generated store

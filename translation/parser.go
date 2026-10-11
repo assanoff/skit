@@ -162,16 +162,17 @@ func walkTags(t reflect.Type, prefix []string, fields *[]fieldSchema, primaryFou
 			fs.isPrimary = true
 			fs.columnName = "primary"
 			*primaryFound = true
-		} else {
-			// Translatable (non-primary) fields must be strings: apply only sets
-			// strings, so accepting other kinds would silently fail later.
-			if ft.Kind() != reflect.String {
-				return fmt.Errorf("%w: field %s must be a string, got %s", ErrInvalidTag, fs.fieldName, ft.Kind())
-			}
-			fs.columnName = tagName
-			fs.optional = omitCheck
+			*fields = append(*fields, fs)
+			continue
 		}
 
+		// Translatable (non-primary) fields must be strings: apply only sets
+		// strings, so accepting other kinds would silently fail later.
+		if ft.Kind() != reflect.String {
+			return fmt.Errorf("%w: field %s must be a string, got %s", ErrInvalidTag, fs.fieldName, ft.Kind())
+		}
+		fs.columnName = tagName
+		fs.optional = omitCheck
 		*fields = append(*fields, fs)
 	}
 	return nil
