@@ -10,6 +10,10 @@ import (
 	"testing"
 
 	"github.com/matryer/is"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/rest"
@@ -79,4 +83,53 @@ func TestErrorsChainMasksAfterLog(t *testing.T) {
 	is.True(ok)
 	is.Equal(e.Message, "internal server error")             // client sees masked
 	is.True(strings.Contains(buf.String(), "secret detail")) // log keeps original
+}
+
+// A 5xx error marks the request's span failed with the domain code as
+// error.type and adds no exception event; a 4xx leaves the span alone.
+func TestErrorsMarksSpan(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     *errs.Error
+		status  codes.Code
+		errType string
+	}{
+		{
+			name:    "server fault",
+			err:     errs.Newf(errs.Internal, "db exploded"),
+			status:  codes.Error,
+			errType: "internal",
+		},
+		{
+			name:   "client error",
+			err:    errs.Newf(errs.NotFound, "missing"),
+			status: codes.Unset,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			is := is.New(t)
+			rec := tracetest.NewSpanRecorder()
+			tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+			ctx, span := tp.Tracer("test").Start(t.Context(), "GET /x")
+			h := mid.Errors(nil)(
+				func(context.Context, *http.Request) rest.ResponseEncoder {
+					return tc.err
+				})
+
+			h(ctx, httptest.NewRequestWithContext(ctx, http.MethodGet, "/x", nil))
+			span.End()
+
+			got := rec.Ended()
+			is.Equal(len(got), 1)
+			is.Equal(got[0].Status().Code, tc.status)
+			is.Equal(len(got[0].Events()), 0) // no exception event
+			errType := ""
+			for _, a := range got[0].Attributes() {
+				if a.Key == semconv.ErrorTypeKey {
+					errType = a.Value.AsString()
+				}
+			}
+			is.Equal(errType, tc.errType)
+		})
+	}
 }

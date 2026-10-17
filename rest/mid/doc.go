@@ -17,9 +17,10 @@
 //   - Panics(log): recover a panic from a typed handler into an Internal
 //     *errs.Error so it flows through the pipeline (logged, masked, localized,
 //     JSON-encoded) instead of a bare 500. Innermost of the chain.
-//   - Errors(log): observe 5xx errors — record them on the active OpenTelemetry
-//     span and log them server-side by domain code. Observability only (masking
-//     is MaskInternal, localization is LocalizeErrors).
+//   - Errors(log): observe 5xx errors — mark the active OpenTelemetry span
+//     failed with the domain code as error.type and log them server-side.
+//     Observability only (masking is MaskInternal, localization is
+//     LocalizeErrors).
 //   - Metrics(record): report each request's outcome code (errs code, or "ok")
 //     to a backend-agnostic callback — errs-aware metrics by domain code.
 //   - LocalizeErrors(tr, lang): translate an *errs.Error response into the

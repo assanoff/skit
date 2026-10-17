@@ -5,17 +5,17 @@ import (
 	"log/slog"
 	"net/http"
 
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/errs"
+	skotel "github.com/assanoff/skit/otel"
 	"github.com/assanoff/skit/rest"
 )
 
 // Errors returns application middleware that observes server-fault responses: on
-// an *errs.Error in the 5xx class it records the error on the active OpenTelemetry
-// span (so the trace is marked failed and carries the error) and logs it
-// server-side with the domain code, HTTP status, and detail.
+// an *errs.Error in the 5xx class it marks the active OpenTelemetry span failed
+// with otel.SetError, so the span carries the domain code as error.type, and logs
+// the error server-side with the domain code, HTTP status, and detail.
 //
 // It is errs-aware and narrowed to a single responsibility — observability —
 // rather than also masking or annotating. Masking is MaskInternal's job (place
@@ -34,11 +34,9 @@ func Errors(log *slog.Logger) rest.MidFunc {
 				return resp
 			}
 
-			// Mark the active span failed and attach the error (a no-op span when
-			// tracing is not active, so this is always safe).
-			span := trace.SpanFromContext(ctx)
-			span.RecordError(e)
-			span.SetStatus(codes.Error, e.CodeStr)
+			// The status description is replaced by otelhttp from the response
+			// code; error.type and the log line below carry the detail.
+			skotel.SetError(trace.SpanFromContext(ctx), e)
 
 			if log != nil {
 				log.ErrorContext(ctx, "request failed",

@@ -15,7 +15,8 @@
 // google.golang.org/grpc/codes, so gRPC mapping is an identity and HTTP mapping
 // is a small lookup table. Each code has a snake_case String (e.g.
 // "invalid_argument") used as the wire "code" and as the default i18n key, and
-// an HTTPStatus. The canonical codes are OK, Canceled, Unknown,
+// an HTTPStatus. ErrorType returns the same string, so otel.SetError writes it as
+// the span's error.type. The canonical codes are OK, Canceled, Unknown,
 // InvalidArgument, DeadlineExceeded, NotFound, AlreadyExists, PermissionDenied,
 // ResourceExhausted, FailedPrecondition, Aborted, OutOfRange, Unimplemented,
 // Internal, Unavailable, DataLoss, and Unauthenticated.

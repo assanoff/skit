@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/matryer/is"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 func TestHTTPStatusMapping(t *testing.T) {
@@ -57,4 +60,15 @@ func TestEncodeSanitizes(t *testing.T) {
 	if !strings.Contains(string(data), "token=***") {
 		t.Fatalf("expected redaction marker, got: %s", data)
 	}
+}
+
+// The code is the error.type of the span, found through a wrapping error too.
+func TestErrorType(t *testing.T) {
+	is := is.New(t)
+
+	e := Newf(Internal, "db exploded")
+	is.Equal(e.ErrorType(), "internal")
+
+	wrapped := fmt.Errorf("load widget: %w", e)
+	is.Equal(semconv.ErrorType(wrapped).Value.AsString(), "internal")
 }

@@ -89,6 +89,11 @@ func (e *Error) Unwrap() error { return e.wrapped }
 // HTTPStatus returns the HTTP status code for this error.
 func (e *Error) HTTPStatus() int { return e.Code.HTTPStatus() }
 
+// ErrorType returns the code string, such as "internal". otel.SetError writes
+// it as the span's error.type: semconv.ErrorType finds the method anywhere in
+// the error chain, so a wrapped *Error is classified by its code too.
+func (e *Error) ErrorType() string { return e.CodeStr }
+
 // WithTitle sets a human-friendly title and returns the error for chaining.
 func (e *Error) WithTitle(title string) *Error {
 	e.Title = title
