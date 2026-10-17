@@ -2,21 +2,20 @@ package kafka
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"testing"
 
 	kgo "github.com/segmentio/kafka-go"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/worker"
 )
 
 // The consumer is a supervised Runnable.
 var _ worker.Runnable = (*Consumer)(nil)
 
-func testLog() *logger.Logger {
-	return logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+func testLog() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }
 
 func noopHandler(context.Context, broker.Message) broker.Action {

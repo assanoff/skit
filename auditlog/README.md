@@ -134,7 +134,7 @@ tick := func(ctx context.Context) error {
     })
     return err
 }
-group.Add(worker.NewLoop(log.Slog(), worker.LoopConfig{
+group.Add(worker.NewLoop(log, worker.LoopConfig{
     Name: "auditlog-compaction", Interval: time.Hour,
 }, tick))
 ```

@@ -130,7 +130,7 @@ func (c *Closer) addNamed(name string, fn func() error) {
 		slog.Info("closing", slog.String("name", name))
 		err := fn()
 		if err != nil {
-			slog.Error("failed to close", slog.String("name", name), slog.String("error", err.Error()))
+			slog.Error("failed to close", slog.String("name", name), slog.Any("err", err))
 			return err
 		}
 		slog.Info("closed", slog.String("name", name), slog.Duration("duration", time.Since(start)))
@@ -162,7 +162,7 @@ func (c *Closer) close() error {
 				defer func() {
 					if r := recover(); r != nil {
 						errsCh <- fmt.Errorf("panic recovered in closer: %v", r)
-						slog.Error("panic recovered", slog.String("error", fmt.Sprintf("%v", r)))
+						slog.Error("panic recovered", slog.Any("err", fmt.Errorf("panic: %v", r)))
 					}
 				}()
 				if err := fn(); err != nil {
@@ -206,7 +206,7 @@ func (c *Closer) closeSync() error {
 				defer func() {
 					if r := recover(); r != nil {
 						errs = append(errs, fmt.Errorf("panic recovered in closer: %v", r))
-						slog.Error("panic recovered", slog.String("error", fmt.Sprintf("%v", r)))
+						slog.Error("panic recovered", slog.Any("err", fmt.Errorf("panic: %v", r)))
 					}
 				}()
 				if err := fn(); err != nil {

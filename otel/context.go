@@ -31,9 +31,8 @@ func setTraceID(ctx context.Context, traceID string) context.Context {
 	return context.WithValue(ctx, traceIDKey, traceID)
 }
 
-// GetTraceID returns the trace id stored in ctx, or an empty string if none.
-// It is designed to be passed as logger.TraceIDFn so every log line carries the
-// active trace id.
+// GetTraceID returns the trace id stored in ctx by InjectTracing, or an empty
+// string if none.
 func GetTraceID(ctx context.Context) string {
 	if id, ok := ctx.Value(traceIDKey).(string); ok {
 		return id

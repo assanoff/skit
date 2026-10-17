@@ -59,7 +59,7 @@ func (r *resource[T]) get(ctx context.Context) T {
 		if r.err != nil {
 			slog.Error("failed to initialize resource",
 				slog.String("name", r.name),
-				slog.String("error", r.err.Error()),
+				slog.Any("err", r.err),
 			)
 			return
 		}

@@ -2,13 +2,13 @@ package mid
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/errs"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 )
 
@@ -24,7 +24,7 @@ import (
 // only the span.
 // 4xx (client-actionable) and non-error responses pass through untouched — the
 // access log already covers those.
-func Errors(log *logger.Logger) rest.MidFunc {
+func Errors(log *slog.Logger) rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 			resp := next(ctx, r)
@@ -41,7 +41,7 @@ func Errors(log *logger.Logger) rest.MidFunc {
 			span.SetStatus(codes.Error, e.CodeStr)
 
 			if log != nil {
-				log.Error(ctx, "request failed",
+				log.ErrorContext(ctx, "request failed",
 					"code", e.CodeStr, "status", e.HTTPStatus(), "detail", e.Message)
 			}
 			return resp

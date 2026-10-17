@@ -7,19 +7,19 @@ package {{.Pkg}}
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 )
 
 // Consumer handles inbound {{.Pkg}} events.
 type Consumer struct {
-	log *logger.Logger
+	log *slog.Logger
 	// core *{{.Pkg}}core.Core // inject the domain core the handler drives
 }
 
 // New builds the {{.Pkg}} consumer.
-func New(log *logger.Logger) *Consumer {
+func New(log *slog.Logger) *Consumer {
 	return &Consumer{log: log}
 }
 
@@ -43,7 +43,7 @@ type Event struct {
 func (c *Consumer) Handle(ctx context.Context, m broker.Message) broker.Action {
 	var evt Event
 	if err := json.Unmarshal(m.Data, &evt); err != nil {
-		c.log.Error(ctx, "decode {{.Pkg}} event", "type", m.Type, "id", m.ID, "err", err)
+		c.log.ErrorContext(ctx, "decode {{.Pkg}} event", "type", m.Type, "id", m.ID, "err", err)
 		return broker.Discard // malformed payload: requeue would loop forever
 	}
 
@@ -52,6 +52,6 @@ func (c *Consumer) Handle(ctx context.Context, m broker.Message) broker.Action {
 	//   	if errs.IsTransient(err) { return broker.Requeue }
 	//   	return broker.Discard
 	//   }
-	c.log.Info(ctx, "handled {{.Pkg}} event", "type", m.Type, "id", m.ID)
+	c.log.InfoContext(ctx, "handled {{.Pkg}} event", "type", m.Type, "id", m.ID)
 	return broker.Ack
 }

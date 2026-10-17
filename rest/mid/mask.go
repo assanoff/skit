@@ -2,10 +2,10 @@ package mid
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/assanoff/skit/errs"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 )
 
@@ -21,7 +21,7 @@ import (
 //
 // Place it inside LocalizeErrors (router.New(reqctx, LocalizeErrors,
 // MaskInternal, ...)) so the localizer still runs on the masked error.
-func MaskInternal(log *logger.Logger, mask bool) rest.MidFunc {
+func MaskInternal(log *slog.Logger, mask bool) rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 			resp := next(ctx, r)
@@ -34,7 +34,7 @@ func MaskInternal(log *logger.Logger, mask bool) rest.MidFunc {
 				return e
 			}
 			if log != nil {
-				log.Error(ctx, "internal error masked", "code", e.CodeStr, "error", e.Error())
+				log.ErrorContext(ctx, "internal error masked", "code", e.CodeStr, "err", e)
 			}
 			return errs.Newf(e.Code, "internal server error")
 		}

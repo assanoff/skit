@@ -2,7 +2,7 @@ package tests
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"testing"
 	"time"
 	"uuid"
@@ -10,7 +10,6 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbtest"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 
@@ -42,7 +41,7 @@ func new{{.Type}}Store(ctx context.Context, t *testing.T) *{{.Pkg}}db.Store {
 		t.Fatalf("create schema: %v", err)
 	}
 
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 	return {{.Pkg}}db.NewStore(log, pg.DB)
 }
 

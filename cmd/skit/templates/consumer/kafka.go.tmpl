@@ -3,6 +3,7 @@ package {{.Pkg}}
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/kafka"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/worker"
 
 	"{{.Module}}/internal/app/config"
@@ -30,7 +30,7 @@ const (
 // config, retry policy, or commit strategy freely — or replace the loop
 // wholesale; Handle in {{.Pkg}}.go stays untouched.
 type kafkaRunnable struct {
-	log     *logger.Logger
+	log     *slog.Logger
 	brokers []string
 	topic   string
 	group   string
@@ -79,7 +79,7 @@ func (r *kafkaRunnable) Start(ctx context.Context) error {
 		}(reader)
 	}
 
-	r.log.Info(ctx, "kafka consumer started", "consumer", r.name, "topic", r.topic, "group", r.group)
+	r.log.InfoContext(ctx, "kafka consumer started", "consumer", r.name, "topic", r.topic, "group", r.group)
 	<-ctx.Done()
 	r.close()
 	wg.Wait()
@@ -101,7 +101,7 @@ func (r *kafkaRunnable) consume(ctx context.Context, rd *kgo.Reader) {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 				return
 			}
-			r.log.Error(ctx, "kafka fetch", "consumer", r.name, "err", err)
+			r.log.ErrorContext(ctx, "kafka fetch", "consumer", r.name, "err", err)
 			continue
 		}
 		r.handle(ctx, rd, msg)
@@ -114,10 +114,10 @@ func (r *kafkaRunnable) handle(ctx context.Context, rd *kgo.Reader, msg kgo.Mess
 		m.Key = string(msg.Key)
 	}
 	for attempt := 0; ; attempt++ {
-		switch broker.Process(ctx, r.log.Slog(), r.name, msg.Value, route, r.h) {
+		switch broker.Process(ctx, r.log, r.name, msg.Value, route, r.h) {
 		case broker.Requeue:
 			if attempt >= maxRetries {
-				r.log.Error(ctx, "kafka retries exhausted, dropping (add a dead-letter topic)",
+				r.log.ErrorContext(ctx, "kafka retries exhausted, dropping (add a dead-letter topic)",
 					"consumer", r.name, "offset", msg.Offset)
 				r.commit(ctx, rd, msg)
 				return
@@ -136,7 +136,7 @@ func (r *kafkaRunnable) handle(ctx context.Context, rd *kgo.Reader, msg kgo.Mess
 
 func (r *kafkaRunnable) commit(ctx context.Context, rd *kgo.Reader, msg kgo.Message) {
 	if err := rd.CommitMessages(ctx, msg); err != nil && ctx.Err() == nil {
-		r.log.Error(ctx, "kafka commit", "consumer", r.name, "offset", msg.Offset, "err", err)
+		r.log.ErrorContext(ctx, "kafka commit", "consumer", r.name, "offset", msg.Offset, "err", err)
 	}
 }
 

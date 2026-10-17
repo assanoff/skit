@@ -2,11 +2,10 @@ package rabbitmq
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 
 	rmq "github.com/wagslane/go-rabbitmq"
-
-	"github.com/assanoff/skit/logger"
 )
 
 // Config holds the AMQP connection settings.
@@ -42,11 +41,11 @@ func (c Config) amqpURL() string {
 type Conn struct {
 	*rmq.Conn
 
-	log *logger.Logger
+	log *slog.Logger
 }
 
 // Dial opens a managed connection to RabbitMQ.
-func Dial(log *logger.Logger, cfg Config) (*Conn, error) {
+func Dial(log *slog.Logger, cfg Config) (*Conn, error) {
 	conn, err := rmq.NewConn(cfg.amqpURL(), rmq.WithConnectionOptionsLogging)
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: dial: %w", err)

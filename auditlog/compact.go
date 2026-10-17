@@ -180,7 +180,7 @@ func (c *Core) CompactBatch(ctx context.Context, opts CompactBatchOptions) (Comp
 //	    })
 //	    return err
 //	}
-//	group.Add(worker.NewLoop(log.Slog(), worker.LoopConfig{
+//	group.Add(worker.NewLoop(log, worker.LoopConfig{
 //	    Name: "auditlog-compaction", Interval: time.Hour,
 //	}, tick))
 //

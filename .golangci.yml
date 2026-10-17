@@ -66,6 +66,7 @@ linters:
     - perfsprint
     - protogetter
     - revive
+    - sloglint
     - unconvert
     - usestdlibvars
     - usetesting
@@ -149,6 +150,9 @@ linters:
         - name: unnecessary-stmt
         - name: use-any
         - name: waitgroup-by-value
+    sloglint:
+      context: all   # the ctx carries the span the record is correlated with
+      no-global: all # log through the injected *slog.Logger
     staticcheck:
       checks: [all]
     wrapcheck:
@@ -181,6 +185,11 @@ linters:
       # reaches a child process through the process group.
       - path: cmd/skit/
         linters: [gosec, noctx, wrapcheck]
+      # dim and closer are package-level lifecycle helpers without a logger
+      # parameter: they log init/shutdown through slog.Default(), which the
+      # service routes into its own handler with slog.SetDefault.
+      - path: ^(closer|dim)/
+        linters: [sloglint]
       # httplog is adapted third-party code kept close to upstream: only
       # correctness, resources and security are checked.
       - path: httplog/

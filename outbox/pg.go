@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 	"uuid"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/retry"
 )
 
@@ -30,7 +30,7 @@ import (
 // PG is safe for concurrent use by multiple relay/sweeper replicas:
 // LeasePending and SweepExpiredLeases claim rows with FOR UPDATE SKIP LOCKED.
 type PG struct {
-	log     *logger.Logger
+	log     *slog.Logger
 	db      sqlx.ExtContext
 	backoff retry.Backoff
 }
@@ -49,7 +49,7 @@ type Options struct {
 
 // NewPG builds a Postgres outbox store. The table is provisioned by
 // EnsureSchema (call it at startup), not here.
-func NewPG(log *logger.Logger, db *sqlx.DB, opts Options) *PG {
+func NewPG(log *slog.Logger, db *sqlx.DB, opts Options) *PG {
 	bo := opts.Backoff
 	if bo.Base == 0 {
 		bo.Base = 2 * time.Second

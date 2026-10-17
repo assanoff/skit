@@ -2,9 +2,9 @@ package mid
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/assanoff/skit/i18n"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 )
 
@@ -17,7 +17,7 @@ type Config struct {
 	Lang func(context.Context) string
 	// Logger receives the span/log of 5xx errors (via Errors) and recovered
 	// panics (via Panics); nil disables that logging.
-	Logger *logger.Logger
+	Logger *slog.Logger
 	// MaskInternal hides 5xx error detail from clients (typically true in
 	// production). See MaskInternal.
 	MaskInternal bool

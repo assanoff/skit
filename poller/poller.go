@@ -79,7 +79,7 @@ func (p *Poller[T]) Stop(context.Context) error { return nil }
 // On error the value is left unchanged and OnError (if set) is invoked. A panic
 // in the Getter is recovered so a single bad poll cannot crash the supervisor.
 func (p *Poller[T]) Poll(ctx context.Context) {
-	defer safetick.RecoverTick(p.log, p.cfg.Name, p.cfg.OnPanic)
+	defer safetick.RecoverTick(ctx, p.log, p.cfg.Name, p.cfg.OnPanic)
 
 	pollCtx := ctx
 	if p.cfg.PollTimeout > 0 {
@@ -94,7 +94,7 @@ func (p *Poller[T]) Poll(ctx context.Context) {
 			p.cfg.OnError(err)
 		}
 		if p.log != nil {
-			p.log.Error("poller poll failed", "poller", p.cfg.Name, "err", err)
+			p.log.ErrorContext(ctx, "poller poll failed", "poller", p.cfg.Name, "err", err)
 		}
 		return
 	}

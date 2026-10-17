@@ -3,6 +3,7 @@ package mid_test
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/errs"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 	"github.com/assanoff/skit/rest/mid"
 )
@@ -23,7 +23,7 @@ func TestPanicsRecoversToInternal(t *testing.T) {
 	is := is.New(t)
 
 	var buf bytes.Buffer
-	log := logger.New(&buf, logger.Config{Service: "test", Level: logger.LevelInfo})
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	h := mid.Panics(log)(func(_ context.Context, _ *http.Request) rest.ResponseEncoder {
 		panic("boom-secret")

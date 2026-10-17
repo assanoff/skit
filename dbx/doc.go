@@ -1,12 +1,14 @@
 // Package dbx provides Postgres helpers on top of jmoiron/sqlx and the pgx
-// driver: connection setup, named query/exec wrappers with query logging,
-// transactions, and bulk insert/upsert.
+// driver: connection setup, named query/exec wrappers that log failed
+// statements, transactions, and bulk insert/upsert.
 //
 // Open builds a *sqlx.DB from a Config; StatusCheck waits for it to become
-// reachable. The Named* helpers run named queries/execs, log the expanded SQL
-// at debug level, and translate well-known Postgres errors into the package
-// sentinels (ErrDBNotFound, ErrDBDuplicatedEntry, ErrUndefinedTable) so callers
-// match them with errors.Is instead of inspecting driver codes. WithinTran runs
+// reachable. The Named* helpers run named queries/execs, log a failed
+// statement with its expanded SQL at info level (the record's source is the
+// store method that called the helper; ErrDBNotFound is not logged), and
+// translate well-known Postgres errors into the package sentinels
+// (ErrDBNotFound, ErrDBDuplicatedEntry, ErrUndefinedTable) so callers match
+// them with errors.Is instead of inspecting driver codes. WithinTran runs
 // a function inside a transaction, committing on success and rolling back on
 // error or panic, and transparently re-runs it when Postgres aborts it as a
 // deadlock victim. Bulk* batch large multi-row writes within Postgres's

@@ -3,6 +3,8 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
@@ -14,19 +16,19 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/assanoff/skit/errs"
-	"github.com/assanoff/skit/logger"
 	skotel "github.com/assanoff/skit/otel"
 )
 
 // recoveryUnary turns a panic in a handler into an Internal status instead of
 // crashing the server.
-func recoveryUnary(log *logger.Logger) grpc.UnaryServerInterceptor {
+func recoveryUnary(log *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				if log != nil {
-					log.Error(ctx, "grpc handler panic recovered",
-						"method", info.FullMethod, "panic", r, "stack", string(debug.Stack()))
+					log.ErrorContext(ctx, "grpc handler panic recovered",
+						"method", info.FullMethod, "err", fmt.Errorf("panic: %v", r),
+						"exception.stacktrace", string(debug.Stack()))
 				}
 				err = status.Errorf(codes.Internal, "internal error")
 			}
@@ -50,12 +52,12 @@ func traceUnary(tracer trace.Tracer) grpc.UnaryServerInterceptor {
 
 // loggingUnary logs one structured line per RPC, including the (already mapped)
 // status code, latency, and the request's trace_id.
-func loggingUnary(log *logger.Logger) grpc.UnaryServerInterceptor {
+func loggingUnary(log *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		start := time.Now()
 		resp, err := handler(ctx, req)
 		if log != nil {
-			log.Info(ctx, "grpc.request",
+			log.InfoContext(ctx, "grpc.request",
 				"rpc.method", info.FullMethod,
 				"rpc.grpc.status_code", status.Code(err).String(),
 				"duration_ms", time.Since(start).Milliseconds(),
@@ -113,13 +115,14 @@ func (w *wrappedStream) Context() context.Context { return w.ctx }
 
 // recoveryStream turns a panic in a streaming handler into an Internal status
 // instead of crashing the server.
-func recoveryStream(log *logger.Logger) grpc.StreamServerInterceptor {
+func recoveryStream(log *slog.Logger) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				if log != nil {
-					log.Error(ss.Context(), "grpc stream handler panic recovered",
-						"method", info.FullMethod, "panic", r, "stack", string(debug.Stack()))
+					log.ErrorContext(ss.Context(), "grpc stream handler panic recovered",
+						"method", info.FullMethod, "err", fmt.Errorf("panic: %v", r),
+						"exception.stacktrace", string(debug.Stack()))
 				}
 				err = status.Errorf(codes.Internal, "internal error")
 			}
@@ -144,12 +147,12 @@ func traceStream(tracer trace.Tracer) grpc.StreamServerInterceptor {
 
 // loggingStream logs one structured line per stream RPC (the already-mapped
 // status code, duration and trace_id).
-func loggingStream(log *logger.Logger) grpc.StreamServerInterceptor {
+func loggingStream(log *slog.Logger) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		start := time.Now()
 		err := handler(srv, ss)
 		if log != nil {
-			log.Info(ss.Context(), "grpc.stream",
+			log.InfoContext(ss.Context(), "grpc.stream",
 				"rpc.method", info.FullMethod,
 				"rpc.grpc.status_code", status.Code(err).String(),
 				"duration_ms", time.Since(start).Milliseconds(),

@@ -2,9 +2,9 @@ package translationrest
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 	"github.com/assanoff/skit/translation"
 )
@@ -28,7 +28,7 @@ type LangFunc func(context.Context) string
 // (collection, translated in one batch query). Translating to the default
 // language is a no-op; translation errors are logged and the original content is
 // served, so a missing translation never fails the request.
-func Middleware(log *logger.Logger, t *translation.Translator, sources ...translation.HeaderSource) rest.MidFunc {
+func Middleware(log *slog.Logger, t *translation.Translator, sources ...translation.HeaderSource) rest.MidFunc {
 	return middleware(log, t, func(_ context.Context, r *http.Request) translation.Language {
 		return t.LanguageFrom(r, sources...)
 	})
@@ -41,7 +41,7 @@ func Middleware(log *logger.Logger, t *translation.Translator, sources ...transl
 //	translationrest.MiddlewareWithLang(log, tr, func(r *http.Request) string {
 //	    return i18n.LangFromContext(r.Context())
 //	})
-func MiddlewareWithLang(log *logger.Logger, t *translation.Translator, lang LangFunc) rest.MidFunc {
+func MiddlewareWithLang(log *slog.Logger, t *translation.Translator, lang LangFunc) rest.MidFunc {
 	return middleware(log, t, func(ctx context.Context, _ *http.Request) translation.Language {
 		return t.Match(lang(ctx))
 	})
@@ -49,7 +49,7 @@ func MiddlewareWithLang(log *logger.Logger, t *translation.Translator, lang Lang
 
 // middleware is the shared core: resolve the language with langOf, run the
 // handler, and best-effort translate its payload.
-func middleware(log *logger.Logger, t *translation.Translator, langOf func(context.Context, *http.Request) translation.Language) rest.MidFunc {
+func middleware(log *slog.Logger, t *translation.Translator, langOf func(context.Context, *http.Request) translation.Language) rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 			lang := langOf(ctx, r)
@@ -68,7 +68,7 @@ func middleware(log *logger.Logger, t *translation.Translator, langOf func(conte
 				err = t.Translate(ctx, v, lang)
 			}
 			if err != nil && log != nil {
-				log.Warn(ctx, "translationrest: translate response", "lang", lang.Code, "error", err)
+				log.WarnContext(ctx, "translationrest: translate response", "lang", lang.Code, "err", err)
 			}
 			return enc
 		}

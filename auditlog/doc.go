@@ -68,7 +68,7 @@
 //	    _, err := core.CompactBatch(ctx, auditlog.CompactBatchOptions{Threshold: 100, Limit: 50, Compact: opts})
 //	    return err
 //	}
-//	group.Add(worker.NewLoop(log.Slog(), worker.LoopConfig{Name: "auditlog-compaction", Interval: time.Hour}, tick))
+//	group.Add(worker.NewLoop(log, worker.LoopConfig{Name: "auditlog-compaction", Interval: time.Hour}, tick))
 //
 // # Concurrency
 //

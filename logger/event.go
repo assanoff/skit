@@ -7,13 +7,14 @@ import (
 
 // EventFn is a side-effect callback invoked for a record at its level, IN
 // ADDITION to normal handling — the record is still written to the underlying
-// sink (including any FanoutHandler). Typical use: capture ERROR records to
-// Sentry or fire an alert, while stdout logging is untouched.
+// sink. Typical use: capture ERROR records to Sentry or fire an alert, while
+// stdout logging is untouched.
 //
 // Unlike a lossy decoded snapshot, the callback receives the full slog.Record,
-// reconstructed to include the attributes accumulated via With/Named and the
-// service tag (which live on the handler, not the record) plus the trace_id, so
-// the hook sees the same context the record is written with.
+// reconstructed to include the attributes accumulated via With and the
+// service.* attributes (which live on the handler, not the record) plus
+// trace_id, span_id and trace_flags, so the hook sees the same context the
+// record is written with.
 //
 // The callback runs synchronously on the logging goroutine, before the write.
 // Keep it fast: offload slow work (network calls) to a goroutine or buffered
@@ -23,7 +24,7 @@ type EventFn func(ctx context.Context, r slog.Record)
 
 // Events assigns an EventFn per level. The zero value (all nil) installs no
 // hook; pass it in Config.Events. Hooks are additive to the sink, never a
-// replacement for it — for multi-sink routing use a FanoutHandler.
+// replacement for it — for multi-sink routing use slog.NewMultiHandler.
 type Events struct {
 	Debug EventFn
 	Info  EventFn
@@ -60,7 +61,7 @@ type groupOrAttrs struct {
 
 // eventHandler wraps a slog.Handler and, for records whose level has a
 // configured EventFn, invokes that callback with the full record — the
-// attributes gathered through With/Named/service replayed in — before
+// attributes gathered through With and service.* replayed in — before
 // delegating to the wrapped handler. It is otherwise transparent: Enabled and
 // the eventual Handle are the wrapped handler's.
 type eventHandler struct {
@@ -106,10 +107,10 @@ func (h *eventHandler) WithGroup(name string) slog.Handler {
 	}
 }
 
-// recordWithContext returns a clone of r with the accumulated With/Named/service
-// attributes (and their group nesting) prepended, so the EventFn observes the
-// record exactly as the sink will render it. trace_id is already on r (added by
-// the outer traceHandler) and is preserved.
+// recordWithContext returns a clone of r with the accumulated With and
+// service.* attributes prepended, so the EventFn observes the record exactly as
+// the sink will render it. The trace fields are already on r (added by the
+// outer traceHandler) and are preserved.
 func (h *eventHandler) recordWithContext(r slog.Record) slog.Record {
 	if len(h.goas) == 0 {
 		return r

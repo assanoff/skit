@@ -56,9 +56,9 @@ func (g *Group) Run(ctx context.Context) error {
 		wg.Add(1)
 		go func(r Runnable) {
 			defer wg.Done()
-			g.logf("worker: starting", "name", r.Name())
+			g.logf(runCtx, "worker: starting", "name", r.Name())
 			if err := r.Start(runCtx); err != nil && !errors.Is(err, context.Canceled) {
-				g.logf("worker: stopped with error", "name", r.Name(), "err", err)
+				g.logf(runCtx, "worker: stopped with error", "name", r.Name(), "err", err)
 				errCh <- err
 				cancel() // one failure tears down the group
 			}
@@ -76,7 +76,7 @@ func (g *Group) Run(ctx context.Context) error {
 	g.stopAll(ctx)
 
 	if !g.waitForStop(&wg) {
-		g.logf("worker: shutdown timed out waiting for Runnables to stop")
+		g.logf(ctx, "worker: shutdown timed out waiting for Runnables to stop")
 	}
 	return trigger
 }
@@ -116,13 +116,13 @@ func (g *Group) stopAll(ctx context.Context) {
 	// Stop in reverse registration order (LIFO), mirroring closer semantics.
 	for _, r := range slices.Backward(g.runnables) {
 		if err := r.Stop(stopCtx); err != nil {
-			g.logf("worker: stop failed", "name", r.Name(), "err", err)
+			g.logf(stopCtx, "worker: stop failed", "name", r.Name(), "err", err)
 		}
 	}
 }
 
-func (g *Group) logf(msg string, args ...any) {
+func (g *Group) logf(ctx context.Context, msg string, args ...any) {
 	if g.log != nil {
-		g.log.Info(msg, args...)
+		g.log.InfoContext(ctx, msg, args...)
 	}
 }

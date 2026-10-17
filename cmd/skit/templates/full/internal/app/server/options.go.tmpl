@@ -64,7 +64,7 @@ func WithServer(addr string, routes ...Routes) Option {
 			Addr:              addr,
 			ReadHeaderTimeout: a.d.Opts.HTTP.ReadHeaderTimeout,
 			ShutdownTimeout:   a.d.Opts.HTTP.ShutdownTimeout,
-			Logger:            a.d.Logger.Slog(),
+			Logger:            a.d.Logger,
 			ErrorLog:          slog.NewLogLogger(a.d.Logger.Handler(), slog.LevelError),
 		}, a.handler(ctx, routes...)))
 		return nil

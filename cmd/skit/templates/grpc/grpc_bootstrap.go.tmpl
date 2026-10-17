@@ -77,7 +77,7 @@ func GRPCGateway(addr string) Routes {
 			Endpoint: gatewayEndpoint(addr),
 		}, gatewayRegistrars()...)
 		if err != nil {
-			a.d.Logger.Error(ctx, "grpc gateway: build failed", "err", err)
+			a.d.Logger.ErrorContext(ctx, "grpc gateway: build failed", "err", err)
 			return
 		}
 		api := requestChain(ctx, a, r)

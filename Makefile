@@ -59,8 +59,9 @@ vet: ## go vet
 	$(GO) vet ./...
 
 .PHONY: test
-test: ## Unit tests (short, race, random order) with per-package coverage
+test: ## Unit tests (short, race, random order) with per-package coverage; allocation budgets without race
 	$(GO) test -race -short -shuffle=on -cover ./...
+	$(GO) test -short -count=1 -run AllocBudget ./...
 
 .PHONY: test-json
 test-json: ## Unit tests with a pretty pass/fail + coverage summary (tparse)

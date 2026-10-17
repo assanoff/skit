@@ -8,22 +8,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/auditlog"
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 )
 
 // Store implements auditlog.Store against Postgres.
 type Store struct {
-	log *logger.Logger
+	log *slog.Logger
 	db  sqlx.ExtContext
 }
 
 // NewStore builds a Store. Pass a *sqlx.DB for pool-backed use.
-func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
+func NewStore(log *slog.Logger, db *sqlx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 

@@ -3,13 +3,13 @@ package kafka
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
 	kgo "github.com/segmentio/kafka-go"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 )
 
 // DefaultMaxRetries bounds how many times a broker.Requeue verdict retries the
@@ -44,7 +44,7 @@ type ConsumerConfig struct {
 // broker.Handler. It implements worker.Runnable: Start blocks until the context
 // is canceled (or Stop is called), then drains its readers.
 type Consumer struct {
-	log     *logger.Logger
+	log     *slog.Logger
 	cfg     ConsumerConfig
 	handler broker.Handler
 
@@ -57,7 +57,7 @@ type Consumer struct {
 // onto Kafka concepts (Topic → topic, Group → consumer group; Filters have no
 // Kafka equivalent and are ignored). It is the pluggable entry point the
 // rabbitmq adapter also offers, so wiring depends on broker.Subscription.
-func New(cfg Config, log *logger.Logger, sub broker.Subscription, h broker.Handler) (*Consumer, error) {
+func New(cfg Config, log *slog.Logger, sub broker.Subscription, h broker.Handler) (*Consumer, error) {
 	return NewConsumer(ConsumerConfig{
 		Brokers:     cfg.Brokers,
 		Topic:       sub.Topic,
@@ -68,7 +68,7 @@ func New(cfg Config, log *logger.Logger, sub broker.Subscription, h broker.Handl
 }
 
 // NewConsumer builds a Consumer from the Kafka-specific config.
-func NewConsumer(cfg ConsumerConfig, log *logger.Logger, h broker.Handler) (*Consumer, error) {
+func NewConsumer(cfg ConsumerConfig, log *slog.Logger, h broker.Handler) (*Consumer, error) {
 	if len(cfg.Brokers) == 0 {
 		return nil, errors.New("kafka: new consumer: brokers are required")
 	}
@@ -124,7 +124,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 		}(r)
 	}
 
-	c.log.Info(ctx, "kafka consumer started",
+	c.log.InfoContext(ctx, "kafka consumer started",
 		"topic", c.cfg.Topic, "group", c.cfg.GroupID, "consumer", c.cfg.Name, "readers", c.cfg.Concurrency)
 
 	<-ctx.Done()
@@ -162,7 +162,7 @@ func (c *Consumer) consume(ctx context.Context, r *kgo.Reader) {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 				return // graceful shutdown
 			}
-			c.log.Error(ctx, "kafka consumer: fetch", "consumer", c.cfg.Name, "err", err)
+			c.log.ErrorContext(ctx, "kafka consumer: fetch", "consumer", c.cfg.Name, "err", err)
 			continue
 		}
 		c.handle(ctx, r, msg)
@@ -176,7 +176,7 @@ func (c *Consumer) consume(ctx context.Context, r *kgo.Reader) {
 func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	m, err := broker.UnmarshalCloudEvent(msg.Value)
 	if err != nil {
-		c.log.Warn(ctx, "kafka consumer: malformed message, dropping",
+		c.log.WarnContext(ctx, "kafka consumer: malformed message, dropping",
 			"consumer", c.cfg.Name, "err", err, "offset", msg.Offset)
 		c.commit(ctx, r, msg)
 		return
@@ -189,7 +189,7 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 		switch c.dispatch(ctx, m) {
 		case broker.Requeue:
 			if attempt >= c.cfg.MaxRetries {
-				c.log.Error(ctx, "kafka consumer: retries exhausted, dropping (add a dead-letter topic)",
+				c.log.ErrorContext(ctx, "kafka consumer: retries exhausted, dropping (add a dead-letter topic)",
 					"consumer", c.cfg.Name, "message_id", m.ID, "offset", msg.Offset)
 				c.commit(ctx, r, msg)
 				return
@@ -209,12 +209,12 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 // dispatch runs the handler under panic recovery (via broker.Guard), defaulting
 // to Requeue on panic so the record is retried rather than silently dropped.
 func (c *Consumer) dispatch(ctx context.Context, m broker.Message) broker.Action {
-	return broker.Guard(ctx, c.log.Slog(), c.cfg.Name, m, c.handler)
+	return broker.Guard(ctx, c.log, c.cfg.Name, m, c.handler)
 }
 
 func (c *Consumer) commit(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	if err := r.CommitMessages(ctx, msg); err != nil && ctx.Err() == nil {
-		c.log.Error(ctx, "kafka consumer: commit", "consumer", c.cfg.Name, "offset", msg.Offset, "err", err)
+		c.log.ErrorContext(ctx, "kafka consumer: commit", "consumer", c.cfg.Name, "offset", msg.Offset, "err", err)
 	}
 }
 

@@ -107,7 +107,7 @@ func sendWelcome(ctx context.Context, t queue.Task) error {
     return mailer.Send(ctx, p)
 }
 
-func run(ctx context.Context, log *logger.Logger, q *queue.PG) error {
+func run(ctx context.Context, log *slog.Logger, q *queue.PG) error {
     mux := queue.NewMux()
     if err := mux.Register("email.welcome", sendWelcome); err != nil {
         return err
@@ -116,7 +116,7 @@ func run(ctx context.Context, log *logger.Logger, q *queue.PG) error {
         return err
     }
 
-    proc := worker.NewProcessor[queue.Task](log.Slog(), q, mux, q, worker.ProcessorConfig{
+    proc := worker.NewProcessor[queue.Task](log, q, mux, q, worker.ProcessorConfig{
         Name:      "jobs",
         BatchSize: 100,
         // An unroutable kind or a bad payload is permanent — dead-letter it
@@ -126,8 +126,8 @@ func run(ctx context.Context, log *logger.Logger, q *queue.PG) error {
         },
     })
 
-    group := worker.NewGroup(log.Slog(), 10*time.Second)
-    group.Add(worker.NewLoop(log.Slog(), worker.LoopConfig{
+    group := worker.NewGroup(log, 10*time.Second)
+    group.Add(worker.NewLoop(log, worker.LoopConfig{
         Name:               "jobs",
         Interval:           time.Second,
         ImmediateFirstTick: true,
@@ -149,7 +149,7 @@ Override with a fallback to handle them yourself:
 
 ```go
 mux := queue.NewMux(queue.WithFallback(func(ctx context.Context, t queue.Task) error {
-    log.Warn(ctx, "dropping task with unknown kind", "kind", t.Kind)
+    log.WarnContext(ctx, "dropping task with unknown kind", "kind", t.Kind)
     return nil // ack and drop
 }))
 ```
@@ -159,7 +159,7 @@ mux := queue.NewMux(queue.WithFallback(func(ctx context.Context, t queue.Task) e
 Use a paced loop to drain a backlog promptly while idling cheaply when empty:
 
 ```go
-group.Add(worker.NewPacedLoop(log.Slog(), worker.LoopConfig{
+group.Add(worker.NewPacedLoop(log, worker.LoopConfig{
     Name:            "jobs",
     Interval:        time.Second,      // idle wait
     MaxIdleInterval: 30 * time.Second, // back off when persistently idle
@@ -216,7 +216,7 @@ Done and dead-lettered rows accumulate; reap them periodically with a
 `worker.Loop`:
 
 ```go
-group.Add(worker.NewLoop(log.Slog(), worker.LoopConfig{
+group.Add(worker.NewLoop(log, worker.LoopConfig{
     Name:     "queue-cleanup",
     Interval: time.Hour,
 }, func(ctx context.Context) error {

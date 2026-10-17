@@ -25,7 +25,7 @@ func Process(ctx context.Context, log *slog.Logger, name string, body []byte, ro
 	m, err := UnmarshalCloudEvent(body)
 	if err != nil {
 		if log != nil {
-			log.Warn("broker: malformed message, dropping", "consumer", name, "err", err, "body_size", len(body))
+			log.WarnContext(ctx, "broker: malformed message, dropping", "consumer", name, "err", err, "body_size", len(body))
 		}
 		return Ack
 	}
@@ -41,11 +41,11 @@ func Process(ctx context.Context, log *slog.Logger, name string, body []byte, ro
 // is decode + Guard for the common single-shot path. log may be nil.
 func Guard(ctx context.Context, log *slog.Logger, name string, m Message, h Handler) Action {
 	action := Requeue
-	recovered := safetick.Guard(log, name, nil, func() {
+	recovered := safetick.Guard(ctx, log, name, nil, func() {
 		action = h(ctx, m)
 	})
 	if recovered && log != nil {
-		log.Error("broker: handler panicked, requeueing", "consumer", name, "message_id", m.ID)
+		log.ErrorContext(ctx, "broker: handler panicked, requeueing", "consumer", name, "message_id", m.ID)
 	}
 	return action
 }

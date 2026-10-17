@@ -3,10 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/dim"
-	"github.com/assanoff/skit/logger"
 )
 
 // RabbitMQ returns a dim factory that dials RabbitMQ with cfg. The cleanup
@@ -18,7 +18,7 @@ import (
 //			User: opts.Broker.User, Password: opts.Broker.Password,
 //			Host: opts.Broker.Host, Port: opts.Broker.Port,
 //		}))
-func RabbitMQ(log *logger.Logger, cfg rabbitmq.Config) func(ctx context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
+func RabbitMQ(log *slog.Logger, cfg rabbitmq.Config) func(ctx context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
 	return func(_ context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
 		conn, err := rabbitmq.Dial(log, cfg)
 		if err != nil {

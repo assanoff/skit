@@ -1,42 +1,49 @@
-// Package logger is a thin wrapper around log/slog tailored for services.
+// Package logger builds the service's *slog.Logger: a JSON handler chain that
+// correlates every record with the active trace, tags it with the service
+// identity, and can fire side-effect hooks per level.
 //
-// It injects a trace_id into every record (via a pluggable TraceIDFn), tags
-// records with the service name, exposes context-aware Debug/Info/Warn/Error
-// methods, and can fan records out to multiple sinks by level (see
-// FanoutHandler) — e.g. everything to stdout and ERROR+ to Sentry. The same
-// *Logger is meant to be used everywhere: HTTP/gRPC handlers, business code,
-// and background workers.
-//
-// Each level also has a *c variant (Debugc/Infoc/Warnc/Errorc) that takes a
-// frame-skip count for correct source attribution when the logger is reached
-// through a helper of your own; see the Logger methods. BuildInfo logs the
-// binary's embedded VCS/build metadata at startup.
+// New and NewWithHandler return a plain *slog.Logger, so the same logger is
+// used everywhere — HTTP/gRPC handlers, business code, background workers and
+// SDK packages — and third-party code logs through the same handler.
+// BuildInfo logs the binary's embedded VCS/build metadata at startup.
 //
 // # Usage
 //
-// Build one Logger at startup and inject it. Pair TraceIDFn with the otel
-// package so every line carries the active trace id:
+// Build one logger at startup and inject it:
 //
 //	log := logger.New(os.Stdout, logger.Config{
-//		Service:   "myapp",
+//		Service:   "myapp", // service.name
+//		Version:   version, // service.version — the build version
 //		Level:     logger.LevelInfo,
 //		AddSource: true,
-//		TraceIDFn: otel.GetTraceID,
 //	})
-//	log.Info(ctx, "service started", "addr", ":8080")
+//	log.InfoContext(ctx, "service started", "addr", ":8080")
 //
-//	access := log.Named("access")   // child tagged logger=access
-//	access.Info(ctx, "request", "method", "GET", "path", "/")
+//	access := log.With("logger", "access") // child tagged logger=access
+//	access.InfoContext(ctx, "request", "method", "GET", "path", "/")
+//
+// Always log with a context (InfoContext, ErrorContext, ...; the sloglint
+// linter enforces it): the context carries cancellation and the span the
+// record is correlated with.
+//
+// # Correlation and identity
+//
+// When the context carries a valid OpenTelemetry span context, every record
+// gets trace_id, span_id and trace_flags at its top level — outside any
+// WithGroup — so a collector can link the line to its trace. Without one the
+// fields are omitted. Config.Service and Config.Version are written as
+// service.name and service.version, the OpenTelemetry resource attribute
+// names; an empty Version is omitted.
 //
 // # Multiple sinks
 //
-// To split output by level, build a FanoutHandler and pass it to
-// NewWithHandler. Each wrapped handler's own Enabled check gates which records
-// it receives, so per-sink level filtering lives on the handlers:
+// To split output by level, combine handlers with slog.NewMultiHandler and
+// pass it to NewWithHandler. Each wrapped handler's own Enabled check gates
+// which records it receives:
 //
 //	stdout := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logger.LevelInfo})
-//	h := logger.NewFanout(stdout, sentryHandler) // sentryHandler.Enabled gates ERROR+
-//	log := logger.NewWithHandler(h, logger.Config{Service: "myapp", TraceIDFn: otel.GetTraceID})
+//	h := slog.NewMultiHandler(stdout, sentryHandler) // sentryHandler.Enabled gates ERROR+
+//	log := logger.NewWithHandler(h, logger.Config{Service: "myapp", Version: version})
 //
 // # Side-effect hooks (Events)
 //
@@ -45,48 +52,41 @@
 // like alerting or Sentry capture on ERROR, without disturbing stdout logging:
 //
 //	log := logger.New(os.Stdout, logger.Config{
-//		Service:   "myapp",
-//		Level:     logger.LevelInfo,
-//		TraceIDFn: otel.GetTraceID,
+//		Service: "myapp",
+//		Level:   logger.LevelInfo,
 //		Events: logger.Events{
 //			Error: func(ctx context.Context, r slog.Record) {
-//				alert.Capture(ctx, r) // r carries service, trace_id, and any With/Named attrs
+//				alert.Capture(ctx, r) // r carries service.*, trace fields and With attrs
 //			},
 //		},
 //	})
 //
-// The callback receives the full slog.Record with the accumulated
-// With/Named/service attributes and the trace_id replayed in, so it sees the
-// same context the sink writes. It runs synchronously before the write, so keep
-// it fast (offload slow work to a goroutine) and do not log at the same level
-// from within it (that re-enters the hook).
+// The callback receives the full slog.Record with the accumulated With and
+// service.* attributes and the trace fields replayed in, so it sees the same
+// context the sink writes. It runs synchronously before the write, so keep it
+// fast (offload slow work to a goroutine) and do not log at the same level from
+// within it (that re-enters the hook).
 //
 // Events is a hook, not a router: it is additive to whatever sink you built. To
-// send full records to multiple destinations by level, compose a FanoutHandler
-// (above); the two combine — a fan-out sink plus an Error hook.
+// send full records to several destinations by level, use slog.NewMultiHandler
+// (above); the two combine — a multi-handler sink plus an Error hook.
 //
-// # Interop with slog
+// # Conventions
 //
-// Handler returns the underlying slog.Handler and Slog returns a stdlib
-// *slog.Logger backed by it, so third-party middleware (e.g. httplog) can log
-// through the same sink, formatting, and trace-id injection. Trace-id injection
-// is installed as a handler wrapper rather than in the *Logger write path, so it
-// applies uniformly to *Logger, Slog(), and anything sharing the handler.
+//   - Errors go under the key "err" with an error value: log.ErrorContext(ctx,
+//     "save failed", "err", err).
+//   - Custom levels stay within [-8, 15], the range OpenTelemetry severity
+//     numbers map to.
 //
 // # Config
 //
 // Config fields:
-//   - Service: tags every record with attribute "service".
+//   - Service: written as "service.name" on every record.
+//   - Version: written as "service.version"; empty omits it.
 //   - Level: minimum level handled (LevelDebug/LevelInfo/LevelWarn/LevelError).
 //   - AddSource: attach a "source" attribute shortened to file:line.
-//   - TraceIDFn: injects "trace_id"; may be nil. Typically otel.GetTraceID.
 //   - Events: optional per-level side-effect hook (see above); zero = none.
 //
-// Deriving child loggers:
-//   - Named(name): child tagged logger=name (access logger, worker logger, ...).
-//   - With(args...): child whose records always carry the given attributes.
-//
-// Children share the parent's handler, so output, level, and any fan-out stay
-// unified — the intended way to have several logger instances without
-// proliferating handlers or config.
+// New applies Level and AddSource to its JSON handler; NewWithHandler leaves
+// both to the handler it is given.
 package logger

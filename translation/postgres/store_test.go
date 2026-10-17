@@ -3,13 +3,12 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbtest"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/translation"
 	"github.com/assanoff/skit/translation/postgres"
 )
@@ -26,7 +25,7 @@ func TestCheckTranslationsExist(t *testing.T) {
 	ctx := context.Background()
 
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 	store := postgres.NewStore(log, pg.DB)
 	is.NoErr(store.EnsureSchema(ctx)) // the translations table must exist
 

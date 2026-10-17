@@ -1,12 +1,11 @@
 package provider
 
 import (
-	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/otel"
 )
 
@@ -17,7 +16,7 @@ func TestConstructorsReturnFactories(t *testing.T) {
 	if Postgres(dbx.Config{Host: "localhost:5432", Name: "x"}) == nil {
 		t.Fatal("Postgres returned a nil factory")
 	}
-	if RabbitMQ(logger.New(io.Discard, logger.Config{}), rabbitmq.Config{Host: "localhost", Port: "5672"}) == nil {
+	if RabbitMQ(slog.New(slog.DiscardHandler), rabbitmq.Config{Host: "localhost", Port: "5672"}) == nil {
 		t.Fatal("RabbitMQ returned a nil factory")
 	}
 	if Tracer(otel.Config{ServiceName: "svc", Endpoint: "localhost:4317"}) == nil {

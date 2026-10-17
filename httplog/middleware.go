@@ -44,6 +44,11 @@ func isAbortHandler(rec any) bool {
 	return ok && errors.Is(err, http.ErrAbortHandler)
 }
 
+// RequestLogger builds the request-logging middleware. It writes through the
+// given logger's handler, so HTTP access logs share the output, level, trace
+// correlation and sinks of the rest of the application — one handler, distinct
+// instances. Pass a dedicated child, e.g. log.With("logger", "access"), to tag
+// access lines. A nil Options falls back to the package defaults.
 func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Handler {
 	// Work on a copy so filling in defaults never mutates the caller's Options
 	// (or the package-global defaultOptions when o is nil).
@@ -290,4 +295,17 @@ func logBody(body *bytes.Buffer, header http.Header, o *Options) string {
 		}
 	}
 	return fmt.Sprintf("[body redacted for Content-Type: %s]", contentType)
+}
+
+// clientIP resolves the client address for the request log, preferring the
+// first X-Forwarded-For hop, then X-Real-IP, then RemoteAddr.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		first, _, _ := strings.Cut(xff, ",")
+		return strings.TrimSpace(first)
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return strings.TrimSpace(xrip)
+	}
+	return r.RemoteAddr
 }

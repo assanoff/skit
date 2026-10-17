@@ -4,20 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 	"uuid"
 
 	kgo "github.com/segmentio/kafka-go"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 )
 
 // Publisher publishes broker.Messages to Kafka as CloudEvents v1.0
 // structured-mode JSON. It writes with RequireAll acks, so Publish returns nil
 // only after every in-sync replica has the record — at-least-once delivery.
 type Publisher struct {
-	log    *logger.Logger
+	log    *slog.Logger
 	w      *kgo.Writer
 	source string
 }
@@ -27,7 +27,7 @@ var _ broker.Publisher = (*Publisher)(nil)
 
 // NewPublisher builds a Kafka publisher. source is the CloudEvents source
 // stamped on messages that don't carry their own.
-func NewPublisher(cfg Config, source string, log *logger.Logger) (*Publisher, error) {
+func NewPublisher(cfg Config, source string, log *slog.Logger) (*Publisher, error) {
 	if source == "" {
 		return nil, errors.New("kafka: new publisher: source is required")
 	}

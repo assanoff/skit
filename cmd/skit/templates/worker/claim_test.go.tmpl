@@ -2,17 +2,16 @@ package {{.Pkg}}
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/matryer/is"
 
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/queue"
 )
 
 func newTestWorker() *Worker {
-	return New(logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError}))
+	return New(slog.New(slog.DiscardHandler))
 }
 
 func Test{{.Type}}WorkerHandleValid(t *testing.T) {

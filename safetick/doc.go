@@ -12,13 +12,13 @@
 // Defer RecoverTick at the start of any tick that must not bring down its loop:
 //
 //	func (w *W) tick(ctx context.Context) {
-//	    defer safetick.RecoverTick(w.log, "outbox-relay", w.onPanic)
+//	    defer safetick.RecoverTick(ctx, w.log, "outbox-relay", w.onPanic)
 //	    // ... work that must not crash the loop ...
 //	}
 //
 // When you need the recovered signal inline rather than via defer, use Guard:
 //
-//	if safetick.Guard(log, "consumer", onPanic, func() { handle(msg) }) {
+//	if safetick.Guard(ctx, log, "consumer", onPanic, func() { handle(msg) }) {
 //	    // the call panicked and was recovered; nack and move on
 //	}
 //
@@ -26,7 +26,7 @@
 //
 //   - PanicHandler: func(worker, phase string), invoked on recovery; phase is a
 //     free-form label such as "tick", "handle", or "guard".
-//   - RecoverTick(log, worker, onPanic): deferred tick guard.
-//   - Guard(log, worker, onPanic, fn): run fn, recover any panic, return
+//   - RecoverTick(ctx, log, worker, onPanic): deferred tick guard.
+//   - Guard(ctx, log, worker, onPanic, fn): run fn, recover any panic, return
 //     whether one occurred.
 package safetick

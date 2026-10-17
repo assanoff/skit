@@ -3,7 +3,7 @@ package outbox_test
 import (
 	"context"
 	"errors"
-	"io"
+	"log/slog"
 	"testing"
 	"time"
 	"uuid"
@@ -11,7 +11,6 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbtest"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/outbox"
 )
 
@@ -26,7 +25,7 @@ func TestPGLeaseLifecycle(t *testing.T) {
 	is := is.New(t)
 	ctx := context.Background()
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 	store := outbox.NewPG(log, pg.DB, outbox.Options{})
 	is.NoErr(store.EnsureSchema(ctx))
 

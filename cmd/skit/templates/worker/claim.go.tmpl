@@ -8,8 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/queue"
 )
 
@@ -18,12 +18,12 @@ const Kind = "{{.Pkg}}"
 
 // Worker handles claimed {{.Pkg}} tasks.
 type Worker struct {
-	log *logger.Logger
+	log *slog.Logger
 	// core *{{.Pkg}}core.Core // inject the domain core the handler drives
 }
 
 // New builds the {{.Pkg}} worker.
-func New(log *logger.Logger) *Worker {
+func New(log *slog.Logger) *Worker {
 	return &Worker{log: log}
 }
 
@@ -44,6 +44,6 @@ func (w *Worker) Handle(ctx context.Context, t queue.Task) error {
 	}
 
 	// TODO: drive the domain, e.g. return w.core.Do(ctx, payload)
-	w.log.Info(ctx, "{{.Pkg}} task handled", "task", t.ID, "attempts", t.Attempts)
+	w.log.InfoContext(ctx, "{{.Pkg}} task handled", "task", t.ID, "attempts", t.Attempts)
 	return nil
 }

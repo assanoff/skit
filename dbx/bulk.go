@@ -3,11 +3,10 @@ package dbx
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
-
-	"github.com/assanoff/skit/logger"
 )
 
 // maxParameters bounds how many bind parameters go into a single statement.
@@ -26,7 +25,15 @@ const maxParameters = 1000
 // The query is built with "?" markers and rebound to the driver's bind style via
 // db.Rebind (sqlx), so it is engine-portable: Postgres gets "$1,$2,…", SQLite/
 // MySQL keep "?". No per-dialect placeholder handling is needed.
-func BulkInsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
+func BulkInsert(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
+	err := bulkInsert(ctx, db, table, columns, values, conflictAction)
+	if loggable(ctx, log, err) {
+		logFailure(ctx, log, caller(), "dbx.bulk_insert", err, slog.String("table", table))
+	}
+	return err
+}
+
+func bulkInsert(ctx context.Context, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("dbx: bulk insert into %s: no columns", table)
 	}
@@ -47,9 +54,6 @@ func BulkInsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, tab
 		right := min(left+stride, len(values))
 		batch := values[left:right]
 		query := db.Rebind(buildInsertQuery(table, columns, len(batch), conflictAction))
-		if log != nil {
-			log.Debug(ctx, "dbx.bulk_insert", "table", table, "rows", len(batch)/len(columns))
-		}
 		if _, err := db.ExecContext(ctx, query, batch...); err != nil {
 			return fmt.Errorf("dbx: bulk insert into %s [%d:%d]: %w", table, left, right, translateError(err))
 		}
@@ -61,8 +65,12 @@ func BulkInsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, tab
 // non-conflict column from the proposed row. The ON CONFLICT … DO UPDATE SET …
 // = excluded.… form is understood by both Postgres and SQLite (3.24+); the query
 // is rebound to the driver's placeholder style by BulkInsert.
-func BulkUpsert(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictColumns []string) error {
-	return BulkInsert(ctx, log, db, table, columns, values, buildUpsertConflictAction(columns, conflictColumns))
+func BulkUpsert(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictColumns []string) error {
+	err := bulkInsert(ctx, db, table, columns, values, buildUpsertConflictAction(columns, conflictColumns))
+	if loggable(ctx, log, err) {
+		logFailure(ctx, log, caller(), "dbx.bulk_upsert", err, slog.String("table", table))
+	}
+	return err
 }
 
 // buildInsertQuery renders a multi-row INSERT with "?" placeholders; callers

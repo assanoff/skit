@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	rmq "github.com/wagslane/go-rabbitmq"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 )
 
 // ConsumerConfig configures a Consumer.
@@ -37,7 +37,7 @@ type ConsumerConfig struct {
 // broker.Handler. It implements worker.Runnable: Start blocks until the context
 // is canceled (or Stop is called), then drains.
 type Consumer struct {
-	log     *logger.Logger
+	log     *slog.Logger
 	cfg     ConsumerConfig
 	handler broker.Handler
 	rc      *rmq.Consumer
@@ -51,7 +51,7 @@ type Consumer struct {
 // broker.Subscription instead of the RabbitMQ-specific ConsumerConfig. Use
 // NewConsumer directly only when you need RabbitMQ-only options (e.g.
 // ExchangeKind).
-func New(conn *Conn, log *logger.Logger, sub broker.Subscription, h broker.Handler) (*Consumer, error) {
+func New(conn *Conn, log *slog.Logger, sub broker.Subscription, h broker.Handler) (*Consumer, error) {
 	return NewConsumer(conn, log, ConsumerConfig{
 		Queue:       sub.Group,
 		Exchange:    sub.Topic,
@@ -63,7 +63,7 @@ func New(conn *Conn, log *logger.Logger, sub broker.Subscription, h broker.Handl
 
 // NewConsumer declares the topology and builds a Consumer. Register it on a
 // worker.Group like any other Runnable.
-func NewConsumer(conn *Conn, log *logger.Logger, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
+func NewConsumer(conn *Conn, log *slog.Logger, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
 	if cfg.Queue == "" {
 		return nil, errors.New("rabbitmq: new consumer: queue is required")
 	}
@@ -125,7 +125,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 		}
 	}()
 
-	c.log.Info(ctx, "rabbitmq consumer started", "queue", c.cfg.Queue, "consumer", c.cfg.Name)
+	c.log.InfoContext(ctx, "rabbitmq consumer started", "queue", c.cfg.Queue, "consumer", c.cfg.Name)
 	err := c.rc.Run(func(d rmq.Delivery) rmq.Action {
 		return c.dispatch(ctx, d)
 	})
@@ -151,7 +151,7 @@ func (c *Consumer) close() {
 // under panic recovery, mapping the broker.Action back to an rmq.Action. A
 // malformed envelope is Ack'd (dropped) — requeuing it would loop forever.
 func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
-	action := broker.Process(ctx, c.log.Slog(), c.cfg.Name, d.Body, func(m *broker.Message) {
+	action := broker.Process(ctx, c.log, c.cfg.Name, d.Body, func(m *broker.Message) {
 		m.Topic = d.Exchange
 		m.Key = d.RoutingKey
 		m.Headers = stringHeaders(d.Headers)

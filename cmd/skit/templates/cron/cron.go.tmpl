@@ -7,12 +7,12 @@
 
 import (
 	"context"
+	"log/slog"
 	{{if .Locked}}"time"
 {{end}}
 	"github.com/assanoff/skit/cron"
 	{{if .Locked}}"github.com/assanoff/skit/lock"
-{{end}}	"github.com/assanoff/skit/logger"
-)
+{{end}})
 
 // Schedule is the cron spec this job runs on: standard 5-field cron
 // (min hour dom month dow) or an @-descriptor (@hourly, @daily, @every 1h30m).
@@ -24,13 +24,13 @@ const Name = "{{.Pkg}}"
 // Cron holds the job's dependencies. Add the collaborators run needs (stores,
 // clients, cores) as fields and set them in New.
 type Cron struct {
-	log *logger.Logger
+	log *slog.Logger
 {{if .Locked}}	locker  lock.Locker
 	lockTTL time.Duration
 {{end}}}
 
 // New builds the job.
-func New(log *logger.Logger{{if .Locked}}, locker lock.Locker{{end}}) *Cron {
+func New(log *slog.Logger{{if .Locked}}, locker lock.Locker{{end}}) *Cron {
 	return &Cron{
 		log: log,
 {{if .Locked}}		locker:  locker,
@@ -41,7 +41,7 @@ func New(log *logger.Logger{{if .Locked}}, locker lock.Locker{{end}}) *Cron {
 // run performs one invocation of the scheduled work.
 func (c *Cron) run(ctx context.Context) error {
 	// TODO: the scheduled work goes here.
-	c.log.Info(ctx, "cron tick", "job", Name)
+	c.log.InfoContext(ctx, "cron tick", "job", Name)
 	return nil
 }
 {{if .Locked}}
@@ -54,7 +54,7 @@ func (c *Cron) guarded(ctx context.Context) error {
 		return err
 	}
 	if !ok {
-		c.log.Debug(ctx, "cron tick skipped: lock held elsewhere", "job", Name)
+		c.log.DebugContext(ctx, "cron tick skipped: lock held elsewhere", "job", Name)
 		return nil
 	}
 	defer release()
@@ -64,7 +64,7 @@ func (c *Cron) guarded(ctx context.Context) error {
 // Scheduler builds the cron scheduler Runnable for this job. Add the returned
 // value to the service's worker group.
 func (c *Cron) Scheduler() (*cron.Scheduler, error) {
-	sched := cron.New(c.log.Slog(), Name)
+	sched := cron.New(c.log, Name)
 	if err := sched.Add(Schedule, Name, c.{{if .Locked}}guarded{{else}}run{{end}}); err != nil {
 		return nil, err
 	}

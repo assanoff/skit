@@ -117,12 +117,12 @@ func (s *Scheduler) run(ctx context.Context, e entry) {
 	if ctx.Err() != nil {
 		return
 	}
-	defer safetick.RecoverTick(s.log, s.name+"/"+e.name, s.onPanic)
+	defer safetick.RecoverTick(ctx, s.log, s.name+"/"+e.name, s.onPanic)
 
 	started := time.Now()
 	if err := e.job(ctx); err != nil && s.log != nil {
-		s.log.Error("cron job failed",
-			"cron", s.name, "job", e.name, "error", err,
+		s.log.ErrorContext(ctx, "cron job failed",
+			"cron", s.name, "job", e.name, "err", err,
 			"elapsed", time.Since(started).String(),
 		)
 	}

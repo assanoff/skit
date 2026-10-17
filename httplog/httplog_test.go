@@ -11,8 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/matryer/is"
-
-	"github.com/assanoff/skit/logger"
 )
 
 func TestCURL(t *testing.T) {
@@ -213,13 +211,13 @@ func TestRequestLoggerPanicOnUpgradeRequestSkips500(t *testing.T) {
 	is.Equal(rec.Code, http.StatusOK) // no status written over a real upgrade (recorder defaults to 200)
 }
 
-func TestMiddlewareUsesServicekitLogger(t *testing.T) {
+func TestRequestLoggerWritesThroughHandler(t *testing.T) {
 	is := is.New(t)
 
 	var buf bytes.Buffer
-	log := logger.New(&buf, logger.Config{Service: "test", Level: logger.LevelInfo})
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	h := Middleware(log, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := RequestLogger(log, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -227,5 +225,5 @@ func TestMiddlewareUsesServicekitLogger(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ping", nil))
 
 	is.Equal(rec.Code, http.StatusOK)
-	is.True(strings.Contains(buf.String(), "GET /ping => HTTP 200")) // logs through the skit logger's handler
+	is.True(strings.Contains(buf.String(), "GET /ping => HTTP 200")) // logs through the given logger's handler
 }

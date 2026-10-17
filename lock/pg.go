@@ -59,7 +59,7 @@ func (p *PG) TryLock(ctx context.Context, key string, _ time.Duration) (Release,
 		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if _, err := conn.ExecContext(uctx, "SELECT pg_advisory_unlock($1)", lockKey); err != nil {
-			p.log.Warn("lock: pg_advisory_unlock failed", "key", key, "error", err)
+			p.log.WarnContext(uctx, "lock: pg_advisory_unlock failed", "key", key, "err", err)
 		}
 	}
 	return release, true, nil

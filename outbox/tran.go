@@ -2,11 +2,11 @@ package outbox
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 )
 
 // PublishFunc is the caller's transactional closure. It receives the
@@ -30,7 +30,7 @@ type PublishFunc func(tx *sqlx.Tx, pub Publisher) error
 // reg resolves each published value's route (topic/key/content type). This is a
 // thin wrapper over dbx.WithinTran; the domain never threads tx through its
 // event code.
-func WithinTran(ctx context.Context, log *logger.Logger, db *sqlx.DB, store Store, reg *Registry, fn PublishFunc) error {
+func WithinTran(ctx context.Context, log *slog.Logger, db *sqlx.DB, store Store, reg *Registry, fn PublishFunc) error {
 	return dbx.WithinTran(ctx, log, db, func(tx *sqlx.Tx) error {
 		pub := Bind(tx, store, reg)
 		return fn(tx, pub)

@@ -702,8 +702,8 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
    if !a.d.Opts.Worker.Disabled {
        mux := queue.NewMux()
        _ = mux.Register(%[1]s.Kind, %[1]s.New(a.d.Logger).Handle)
-       proc := worker.NewProcessor[queue.Task](a.d.Logger.Slog(), q, mux, q, worker.ProcessorConfig{})
-       a.workers = append(a.workers, worker.NewPacedLoop(a.d.Logger.Slog(),
+       proc := worker.NewProcessor[queue.Task](a.d.Logger, q, mux, q, worker.ProcessorConfig{})
+       a.workers = append(a.workers, worker.NewPacedLoop(a.d.Logger,
            worker.LoopConfig{Name: %[1]q + "-worker", Interval: time.Second}, proc.PacedTick()))
    }
    // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue", "github.com/assanoff/skit/worker"
@@ -827,7 +827,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 2. Wire it into initWorkers (internal/app/server/server.go), building a
    Postgres advisory-lock Locker:
 
-   locker := lock.NewPG(a.d.DB(ctx), a.d.Logger.Slog())
+   locker := lock.NewPG(a.d.DB(ctx), a.d.Logger)
    sched, err := %[1]s.New(a.d.Logger, locker).Scheduler()
    if err != nil { return err }
    a.workers = append(a.workers, sched)
@@ -840,7 +840,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 2. Enable Redis (REDIS_ENABLED=true) and wire it into initWorkers
    (internal/app/server/server.go), building a Redis Locker:
 
-   locker := lock.NewRedis(a.d.Redis(ctx), a.d.Logger.Slog())
+   locker := lock.NewRedis(a.d.Redis(ctx), a.d.Logger)
    sched, err := %[1]s.New(a.d.Logger, locker).Scheduler()
    if err != nil { return err }
    a.workers = append(a.workers, sched)

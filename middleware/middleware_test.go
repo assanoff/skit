@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,12 +14,11 @@ import (
 
 	"github.com/matryer/is"
 
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/middleware"
 )
 
-func discardLogger() *logger.Logger {
-	return logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+func discardLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestCompressSetsVaryWhenGzipping(t *testing.T) {
@@ -200,7 +200,7 @@ func TestAccessLogWritesStructuredLine(t *testing.T) {
 	is := is.New(t)
 
 	var buf bytes.Buffer
-	log := logger.New(&buf, logger.Config{Service: "test", Level: logger.LevelInfo})
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	h := middleware.AccessLog(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)

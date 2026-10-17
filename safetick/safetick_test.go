@@ -2,6 +2,7 @@ package safetick_test
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"testing"
 
@@ -14,7 +15,7 @@ import (
 // worker tick uses it. It returns normally when the panic is swallowed — if the
 // panic escaped, the test goroutine would crash.
 func runTick(log *slog.Logger, worker string, onPanic safetick.PanicHandler, fn func()) {
-	defer safetick.RecoverTick(log, worker, onPanic)
+	defer safetick.RecoverTick(context.Background(), log, worker, onPanic)
 	fn()
 }
 
@@ -78,7 +79,7 @@ func TestGuardRecoversAndReturnsTrue(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	recovered := safetick.Guard(log, "consumer", onPanic, func() {
+	recovered := safetick.Guard(context.Background(), log, "consumer", onPanic, func() {
 		panic("kaboom")
 	})
 
@@ -91,7 +92,7 @@ func TestGuardNoPanicReturnsFalse(t *testing.T) {
 	is := is.New(t)
 
 	ran := false
-	recovered := safetick.Guard(nil, "consumer", nil, func() {
+	recovered := safetick.Guard(context.Background(), nil, "consumer", nil, func() {
 		ran = true
 	})
 

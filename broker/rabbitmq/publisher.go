@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 	"uuid"
 
 	rmq "github.com/wagslane/go-rabbitmq"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 )
 
 // TopicMapper maps a transport-neutral (topic, key) pair to the RabbitMQ
@@ -34,7 +34,7 @@ func defaultTopicMapper(topic, key string) (exchange, routingKey string) {
 // publisher confirmation per publish, giving at-least-once delivery: Publish
 // returns nil only after the broker has durably accepted the message.
 type Publisher struct {
-	log    *logger.Logger
+	log    *slog.Logger
 	pub    *rmq.Publisher
 	source string
 	mapper TopicMapper
@@ -58,7 +58,7 @@ func WithTopicMapper(m TopicMapper) PublisherOption {
 
 // NewPublisher builds a confirm-mode publisher. source is the CloudEvents
 // source stamped on messages that don't carry their own.
-func NewPublisher(conn *Conn, source string, log *logger.Logger, opts ...PublisherOption) (*Publisher, error) {
+func NewPublisher(conn *Conn, source string, log *slog.Logger, opts ...PublisherOption) (*Publisher, error) {
 	if source == "" {
 		return nil, errors.New("rabbitmq: new publisher: source is required")
 	}

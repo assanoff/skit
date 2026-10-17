@@ -3,34 +3,70 @@ package logger
 import (
 	"context"
 	"log/slog"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
-// traceHandler is a slog.Handler middleware that injects a trace_id attribute
-// (resolved from the context via fn) into every record. Installing it at the
-// handler layer means the trace id appears regardless of how the record is
-// produced — through *Logger or through a plain *slog.Logger obtained from
-// Slog() — keeping logs consistent across the app and any third-party
-// middleware sharing the handler.
+// traceHandler is a slog.Handler middleware that adds trace_id, span_id and
+// trace_flags from the span context in ctx to every record whose context
+// carries a valid one. The fields always land at the top level of the record,
+// so a collector finds them under WithGroup too.
+//
+// Attributes added before the first WithGroup go straight to next, which keeps
+// their pre-rendered form. From the first WithGroup on, the steps are kept here
+// and folded into the record in Handle: next never sees the groups, and the
+// trace fields are added outside them.
 type traceHandler struct {
-	slog.Handler
+	next slog.Handler
+	goas []groupOrAttrs // steps from the first WithGroup on
+}
 
-	fn TraceIDFn
+func (h *traceHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.next.Enabled(ctx, level)
 }
 
 func (h *traceHandler) Handle(ctx context.Context, r slog.Record) error {
-	if h.fn != nil {
-		if id := h.fn(ctx); id != "" {
-			r = r.Clone()
-			r.AddAttrs(slog.String("trace_id", id))
-		}
+	sc := trace.SpanContextFromContext(ctx)
+	if len(h.goas) > 0 {
+		r = foldRecord(h.goas, r)
 	}
-	return h.Handler.Handle(ctx, r)
+	if sc.IsValid() {
+		r = r.Clone()
+		r.AddAttrs(
+			slog.String("trace_id", sc.TraceID().String()),
+			slog.String("span_id", sc.SpanID().String()),
+			slog.String("trace_flags", sc.TraceFlags().String()),
+		)
+	}
+	return h.next.Handle(ctx, r)
 }
 
 func (h *traceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &traceHandler{Handler: h.Handler.WithAttrs(attrs), fn: h.fn}
+	if len(attrs) == 0 {
+		return h
+	}
+	if len(h.goas) == 0 {
+		return &traceHandler{next: h.next.WithAttrs(attrs)}
+	}
+	return &traceHandler{next: h.next, goas: appendGOA(h.goas, groupOrAttrs{attrs: attrs})}
 }
 
 func (h *traceHandler) WithGroup(name string) slog.Handler {
-	return &traceHandler{Handler: h.Handler.WithGroup(name), fn: h.fn}
+	if name == "" {
+		return h
+	}
+	return &traceHandler{next: h.next, goas: appendGOA(h.goas, groupOrAttrs{group: name})}
+}
+
+// foldRecord returns a copy of r whose attributes are nested in the kept
+// WithGroup/WithAttrs steps, as next would have nested them.
+func foldRecord(goas []groupOrAttrs, r slog.Record) slog.Record {
+	own := make([]slog.Attr, 0, r.NumAttrs())
+	r.Attrs(func(a slog.Attr) bool {
+		own = append(own, a)
+		return true
+	})
+	out := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	out.AddAttrs(foldGOA(goas, own)...)
+	return out
 }

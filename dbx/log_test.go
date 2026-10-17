@@ -1,0 +1,79 @@
+package dbx
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"path/filepath"
+	"testing"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/matryer/is"
+)
+
+// execStub is a sqlx.ExtContext whose ExecContext returns err; the query
+// methods are never reached by the exec helpers.
+type execStub struct {
+	sqlx.ExtContext
+
+	err error
+}
+
+func (execStub) DriverName() string { return "pgx" }
+
+func (execStub) Rebind(q string) string { return q }
+
+func (s execStub) ExecContext(context.Context, string, ...any) (sql.Result, error) {
+	return nil, s.err
+}
+
+func jsonLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{AddSource: true}))
+}
+
+func TestExecLogsOnlyFailures(t *testing.T) {
+	is := is.New(t)
+	ctx := t.Context()
+	var buf bytes.Buffer
+	log := jsonLogger(&buf)
+
+	is.NoErr(NamedExecContext(ctx, log, execStub{}, "UPDATE t SET a = 1", struct{}{}))
+	is.Equal(buf.Len(), 0) // a successful statement is not logged
+
+	boom := errors.New("boom")
+	err := NamedExecContext(ctx, log, execStub{err: boom}, "UPDATE t SET a = 1", struct{}{})
+	is.True(errors.Is(err, boom))
+
+	var rec struct {
+		Level  string
+		Msg    string
+		Query  string
+		Err    string
+		Source struct{ Function, File string }
+	}
+	is.NoErr(json.Unmarshal(buf.Bytes(), &rec))
+	is.Equal(rec.Level, "INFO")
+	is.Equal(rec.Msg, "dbx.exec")
+	is.Equal(rec.Query, "UPDATE t SET a = 1")
+	is.Equal(rec.Err, "boom")
+	is.Equal(filepath.Base(rec.Source.File), "log_test.go") // the caller, not dbx
+	is.Equal(rec.Source.Function, "github.com/assanoff/skit/dbx.TestExecLogsOnlyFailures")
+}
+
+func TestLogQuerySkipsNotFound(t *testing.T) {
+	is := is.New(t)
+	var buf bytes.Buffer
+
+	err := logQuery(t.Context(), jsonLogger(&buf), 0, "dbx.query", "SELECT 1", nil, ErrDBNotFound)
+	is.Equal(err, ErrDBNotFound)
+	is.Equal(buf.Len(), 0) // "no rows" is an ordinary outcome
+}
+
+func TestLogQueryNilLogger(t *testing.T) {
+	is := is.New(t)
+	boom := errors.New("boom")
+	is.Equal(logQuery(t.Context(), nil, 0, "dbx.query", "SELECT 1", nil, boom), boom)
+}

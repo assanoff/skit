@@ -10,11 +10,11 @@ package events
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/outbox"
 	"github.com/assanoff/skit/worker"
 )
@@ -22,7 +22,7 @@ import (
 // NewStore builds the outbox Store and provisions its table if absent (advisory
 // -lock guarded, so replicas booting together do not race). Call once at
 // startup.
-func NewStore(ctx context.Context, log *logger.Logger, db *sqlx.DB) (*outbox.PG, error) {
+func NewStore(ctx context.Context, log *slog.Logger, db *sqlx.DB) (*outbox.PG, error) {
 	s := outbox.NewPG(log, db, outbox.Options{})
 	if err := s.EnsureSchema(ctx); err != nil {
 		return nil, err
@@ -50,6 +50,6 @@ func NewRegistry() (*outbox.Registry, error) {
 // Add the returned *worker.Loop to the service's runnable group. pub is the
 // transport publisher (rabbitmq.NewPublisher / kafka.NewPublisher) — passed in
 // from wiring so this file stays transport-agnostic.
-func NewRelay(log *logger.Logger, store outbox.Store, pub broker.Publisher) *worker.Loop {
+func NewRelay(log *slog.Logger, store outbox.Store, pub broker.Publisher) *worker.Loop {
 	return outbox.NewRelay(log, store, pub, outbox.RelayConfig{})
 }

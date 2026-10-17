@@ -162,7 +162,7 @@ func (l *Loop) growIdle(cur time.Duration) time.Duration {
 func (l *Loop) Stop(context.Context) error { return nil }
 
 func (l *Loop) runTick(ctx context.Context) {
-	defer safetick.RecoverTick(l.log, l.cfg.Name, l.cfg.OnPanic)
+	defer safetick.RecoverTick(ctx, l.log, l.cfg.Name, l.cfg.OnPanic)
 
 	tickCtx, cancel := l.tickContext(ctx)
 	if cancel != nil {
@@ -170,12 +170,12 @@ func (l *Loop) runTick(ctx context.Context) {
 	}
 
 	if err := l.tick(tickCtx); err != nil && l.log != nil {
-		l.log.Error("worker tick error", "worker", l.cfg.Name, "err", err)
+		l.log.ErrorContext(ctx, "worker tick error", "worker", l.cfg.Name, "err", err)
 	}
 }
 
 func (l *Loop) runPacedTick(ctx context.Context) (pace Pace) {
-	defer safetick.RecoverTick(l.log, l.cfg.Name, l.cfg.OnPanic)
+	defer safetick.RecoverTick(ctx, l.log, l.cfg.Name, l.cfg.OnPanic)
 
 	tickCtx, cancel := l.tickContext(ctx)
 	if cancel != nil {
@@ -184,7 +184,7 @@ func (l *Loop) runPacedTick(ctx context.Context) (pace Pace) {
 
 	p, err := l.paced(tickCtx)
 	if err != nil && l.log != nil {
-		l.log.Error("worker tick error", "worker", l.cfg.Name, "err", err)
+		l.log.ErrorContext(ctx, "worker tick error", "worker", l.cfg.Name, "err", err)
 	}
 	return p
 }

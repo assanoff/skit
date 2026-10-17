@@ -12,7 +12,6 @@ import (
 
 	skconfig "github.com/assanoff/skit/config"
 	"github.com/assanoff/skit/logger"
-	skotel "github.com/assanoff/skit/otel"
 
 	"{{.Module}}/internal/app/config"
 )
@@ -43,6 +42,7 @@ func Execute() int {
 
 	const envFile = ".env"
 	if _, err := os.Stat(envFile); errors.Is(err, os.ErrNotExist) {
+		//nolint:sloglint // the app logger needs the parsed config and does not exist yet
 		slog.Warn("no .env file found; starting on defaults and process environment", "file", envFile)
 	}
 
@@ -58,15 +58,15 @@ func Execute() int {
 
 // buildLogger builds the structured logger shared by the subcommands and routes
 // the global slog (used by dim/closer for init/shutdown logs) through it.
-func buildLogger(cfg config.ServerOpts) *logger.Logger {
+func buildLogger(cfg config.ServerOpts) *slog.Logger {
 	log := logger.New(os.Stdout, logger.Config{
 		Service:   cfg.Service,
+		Version:   version,
 		Level:     parseLevel(cfg.LogLevel),
 		AddSource: true,
-		TraceIDFn: skotel.GetTraceID,
 		// Fire a side effect on ERROR (alerting, Sentry, ...) without changing
-		// stdout logging. The record carries service, trace_id and any
-		// With/Named attributes. Keep it fast — offload slow work.
+		// stdout logging. The record carries service.*, the trace fields and
+		// any With attributes. Keep it fast — offload slow work.
 		//
 		// Events: logger.Events{
 		// 	Error: func(ctx context.Context, r slog.Record) {
@@ -74,7 +74,7 @@ func buildLogger(cfg config.ServerOpts) *logger.Logger {
 		// 	},
 		// },
 	})
-	slog.SetDefault(log.Slog())
+	slog.SetDefault(log)
 	return log
 }
 

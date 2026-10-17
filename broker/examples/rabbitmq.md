@@ -1,8 +1,5 @@
 # broker + RabbitMQ: импорты и использование
 
-> Показано **целевое** состояние после ломающего релиза (`research-mods.md` §3): логгер —
-> `*slog.Logger`. Сегодня адаптеры принимают `*logger.Logger`.
-
 `broker` — интерфейсы, CloudEvents, `Guard`/`Process`; `broker/rabbitmq` и `broker/kafka` —
 адаптеры. Друг друга адаптеры не импортируют.
 

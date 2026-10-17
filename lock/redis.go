@@ -68,7 +68,7 @@ func (r *Redis) TryLock(ctx context.Context, key string, ttl time.Duration) (Rel
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := releaseScript.Run(rctx, r.client, []string{key}, token).Err(); err != nil && !errors.Is(err, redis.Nil) {
-			r.log.Warn("lock: redis release failed", "key", key, "error", err)
+			r.log.WarnContext(rctx, "lock: redis release failed", "key", key, "err", err)
 		}
 	}
 	return release, true, nil

@@ -5,9 +5,9 @@ package {{.Pkg}}
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/worker"
 )
 
@@ -16,12 +16,12 @@ const DefaultInterval = time.Minute
 
 // Worker runs one unit of periodic work per tick.
 type Worker struct {
-	log *logger.Logger
+	log *slog.Logger
 	// core *{{.Pkg}}core.Core // inject the domain core the tick drives
 }
 
 // New builds the {{.Pkg}} worker.
-func New(log *logger.Logger) *Worker {
+func New(log *slog.Logger) *Worker {
 	return &Worker{log: log}
 }
 
@@ -30,7 +30,7 @@ func New(log *logger.Logger) *Worker {
 // tick bounded and idempotent — it may run on every replica.
 func (w *Worker) Tick(ctx context.Context) error {
 	// TODO: one unit of periodic work, e.g. return w.core.Sweep(ctx)
-	w.log.Info(ctx, "{{.Pkg}} tick")
+	w.log.InfoContext(ctx, "{{.Pkg}} tick")
 	return nil
 }
 
@@ -40,7 +40,7 @@ func (w *Worker) Loop(interval time.Duration) *worker.Loop {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
-	return worker.NewLoop(w.log.Slog(), worker.LoopConfig{
+	return worker.NewLoop(w.log, worker.LoopConfig{
 		Name:     "{{.Pkg}}-worker",
 		Interval: interval,
 	}, w.Tick)

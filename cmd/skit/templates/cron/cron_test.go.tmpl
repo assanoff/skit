@@ -2,18 +2,17 @@ package {{.Pkg}}
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"testing"
 	{{if .Locked}}"time"
 {{end}}
 	"github.com/matryer/is"
-
-	{{if .Locked}}"github.com/assanoff/skit/lock"
-{{end}}	"github.com/assanoff/skit/logger"
-)
+{{if .Locked}}
+	"github.com/assanoff/skit/lock"
+{{end}})
 
 func newTestCron() *Cron {
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 	return New(log{{if .Locked}}, stubLocker{ok: true}{{end}})
 }
 
@@ -38,7 +37,7 @@ func (s stubLocker) TryLock(context.Context, string, time.Duration) (lock.Releas
 
 func TestGuardedSkipsWhenLockHeld(t *testing.T) {
 	is := is.New(t)
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 
 	c := New(log, stubLocker{ok: false})      // lock always held elsewhere
 	is.NoErr(c.guarded(context.Background()))  // skips cleanly, no error

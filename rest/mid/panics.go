@@ -2,11 +2,12 @@ package mid
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 
 	"github.com/assanoff/skit/errs"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 )
 
@@ -22,14 +23,15 @@ import (
 // handler) so the recovered error propagates back out through the rest of the
 // chain. It complements, not replaces, a transport-level panic recovery (e.g.
 // httplog) that guards raw handlers and other transport middleware.
-func Panics(log *logger.Logger) rest.MidFunc {
+func Panics(log *slog.Logger) rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) (resp rest.ResponseEncoder) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					if log != nil {
-						log.Error(ctx, "panic recovered",
-							"panic", rec, "stack", string(debug.Stack()),
+						log.ErrorContext(ctx, "panic recovered",
+							"err", fmt.Errorf("panic: %v", rec),
+							"exception.stacktrace", string(debug.Stack()),
 							"method", r.Method, "path", r.URL.Path)
 					}
 					resp = errs.Newf(errs.Internal, "internal server error").

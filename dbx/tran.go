@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/retry"
 )
 
@@ -75,14 +75,14 @@ func ExtContext(tx CommitRollbacker) (sqlx.ExtContext, error) {
 // error. fn must therefore be safe to run more than once: keep every side
 // effect inside the transaction and do not mutate captured state that the next
 // run depends on. Any other error returns at once.
-func WithinTran(ctx context.Context, log *logger.Logger, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
+func WithinTran(ctx context.Context, log *slog.Logger, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
 	cfg := retry.Config{
 		Backoff:    deadlockBackoff,
 		IsTerminal: func(err error) bool { return !IsDeadlock(err) },
 	}
 	if log != nil {
 		cfg.OnRetry = func(attempt int, err error) {
-			log.Warn(ctx, "dbx.tran.deadlock, retrying", "attempt", attempt, "err", err)
+			log.WarnContext(ctx, "dbx.tran.deadlock, retrying", "attempt", attempt, "err", err)
 		}
 	}
 	return retry.Do(ctx, cfg, func(ctx context.Context) error {
@@ -98,9 +98,9 @@ func IsDeadlock(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == deadlockDetected
 }
 
-func withinTran(ctx context.Context, log *logger.Logger, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
+func withinTran(ctx context.Context, log *slog.Logger, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
 	if log != nil {
-		log.Debug(ctx, "dbx.tran.begin")
+		log.DebugContext(ctx, "dbx.tran.begin")
 	}
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -114,7 +114,7 @@ func withinTran(ctx context.Context, log *logger.Logger, db *sqlx.DB, fn func(tx
 		}
 		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, errTxDone) {
 			if log != nil {
-				log.Error(ctx, "dbx.tran.rollback failed", "err", rbErr)
+				log.ErrorContext(ctx, "dbx.tran.rollback failed", "err", rbErr)
 			}
 		}
 	}()

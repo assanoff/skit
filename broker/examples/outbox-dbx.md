@@ -1,9 +1,8 @@
 # outbox + dbx + RabbitMQ: транзакции и события в сервисе
 
 > Пример к `research-mods.md` §6. Показано **целевое** состояние после ломающего релиза
-> (`research-mods.md` §3): логгер — `*slog.Logger`, транзакции открывает store, метрики —
-> реестр `metrics.New()` в `Deps` и поле `Metrics` в `Config` (§7). Сегодня `outbox` и `dbx`
-> принимают `*logger.Logger`, а outbox — набор `outbox.NewMetrics` и
+> (`research-mods.md` §3): транзакции открывает store, метрики — реестр `metrics.New()` в
+> `Deps` и поле `Metrics` в `Config` (§7). Сегодня у outbox — набор `outbox.NewMetrics` и
 > `outbox.NewBacklogCollector`. Транспорт — как в [rabbitmq.md](rabbitmq.md).
 
 ## 1. Импорты

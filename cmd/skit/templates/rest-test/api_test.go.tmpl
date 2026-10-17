@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +15,6 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 	"github.com/assanoff/skit/rest"
@@ -37,7 +36,7 @@ import (
 // newTestHandler builds the {{.Pkg}} handler over a mocked Store, so tests
 // exercise the transport + business logic without a database.
 func newTestHandler(store *mocks.StoreMock) *Handler {
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 	return New({{.Pkg}}core.NewCore(log, store))
 }
 

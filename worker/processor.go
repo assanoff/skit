@@ -172,7 +172,7 @@ func (p *Processor[T]) handleOne(ctx context.Context, item T) {
 	})
 
 	if markErr != nil && p.log != nil {
-		p.log.Error(
+		p.log.ErrorContext(ctx,
 			"processor mark failed",
 			"worker", p.cfg.Name,
 			"handle_err", handleErr,

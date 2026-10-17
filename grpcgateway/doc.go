@@ -20,7 +20,7 @@
 //	closer.Add(gw.Close) // release the dialed conn on shutdown
 //
 //	group.Add(httpserver.New(httpserver.Config{
-//		Name: "gateway-server", Addr: opts.Gateway.Addr, Logger: log.Slog(),
+//		Name: "gateway-server", Addr: opts.Gateway.Addr, Logger: log,
 //	}, gw))
 //
 // Because gw is an http.Handler, cross-cutting behavior (tracing, request

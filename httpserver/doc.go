@@ -15,10 +15,10 @@
 //		Name:            "rest-server",
 //		Addr:            ":8080",
 //		ShutdownTimeout: 10 * time.Second,
-//		Logger:          log.Slog(),
+//		Logger:          log,
 //	}, router)
 //
-//	grp := worker.NewGroup(log.Slog(), 10*time.Second)
+//	grp := worker.NewGroup(log, 10*time.Second)
 //	grp.Add(srv)          // alongside grpcserver.Server, debugsrv.Server, ...
 //	_ = grp.Run(ctx)
 //

@@ -2,7 +2,6 @@ package httpserver
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,7 +10,7 @@ import (
 )
 
 func quietLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestNewAppliesDefaults(t *testing.T) {

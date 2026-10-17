@@ -8,14 +8,13 @@ package tests
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/assanoff/skit/apitest"
 	"github.com/assanoff/skit/dbtest"
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 
 	"{{.Module}}/internal/app/config"
 	"{{.Module}}/internal/app/server"
@@ -31,7 +30,7 @@ func startup(ctx context.Context, t *testing.T) (*apitest.Server, *dbtest.Postgr
 
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{Migrations: migrations.FS})
 
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 	h, err := server.Handler(ctx, testOpts(pg.Config), log)
 	if err != nil {
 		t.Fatalf("build handler: %v", err)

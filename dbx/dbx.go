@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -12,8 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 	"github.com/jmoiron/sqlx"
-
-	"github.com/assanoff/skit/logger"
 )
 
 // Postgres error codes we translate into sentinel errors.
@@ -192,23 +191,25 @@ func StatusCheck(ctx context.Context, db *sqlx.DB) error {
 }
 
 // ExecContext runs a parameterless statement.
-func ExecContext(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string) error {
-	return NamedExecContext(ctx, log, db, query, struct{}{})
+func ExecContext(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string) error {
+	_, err := namedExec(ctx, db, query, struct{}{})
+	return logQuery(ctx, log, caller(), "dbx.exec", query, nil, err)
 }
 
 // NamedExecContext runs an INSERT/UPDATE/DELETE with named parameters bound from
-// data. It logs the expanded query and translates well-known Postgres errors.
-func NamedExecContext(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any) error {
-	_, err := namedExec(ctx, log, db, query, data)
-	return err
+// data. It translates well-known Postgres errors and logs a failed statement
+// with the expanded query.
+func NamedExecContext(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data any) error {
+	_, err := namedExec(ctx, db, query, data)
+	return logQuery(ctx, log, caller(), "dbx.exec", query, data, err)
 }
 
 // NamedExecContextRowsAffected is like NamedExecContext but returns the number
 // of affected rows.
-func NamedExecContextRowsAffected(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any) (int64, error) {
-	res, err := namedExec(ctx, log, db, query, data)
+func NamedExecContextRowsAffected(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data any) (int64, error) {
+	res, err := namedExec(ctx, db, query, data)
 	if err != nil {
-		return 0, err
+		return 0, logQuery(ctx, log, caller(), "dbx.exec", query, data, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
@@ -217,11 +218,7 @@ func NamedExecContextRowsAffected(ctx context.Context, log *logger.Logger, db sq
 	return n, nil
 }
 
-func namedExec(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any) (sql.Result, error) {
-	if log != nil {
-		log.Debug(ctx, "dbx.exec", "query", queryString(query, data))
-	}
-
+func namedExec(ctx context.Context, db sqlx.ExtContext, query string, data any) (sql.Result, error) {
 	res, err := sqlx.NamedExecContext(ctx, db, query, data)
 	if err != nil {
 		return nil, translateError(err)
@@ -231,16 +228,18 @@ func namedExec(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, quer
 
 // QueryStruct runs a parameterless query expected to return exactly one row and
 // scans it into dest (a pointer to a struct).
-func QueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, dest any) error {
-	return NamedQueryStruct(ctx, log, db, query, struct{}{}, dest)
+func QueryStruct(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, dest any) error {
+	err := namedQueryStruct(ctx, db, query, struct{}{}, dest)
+	return logQuery(ctx, log, caller(), "dbx.query", query, nil, err)
 }
 
 // NamedQueryStruct runs a named query expected to return exactly one row.
-func NamedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data, dest any) error {
-	if log != nil {
-		log.Debug(ctx, "dbx.query", "query", queryString(query, data))
-	}
+func NamedQueryStruct(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data, dest any) error {
+	err := namedQueryStruct(ctx, db, query, data, dest)
+	return logQuery(ctx, log, caller(), "dbx.query", query, data, err)
+}
 
+func namedQueryStruct(ctx context.Context, db sqlx.ExtContext, query string, data, dest any) error {
 	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
 	if err != nil {
 		return translateError(err)
@@ -262,16 +261,18 @@ func NamedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContex
 }
 
 // QuerySlice runs a parameterless query and scans all rows into *[]T.
-func QuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, dest *[]T) error {
-	return NamedQuerySlice(ctx, log, db, query, struct{}{}, dest)
+func QuerySlice[T any](ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, dest *[]T) error {
+	err := namedQuerySlice(ctx, db, query, struct{}{}, dest)
+	return logQuery(ctx, log, caller(), "dbx.query", query, nil, err)
 }
 
 // NamedQuerySlice runs a named query and scans all rows into *[]T.
-func NamedQuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest *[]T) error {
-	if log != nil {
-		log.Debug(ctx, "dbx.query", "query", queryString(query, data))
-	}
+func NamedQuerySlice[T any](ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data any, dest *[]T) error {
+	err := namedQuerySlice(ctx, db, query, data, dest)
+	return logQuery(ctx, log, caller(), "dbx.query", query, data, err)
+}
 
+func namedQuerySlice[T any](ctx context.Context, db sqlx.ExtContext, query string, data any, dest *[]T) error {
 	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
 	if err != nil {
 		return translateError(err)

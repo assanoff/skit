@@ -3,10 +3,10 @@ package outbox
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/assanoff/skit/broker"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/worker"
 )
 
@@ -42,7 +42,7 @@ type RelayConfig struct {
 // process dies after a successful publish but before MarkSent, the sweeper
 // returns the row to pending and the relay republishes it. Consumers dedupe on
 // the CloudEvents id.
-func NewRelay(log *logger.Logger, store Store, pub broker.Publisher, cfg RelayConfig) *worker.Loop {
+func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConfig) *worker.Loop {
 	if cfg.Name == "" {
 		cfg.Name = "outbox-relay"
 	}
@@ -57,7 +57,7 @@ func NewRelay(log *logger.Logger, store Store, pub broker.Publisher, cfg RelayCo
 	}
 
 	proc := worker.NewProcessor[Event](
-		log.Slog(),
+		log,
 		relaySource{store},
 		relayPublisher{pub: pub, m: cfg.Metrics},
 		relaySink{store},
@@ -69,7 +69,7 @@ func NewRelay(log *logger.Logger, store Store, pub broker.Publisher, cfg RelayCo
 			// MarkFailed, not by the error, so the classifier is a no-op.
 		},
 	)
-	return worker.NewPacedLoop(log.Slog(), worker.LoopConfig{
+	return worker.NewPacedLoop(log, worker.LoopConfig{
 		Name:               cfg.Name,
 		Interval:           cfg.PollInterval,
 		MaxIdleInterval:    cfg.MaxPollInterval,
@@ -136,7 +136,7 @@ type SweeperConfig struct {
 
 // NewSweeper builds the lease-reclaim worker as a worker.Loop. It returns
 // in_flight rows abandoned by a crashed relay back to pending.
-func NewSweeper(log *logger.Logger, store Store, cfg SweeperConfig) *worker.Loop {
+func NewSweeper(log *slog.Logger, store Store, cfg SweeperConfig) *worker.Loop {
 	if cfg.Name == "" {
 		cfg.Name = "outbox-sweeper"
 	}
@@ -154,7 +154,7 @@ func NewSweeper(log *logger.Logger, store Store, cfg SweeperConfig) *worker.Loop
 		cfg.Metrics.addSwept(n)
 		return err
 	}
-	return worker.NewLoop(log.Slog(), worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
+	return worker.NewLoop(log, worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
 }
 
 // CleanerConfig configures the Cleaner worker.
@@ -170,7 +170,7 @@ type CleanerConfig struct {
 
 // NewCleaner builds the retention worker as a worker.Loop. It deletes terminal
 // rows past the retention window to keep the table small.
-func NewCleaner(log *logger.Logger, store Store, cfg CleanerConfig) *worker.Loop {
+func NewCleaner(log *slog.Logger, store Store, cfg CleanerConfig) *worker.Loop {
 	if cfg.Name == "" {
 		cfg.Name = "outbox-cleaner"
 	}
@@ -185,7 +185,7 @@ func NewCleaner(log *logger.Logger, store Store, cfg CleanerConfig) *worker.Loop
 		cfg.Metrics.addCleaned(n)
 		return err
 	}
-	return worker.NewLoop(log.Slog(), worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
+	return worker.NewLoop(log, worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
 }
 
 // decodeHeaders parses the JSONB headers blob into a string map for transport,

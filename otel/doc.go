@@ -6,8 +6,8 @@
 // and samples with a parent-based ratio sampler that always drops excluded
 // routes (health/readiness probes) and anything started from a suppressed
 // context (see Suppress). InjectTracing seeds the request context
-// with the tracer and a guaranteed trace id, so GetTraceID — usable directly as
-// logger.TraceIDFn — makes every log line carry the active trace.
+// with the tracer and a guaranteed trace id, read back by GetTraceID. Package
+// logger correlates log lines with the trace on its own, from the span context.
 //
 // # Startup
 //
@@ -24,10 +24,6 @@
 //		return err
 //	}
 //	defer shutdown(context.Background())
-//
-//	log := logger.New(os.Stdout, logger.Config{
-//		Service: "myapp", TraceIDFn: otel.GetTraceID, // every line gets trace_id
-//	})
 //
 // # Per request
 //

@@ -72,8 +72,8 @@ func NewAsyncRecorder(core *Core, cfg AsyncConfig) *AsyncRecorder {
 		shards[i] = make(chan job, cfg.Buffer)
 	}
 	var log *slog.Logger
-	if core != nil && core.log != nil {
-		log = core.log.Slog()
+	if core != nil {
+		log = core.log
 	}
 	return &AsyncRecorder{
 		core:       core,
@@ -102,31 +102,31 @@ func (a *AsyncRecorder) Record(ctx context.Context, entry NewAuditLog) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if a.closing {
-		a.drop(entry)
+		a.drop(ctx, entry)
 		return
 	}
 	if a.cfg.BlockOnFull {
 		select {
 		case shard <- j:
 		case <-a.done: // shutting down: drop instead of blocking forever
-			a.drop(entry)
+			a.drop(ctx, entry)
 		}
 		return
 	}
 	select {
 	case shard <- j:
 	default:
-		a.drop(entry)
+		a.drop(ctx, entry)
 	}
 }
 
 // drop reports a discarded entry via OnDrop and the log.
-func (a *AsyncRecorder) drop(entry NewAuditLog) {
+func (a *AsyncRecorder) drop(ctx context.Context, entry NewAuditLog) {
 	if a.cfg.OnDrop != nil {
 		a.cfg.OnDrop(entry)
 	}
 	if a.log != nil {
-		a.log.Warn("auditlog: async entry dropped (buffer full or shutting down)",
+		a.log.WarnContext(ctx, "auditlog: async entry dropped (buffer full or shutting down)",
 			"model_type", entry.ModelType, "model_id", entry.ModelID)
 	}
 }
@@ -191,7 +191,7 @@ func (a *AsyncRecorder) drain(ctx context.Context, ch chan job) {
 }
 
 func (a *AsyncRecorder) write(j job) {
-	defer safetick.RecoverTick(a.log, "auditlog-async", nil)
+	defer safetick.RecoverTick(j.ctx, a.log, "auditlog-async", nil)
 	a.core.Record(j.ctx, j.entry)
 }
 

@@ -19,7 +19,7 @@ package grpctest
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"net"
 	"testing"
 
@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/assanoff/skit/grpcserver"
-	"github.com/assanoff/skit/logger"
 )
 
 // bufSize is the bufconn buffer; 1 MiB comfortably fits test messages.
@@ -52,8 +51,7 @@ type Server struct {
 func New(t *testing.T, svcs []grpcserver.Service, opts ...grpcserver.Option) *Server {
 	t.Helper()
 
-	log := logger.New(io.Discard, logger.Config{Service: "grpctest", Level: logger.LevelError})
-	srv := grpcserver.New(log, grpcserver.Config{}, opts...)
+	srv := grpcserver.New(slog.New(slog.DiscardHandler), grpcserver.Config{}, opts...)
 	srv.Install(svcs...)
 
 	lis := bufconn.Listen(bufSize)

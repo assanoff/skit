@@ -3,7 +3,7 @@ package tests
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -13,7 +13,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/matryer/is"
 
-	"github.com/assanoff/skit/logger"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 	"{{.Module}}/core/{{.Pkg}}/{{.Pkg}}db"
@@ -84,7 +83,7 @@ func Test_{{.Type}}(t *testing.T) {
 // the read endpoints have something to return.
 func insert{{.Type}}Seed(ctx context.Context, t *testing.T, db *sqlx.DB) {{.Pkg}}Seed {
 	t.Helper()
-	log := logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+	log := slog.New(slog.DiscardHandler)
 	store := {{.Pkg}}db.NewStore(log, db)
 
 	var sd {{.Pkg}}Seed

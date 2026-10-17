@@ -2,11 +2,11 @@ package outbox
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/metrics"
 )
 
@@ -122,7 +122,7 @@ type StatsReader interface {
 // collector.
 type BacklogCollector struct {
 	sr      StatsReader
-	log     *logger.Logger
+	log     *slog.Logger
 	timeout time.Duration
 
 	pending  *prometheus.Desc
@@ -144,7 +144,7 @@ func WithScrapeTimeout(d time.Duration) BacklogOption {
 }
 
 // NewBacklogCollector builds a backlog collector over sr. log may be nil.
-func NewBacklogCollector(sr StatsReader, log *logger.Logger, opts ...BacklogOption) *BacklogCollector {
+func NewBacklogCollector(sr StatsReader, log *slog.Logger, opts ...BacklogOption) *BacklogCollector {
 	desc := func(name, help string) *prometheus.Desc {
 		return prometheus.NewDesc(
 			prometheus.BuildFQName(metricsNamespace, metricsSubsystem, name), help, nil, nil,
@@ -182,7 +182,7 @@ func (c *BacklogCollector) Collect(ch chan<- prometheus.Metric) {
 	st, err := c.sr.Stats(ctx, time.Now().UTC())
 	if err != nil {
 		if c.log != nil {
-			c.log.Error(ctx, "outbox backlog collect failed", "err", err)
+			c.log.ErrorContext(ctx, "outbox backlog collect failed", "err", err)
 		}
 		return
 	}

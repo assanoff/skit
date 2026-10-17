@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"log/slog"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -12,10 +13,10 @@ import (
 // once at startup so every process records exactly what is running. When the
 // info is unavailable (e.g. `go run` without VCS stamping) it logs a warning
 // instead.
-func (l *Logger) BuildInfo(ctx context.Context) {
+func BuildInfo(ctx context.Context, log *slog.Logger) {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		l.Warn(ctx, "build info not available")
+		log.WarnContext(ctx, "build info not available")
 		return
 	}
 
@@ -36,7 +37,7 @@ func (l *Logger) BuildInfo(ctx context.Context) {
 
 	values = append(values, "goversion", info.GoVersion, "modversion", info.Main.Version)
 
-	l.Info(ctx, "build info", values...)
+	log.InfoContext(ctx, "build info", values...)
 }
 
 // quoteKey reports whether key must be quoted to be a valid log key.

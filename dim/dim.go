@@ -26,7 +26,7 @@ func NamedCleanup(name string, fn func() error) CleanupFunc {
 		if err := fn(); err != nil {
 			slog.Error("failed to close",
 				slog.String("resource", name),
-				slog.String("error", err.Error()),
+				slog.Any("err", err),
 			)
 			return err
 		}

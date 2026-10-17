@@ -3,6 +3,7 @@ package mid_test
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/errs"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 	"github.com/assanoff/skit/rest/mid"
 )
@@ -21,7 +21,7 @@ func TestErrorsLogs5xx(t *testing.T) {
 	is := is.New(t)
 
 	var buf bytes.Buffer
-	log := logger.New(&buf, logger.Config{Service: "test", Level: logger.LevelInfo})
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	got := run(mid.Errors(log), errs.Newf(errs.Internal, "db exploded"))
 	_, ok := got.(*errs.Error)
@@ -39,7 +39,7 @@ func TestErrorsSkips4xx(t *testing.T) {
 	is := is.New(t)
 
 	var buf bytes.Buffer
-	log := logger.New(&buf, logger.Config{Service: "test", Level: logger.LevelInfo})
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	got := run(mid.Errors(log), errs.Newf(errs.NotFound, "missing"))
 	_, ok := got.(*errs.Error)
@@ -53,7 +53,7 @@ func TestErrorsPassThroughSuccess(t *testing.T) {
 	is := is.New(t)
 
 	var buf bytes.Buffer
-	log := logger.New(&buf, logger.Config{Service: "test", Level: logger.LevelInfo})
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	got := run(mid.Errors(log), rest.JSON("ok"))
 	_, isErr := got.(*errs.Error)
@@ -67,7 +67,7 @@ func TestErrorsChainMasksAfterLog(t *testing.T) {
 	is := is.New(t)
 
 	var buf bytes.Buffer
-	log := logger.New(&buf, logger.Config{Service: "test", Level: logger.LevelInfo})
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	// outermost..innermost: MaskInternal, Errors
 	h := rest.ChainMiddleware(func(_ context.Context, _ *http.Request) rest.ResponseEncoder {

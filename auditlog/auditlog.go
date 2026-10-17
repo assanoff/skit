@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 )
 
 // Recorder records an audit entry best-effort (errors are handled internally, not
@@ -33,7 +33,7 @@ var ErrInvalidFilter = errors.New("invalid audit log query filter")
 // answers history/diff queries. It depends only on the Store interface declared
 // here; the Postgres implementation lives in the db subpackage.
 type Core struct {
-	log   *logger.Logger
+	log   *slog.Logger
 	store Store
 
 	// Opportunistic compaction: when autoCompactEvery > 0, Create compacts the
@@ -90,7 +90,7 @@ type ModelRef struct {
 }
 
 // NewCore constructs a Core over the given store. log may be nil.
-func NewCore(log *logger.Logger, store Store, opts ...Option) *Core {
+func NewCore(log *slog.Logger, store Store, opts ...Option) *Core {
 	c := &Core{log: log, store: store}
 	for _, opt := range opts {
 		opt(c)
@@ -277,7 +277,7 @@ func (c *Core) maybeAutoCompact(ctx context.Context, entry AuditLog) {
 		return
 	}
 	if _, err := c.Compact(ctx, entry.ModelType, entry.ModelID, c.autoCompactOpts); err != nil && c.log != nil {
-		c.log.Error(ctx, "auditlog: auto-compact failed",
+		c.log.ErrorContext(ctx, "auditlog: auto-compact failed",
 			"model_type", entry.ModelType, "model_id", entry.ModelID, "err", err)
 	}
 }
@@ -287,7 +287,7 @@ func (c *Core) maybeAutoCompact(ctx context.Context, entry AuditLog) {
 // response the user already received.
 func (c *Core) Record(ctx context.Context, entry NewAuditLog) {
 	if _, err := c.Create(ctx, entry); err != nil && c.log != nil {
-		c.log.Error(ctx, "auditlog: record failed",
+		c.log.ErrorContext(ctx, "auditlog: record failed",
 			"model_type", entry.ModelType, "model_id", entry.ModelID, "err", err)
 	}
 }

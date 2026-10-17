@@ -7,23 +7,23 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/translation"
 )
 
 // Store implements translation.Store against Postgres.
 type Store struct {
-	log *logger.Logger
+	log *slog.Logger
 	db  *sqlx.DB
 }
 
 // NewStore creates a Postgres-backed Store.
-func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
+func NewStore(log *slog.Logger, db *sqlx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 

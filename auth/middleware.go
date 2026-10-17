@@ -1,10 +1,10 @@
 package auth
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/assanoff/skit/errs"
-	"github.com/assanoff/skit/logger"
 )
 
 // Middleware is standard net/http middleware (composes with router.Use).
@@ -13,7 +13,7 @@ type Middleware func(http.Handler) http.Handler
 // Authenticate extracts a bearer token, verifies it, and stores the resulting
 // Principal in the request context. Requests without a valid token are rejected
 // with 401. log may be nil.
-func Authenticate(v Verifier, log *logger.Logger) Middleware {
+func Authenticate(v Verifier, log *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := BearerToken(r)
@@ -89,14 +89,14 @@ func RequireRole(roles ...string) Middleware {
 
 // writeErr renders an *errs.Error as a JSON response with its HTTP status,
 // matching the rest package's encoding.
-func writeErr(w http.ResponseWriter, r *http.Request, log *logger.Logger, e *errs.Error) {
+func writeErr(w http.ResponseWriter, r *http.Request, log *slog.Logger, e *errs.Error) {
 	body, contentType, encErr := e.Encode()
 	if encErr != nil {
 		http.Error(w, e.Message, e.HTTPStatus())
 		return
 	}
 	if log != nil {
-		log.Info(r.Context(), "auth: request rejected", "code", e.CodeStr, "detail", e.Message)
+		log.InfoContext(r.Context(), "auth: request rejected", "code", e.CodeStr, "detail", e.Message)
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(e.HTTPStatus())

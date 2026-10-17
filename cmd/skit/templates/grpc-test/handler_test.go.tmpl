@@ -2,7 +2,7 @@ package {{.Pkg}}grpc
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"testing"
 	"uuid"
 
@@ -14,7 +14,6 @@ import (
 	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/grpcserver"
 	"github.com/assanoff/skit/grpctest"
-	"github.com/assanoff/skit/logger"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 	"{{.Module}}/core/{{.Pkg}}/mocks"
@@ -32,8 +31,8 @@ import (
 //
 // Assertions use matryer/is; input uses gofakeit; one test function per case.
 
-func testLogger() *logger.Logger {
-	return logger.New(io.Discard, logger.Config{Service: "test", Level: logger.LevelError})
+func testLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }
 
 // newTestHandler builds the handler over a mocked Store for direct (unit) calls.

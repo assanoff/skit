@@ -4,9 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
-
-	"github.com/assanoff/skit/logger"
 )
 
 // Bus routes events to the handlers registered for each (domain, action). It is
@@ -14,13 +13,13 @@ import (
 // and handlers are snapshotted before they run so a handler may itself register
 // without deadlocking.
 type Bus struct {
-	log   *logger.Logger
+	log   *slog.Logger
 	mu    sync.RWMutex
 	funcs map[string]map[string][]Func
 }
 
 // New constructs an empty Bus. log may be nil to disable logging.
-func New(log *logger.Logger) *Bus {
+func New(log *slog.Logger) *Bus {
 	return &Bus{
 		log:   log,
 		funcs: make(map[string]map[string][]Func),
@@ -61,13 +60,13 @@ func (b *Bus) handlers(data Data) []Func {
 func (b *Bus) Call(ctx context.Context, data Data) error {
 	fns := b.handlers(data)
 	if b.log != nil {
-		b.log.Debug(ctx, "eventbus.call", "domain", data.Domain, "action", data.Action, "handlers", len(fns))
+		b.log.DebugContext(ctx, "eventbus.call", "domain", data.Domain, "action", data.Action, "handlers", len(fns))
 	}
 
 	for _, fn := range fns {
 		if err := fn(ctx, data); err != nil {
 			if b.log != nil {
-				b.log.Error(ctx, "eventbus.call handler failed", "domain", data.Domain, "action", data.Action, "err", err)
+				b.log.ErrorContext(ctx, "eventbus.call handler failed", "domain", data.Domain, "action", data.Action, "err", err)
 			}
 			return fmt.Errorf("eventbus: %s/%s: %w", data.Domain, data.Action, err)
 		}
@@ -82,14 +81,14 @@ func (b *Bus) Call(ctx context.Context, data Data) error {
 func (b *Bus) Publish(ctx context.Context, data Data) error {
 	fns := b.handlers(data)
 	if b.log != nil {
-		b.log.Debug(ctx, "eventbus.publish", "domain", data.Domain, "action", data.Action, "handlers", len(fns))
+		b.log.DebugContext(ctx, "eventbus.publish", "domain", data.Domain, "action", data.Action, "handlers", len(fns))
 	}
 
 	var errs []error
 	for _, fn := range fns {
 		if err := fn(ctx, data); err != nil {
 			if b.log != nil {
-				b.log.Error(ctx, "eventbus.publish handler failed", "domain", data.Domain, "action", data.Action, "err", err)
+				b.log.ErrorContext(ctx, "eventbus.publish handler failed", "domain", data.Domain, "action", data.Action, "err", err)
 			}
 			errs = append(errs, err)
 		}

@@ -5,6 +5,8 @@
 package deps
 
 import (
+	"log/slog"
+
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/trace"
@@ -13,7 +15,6 @@ import (
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/dim"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/outbox"
 
 	"{{.Module}}/internal/app/config"
@@ -24,7 +25,7 @@ import (
 // handlers, workers) as the service grows.
 type Deps struct {
 	Opts   config.ServerOpts
-	Logger *logger.Logger
+	Logger *slog.Logger
 
 	Tracer     dim.Provider[trace.Tracer]
 	DB         dim.Provider[*sqlx.DB]

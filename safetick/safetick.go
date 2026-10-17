@@ -1,6 +1,8 @@
 package safetick
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"runtime/debug"
 )
@@ -13,19 +15,19 @@ type PanicHandler func(worker, phase string)
 // invokes onPanic (if non-nil). Use it as a deferred call at the top of a tick:
 //
 //	func (w *W) tick(ctx context.Context) {
-//	    defer safetick.RecoverTick(w.log, "outbox-relay", w.onPanic)
+//	    defer safetick.RecoverTick(ctx, w.log, "outbox-relay", w.onPanic)
 //	    // ... work that must not crash the loop ...
 //	}
-func RecoverTick(log *slog.Logger, worker string, onPanic PanicHandler) {
+func RecoverTick(ctx context.Context, log *slog.Logger, worker string, onPanic PanicHandler) {
 	if r := recover(); r != nil { //nolint:revive // RecoverTick is itself the deferred call
 		if onPanic != nil {
 			onPanic(worker, "tick")
 		}
 		if log != nil {
-			log.Error("worker tick panic recovered",
+			log.ErrorContext(ctx, "worker tick panic recovered",
 				"worker", worker,
-				"panic", r,
-				"stack", string(debug.Stack()),
+				"err", fmt.Errorf("panic: %v", r),
+				"exception.stacktrace", string(debug.Stack()),
 			)
 		}
 	}
@@ -34,7 +36,7 @@ func RecoverTick(log *slog.Logger, worker string, onPanic PanicHandler) {
 // Guard runs fn and converts a panic into a (logged) no-op, returning true if a
 // panic was recovered. Handy when you need the recovered signal inline rather
 // than via defer.
-func Guard(log *slog.Logger, worker string, onPanic PanicHandler, fn func()) (recovered bool) {
+func Guard(ctx context.Context, log *slog.Logger, worker string, onPanic PanicHandler, fn func()) (recovered bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			recovered = true
@@ -42,8 +44,9 @@ func Guard(log *slog.Logger, worker string, onPanic PanicHandler, fn func()) (re
 				onPanic(worker, "guard")
 			}
 			if log != nil {
-				log.Error("guarded call panic recovered",
-					"worker", worker, "panic", r, "stack", string(debug.Stack()))
+				log.ErrorContext(ctx, "guarded call panic recovered",
+					"worker", worker, "err", fmt.Errorf("panic: %v", r),
+					"exception.stacktrace", string(debug.Stack()))
 			}
 		}
 	}()

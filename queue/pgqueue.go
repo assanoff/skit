@@ -3,13 +3,13 @@ package queue
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 	"uuid"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/worker"
 )
 
@@ -23,7 +23,7 @@ import (
 // coordinates consumers via FOR UPDATE SKIP LOCKED so each ready task is handed
 // to exactly one consumer at a time.
 type PG struct {
-	log          *logger.Logger
+	log          *slog.Logger
 	db           *sqlx.DB
 	leaseTimeout time.Duration
 	retryDelay   time.Duration
@@ -53,7 +53,7 @@ type Options struct {
 
 // NewPG builds a Postgres queue. It does not create the table; run a migration
 // with Schema() or call EnsureSchema (handy in tests).
-func NewPG(log *logger.Logger, db *sqlx.DB, opts Options) *PG {
+func NewPG(log *slog.Logger, db *sqlx.DB, opts Options) *PG {
 	lease := opts.LeaseTimeout
 	if lease <= 0 {
 		lease = 5 * time.Minute

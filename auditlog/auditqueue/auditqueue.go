@@ -21,7 +21,6 @@ import (
 
 	"github.com/assanoff/skit/auditlog"
 	"github.com/assanoff/skit/auditlog/auditbus"
-	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/queue"
 	"github.com/assanoff/skit/worker"
 )
@@ -32,11 +31,11 @@ const Kind = "auditlog.record"
 // Recorder enqueues audit entries onto a queue. It implements auditlog.Recorder.
 type Recorder struct {
 	q   queue.Queue
-	log *logger.Logger
+	log *slog.Logger
 }
 
 // NewRecorder builds a queue-backed recorder.
-func NewRecorder(q queue.Queue, log *logger.Logger) *Recorder {
+func NewRecorder(q queue.Queue, log *slog.Logger) *Recorder {
 	return &Recorder{q: q, log: log}
 }
 
@@ -67,7 +66,7 @@ func (r *Recorder) Record(ctx context.Context, entry auditlog.NewAuditLog) {
 
 func (r *Recorder) logErr(ctx context.Context, op string, entry auditlog.NewAuditLog, err error) {
 	if r.log != nil {
-		r.log.Error(ctx, "auditqueue: "+op+" failed",
+		r.log.ErrorContext(ctx, "auditqueue: "+op+" failed",
 			"model_type", entry.ModelType, "model_id", entry.ModelID, "err", err)
 	}
 }
@@ -98,28 +97,23 @@ type WorkerConfig struct {
 //
 // It returns an error only if wiring the Mux fails — which cannot happen here,
 // as the single registration uses a constant Kind and a non-nil handler.
-func NewWorker(q queue.Queue, core *auditlog.Core, log *logger.Logger, cfg WorkerConfig) (*worker.Loop, error) {
+func NewWorker(q queue.Queue, core *auditlog.Core, log *slog.Logger, cfg WorkerConfig) (*worker.Loop, error) {
 	batch := cfg.Batch
 	if batch <= 0 {
 		batch = 100
 	}
-	var sl *slog.Logger
-	if log != nil {
-		sl = log.Slog()
-	}
-
 	w := &Worker{core: core}
 	mux := queue.NewMux()
 	if err := mux.Register(Kind, w.handle); err != nil {
 		return nil, fmt.Errorf("auditqueue: new worker: %w", err)
 	}
 
-	proc := worker.NewProcessor[queue.Task](sl, q, mux, q, worker.ProcessorConfig{
+	proc := worker.NewProcessor[queue.Task](log, q, mux, q, worker.ProcessorConfig{
 		Name:       "auditlog-queue",
 		BatchSize:  batch,
 		IsTerminal: func(err error) bool { return errors.Is(err, errBadEvent) },
 	})
-	return worker.NewLoop(sl, worker.LoopConfig{
+	return worker.NewLoop(log, worker.LoopConfig{
 		Name:               "auditlog-queue",
 		Interval:           cfg.Interval,
 		ImmediateFirstTick: true,

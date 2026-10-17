@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -14,8 +15,6 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
-
-	"github.com/assanoff/skit/logger"
 )
 
 // Config configures the gRPC server.
@@ -54,7 +53,7 @@ type KeepaliveConfig struct {
 
 // Server wraps a *grpc.Server and implements worker.Runnable.
 type Server struct {
-	log    *logger.Logger
+	log    *slog.Logger
 	cfg    Config
 	gs     *grpc.Server
 	health *health.Server
@@ -93,7 +92,7 @@ func WithStreamInterceptors(in ...grpc.StreamServerInterceptor) Option {
 }
 
 // New builds a Server. Register services via ServiceRegistrar before Start.
-func New(log *logger.Logger, cfg Config, opts ...Option) *Server {
+func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
 	o := options{tracer: noop.NewTracerProvider().Tracer("grpc")}
 	for _, opt := range opts {
 		opt(&o)
@@ -224,7 +223,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("grpc server: listen %s: %w", s.cfg.Addr, err)
 	}
-	s.log.Info(ctx, "grpc server listening", "addr", s.cfg.Addr)
+	s.log.InfoContext(ctx, "grpc server listening", "addr", s.cfg.Addr)
 	return s.Serve(lis)
 }
 
@@ -242,7 +241,7 @@ func (s *Server) Serve(lis net.Listener) error {
 // shutdown timeout elapses.
 func (s *Server) Stop(ctx context.Context) error {
 	s.health.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
-	s.log.Info(ctx, "grpc server shutting down")
+	s.log.InfoContext(ctx, "grpc server shutting down")
 
 	done := make(chan struct{})
 	go func() {
