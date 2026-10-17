@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -159,8 +160,9 @@ func (c *Consumer) consume(ctx context.Context, r *kgo.Reader) {
 	for {
 		msg, err := r.FetchMessage(ctx)
 		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-				return // graceful shutdown
+			// Shutdown: ctx canceled, or Stop closed the reader (io.EOF).
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+				return
 			}
 			c.log.ErrorContext(ctx, "kafka consumer: fetch", "consumer", c.cfg.Name, "err", err)
 			continue

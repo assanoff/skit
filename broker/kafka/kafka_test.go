@@ -3,7 +3,9 @@ package kafka
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	kgo "github.com/segmentio/kafka-go"
 
@@ -85,5 +87,47 @@ func TestHeadersRoundTrip(t *testing.T) {
 	got := headers([]kgo.Header{{Key: "traceparent", Value: []byte("00-abc")}, {Key: "x", Value: []byte("y")}})
 	if got["traceparent"] != "00-abc" || got["x"] != "y" {
 		t.Errorf("headers round-trip wrong: %v", got)
+	}
+}
+
+// countHandler counts the records it handles.
+type countHandler struct {
+	slog.Handler
+
+	n *atomic.Int64
+}
+
+func (h countHandler) Handle(context.Context, slog.Record) error {
+	h.n.Add(1)
+	return nil
+}
+
+// TestConsumeReturnsWhenReaderClosed checks that consume returns once Stop has
+// closed the reader, even while ctx is still live: FetchMessage then reports
+// io.EOF, which is a shutdown, not a fetch error to log and retry.
+func TestConsumeReturnsWhenReaderClosed(t *testing.T) {
+	var logged atomic.Int64
+	log := slog.New(countHandler{Handler: slog.DiscardHandler, n: &logged})
+	c, err := NewConsumer(ConsumerConfig{Brokers: []string{"127.0.0.1:1"}, Topic: "t", GroupID: "g"}, log, noopHandler)
+	if err != nil {
+		t.Fatalf("NewConsumer: %v", err)
+	}
+	r := kgo.NewReader(kgo.ReaderConfig{Brokers: []string{"127.0.0.1:1"}, Topic: "t"})
+	if err := r.Close(); err != nil {
+		t.Fatalf("close reader: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.consume(t.Context(), r)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consume kept fetching from a closed reader")
+	}
+	if n := logged.Load(); n != 0 {
+		t.Errorf("logged %d records for a closed reader, want 0", n)
 	}
 }
