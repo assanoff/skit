@@ -2,6 +2,23 @@
 
 skit ([S]ervice [KIT]) Go SDK (software development kit) for building production web services that speak **REST and/or gRPC**, backed by Postgres, with first-class observability (slog + OpenTelemetry traces + Prometheus metrics), reliable background workers, and a transactional outbox.
 
+**OpenTelemetry compliant.** Services built with skit follow the conventions of
+[OpenTelemetry Go](https://github.com/open-telemetry/opentelemetry-go):
+
+- traces are recorded with the OpenTelemetry Go SDK and exported over OTLP;
+- the SDK is configured with the `OTEL_*` environment variables of the
+  specification (`OTEL_TRACES_EXPORTER`, `OTEL_TRACES_SAMPLER`,
+  `OTEL_EXPORTER_OTLP_*`, `OTEL_RESOURCE_ATTRIBUTES`);
+- trace context is propagated as W3C TraceContext (`traceparent`, `tracestate`)
+  over HTTP, gRPC and outbox/broker messages;
+- server spans come from the official instrumentation (otelhttp, otelgrpc);
+  span names, attributes and the Resource (`service.*`,
+  `deployment.environment.name`, `telemetry.sdk.*`) follow the semantic
+  conventions;
+- every log record carries `trace_id`, `span_id` and `trace_flags` of its span.
+
+Metrics are exposed in the Prometheus format.
+
 This is NOT a framework.
 It is just a building block for production-ready applications in Go.
 
