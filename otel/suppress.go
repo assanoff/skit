@@ -4,8 +4,8 @@ import "context"
 
 // Suppress marks ctx as "do not trace anything started from here". Spans started
 // with a suppressed context — and their children — are dropped by the sampler
-// InitTracing installs: they are neither recorded nor exported, so the cost is
-// one context value and one no-op span object per call.
+// otel/setup installs: they are neither recorded nor exported, so the cost is
+// one context value and one non-recording span per call.
 //
 // Intended for background tick loops (pollers, outbox relays, sweepers,
 // cleaners). Their poll/lease/cleanup queries fire every few seconds, carry no
@@ -15,9 +15,8 @@ import "context"
 //
 // Suppression is inherited by every context derived from a suppressed one, so
 // nothing below the tick is traced either. When a tick does find work worth
-// tracing, start that span from context.Background() (carrying the tick's span
-// context as a link if there is one) rather than deriving it from the suppressed
-// context — see the "Suppressing background traces" section of the package doc.
+// tracing, lift it for that work with Unsuppress — see the "Suppressing
+// background traces" section of the package doc.
 //
 // Deliberately explicit at the call site: a name-based rule in the sampler
 // ("drop parentless postgres: … spans") looks equivalent but goes silently
@@ -25,6 +24,15 @@ import "context"
 // one-shot CLI commands produce, since none of them opens a root span.
 func Suppress(ctx context.Context) context.Context {
 	return context.WithValue(ctx, suppressKey, true)
+}
+
+// Unsuppress lifts Suppress for ctx and the contexts derived from it. A tick
+// calls it for each item worth tracing, together with the item's own trace
+// context (ExtractFromCarrier) or trace.WithNewRoot. The sampler sees the
+// parent context with all its values even for a new root, so the mark must be
+// lifted rather than left behind.
+func Unsuppress(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressKey, false)
 }
 
 // IsSuppressed reports whether ctx, or any context it was derived from, went

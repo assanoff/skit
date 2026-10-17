@@ -24,6 +24,18 @@ func TestSuppressIsInherited(t *testing.T) {
 	is.True(IsSuppressed(child)) // every derived context stays suppressed
 }
 
+func TestUnsuppressLiftsInheritedMark(t *testing.T) {
+	is := is.New(t)
+
+	ctx := Unsuppress(Suppress(t.Context()))
+	is.True(!IsSuppressed(ctx)) // lifted
+
+	child, cancel := context.WithCancel(ctx)
+	defer cancel()
+	is.True(!IsSuppressed(child))          // for the derived contexts too
+	is.True(IsSuppressed(Suppress(child))) // and can be set again
+}
+
 func TestEndpointExcluderDropsSuppressed(t *testing.T) {
 	is := is.New(t)
 
