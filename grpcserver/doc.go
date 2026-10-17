@@ -1,24 +1,32 @@
 // Package grpcserver bootstraps a gRPC server with the SDK's cross-cutting
 // concerns and exposes it as a worker.Runnable.
 //
-// It applies the same chain of unary interceptors as the REST stack — panic
-// recovery, trace-id injection (extracting inbound W3C trace context from gRPC
-// metadata), structured access logging, Prometheus metrics, and errs->status
-// mapping — then registers a health service and, optionally, server reflection.
-// Because Server implements worker.Runnable (Name/Start/Stop), it is supervised
-// alongside the HTTP server and background workers.
+// It opens a server span per RPC (otelgrpc), then applies the same chain of
+// unary interceptors as the REST stack — panic recovery, structured access
+// logging, Prometheus metrics, and errs->status mapping — and registers a
+// health service and, optionally, server reflection. Because Server implements
+// worker.Runnable (Name/Start/Stop), it is supervised alongside the HTTP server
+// and background workers.
 //
-// Interceptor order is recovery (outermost) -> trace -> logging -> metrics ->
-// errormap -> application interceptors -> handler, so logging and metrics
-// observe the already-mapped status code.
+// Interceptor order is recovery (outermost) -> logging -> metrics -> errormap
+// -> application interceptors -> handler, so logging and metrics observe the
+// already-mapped status code.
+//
+// # Tracing
+//
+// The server span is opened before the interceptors, so every interceptor and
+// the handler run inside it and their log records carry its trace id. It
+// continues the W3C trace context of the request metadata. Health checks,
+// reflection and methods the server does not serve get no span: a scanner
+// cannot fill the trace UI with spans of made-up names.
 //
 // # Usage
 //
 //	srv := grpcserver.New(log, grpcserver.Config{
 //	    Addr:             ":9090",
 //	    EnableReflection: true,
+//	    TracerProvider:   tp,
 //	},
-//	    grpcserver.WithTracer(tracer),
 //	    grpcserver.WithMetrics(m.Registry),
 //	)
 //	srv.Install(handler) // each feature's Register owns its RegisterXxxServer call
@@ -33,6 +41,7 @@
 //   - ShutdownTimeout: bounds graceful drain before a hard stop (default 10s).
 //   - EnableReflection: turns on server reflection (handy for grpcurl in dev).
 //   - MetricsNamespace: prefixes the gRPC metric names (default "grpc").
+//   - TracerProvider: records the server spans; nil → the global provider.
 //   - MaxRecvMsgSize / MaxSendMsgSize: override the 4 MiB defaults.
 //   - NumStreamWorkers: stream-serving tuning (shared write buffers are
 //     gRPC's default since v1.84).
@@ -41,7 +50,6 @@
 //
 // # Options
 //
-//   - WithTracer(t): tracer used for trace-id injection (defaults to a no-op).
 //   - WithMetrics(reg): registers gRPC request count/latency collectors on reg
 //     (typically the shared metrics.Metrics.Registry).
 //   - WithUnaryInterceptors(in...): appends application interceptors, applied

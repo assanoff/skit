@@ -12,7 +12,7 @@
 //
 // Usage:
 //
-//	srv := grpctest.New(t, handler) // handler implements grpcserver.Service
+//	srv := grpctest.New(t, grpcserver.Config{}, []grpcserver.Service{handler})
 //	client := widgetv1.NewWidgetServiceClient(srv.Conn)
 //	resp, err := client.GetWidget(ctx, &widgetv1.GetWidgetRequest{Id: id})
 package grpctest
@@ -45,13 +45,14 @@ type Server struct {
 
 // New starts an in-memory gRPC server with svcs registered (each is a
 // grpcserver.Service — the Register seam the scaffolded handler implements) and
-// returns a Server whose Conn dials it over bufconn. opts are forwarded to
-// grpcserver.New, e.g. grpcserver.WithUnaryInterceptors(authMW) to test an
-// interceptor. The server and connection are torn down via t.Cleanup.
-func New(t *testing.T, svcs []grpcserver.Service, opts ...grpcserver.Option) *Server {
+// returns a Server whose Conn dials it over bufconn. cfg and opts are forwarded
+// to grpcserver.New: cfg.TracerProvider records the spans of a test,
+// grpcserver.WithUnaryInterceptors(authMW) adds an interceptor under test. The
+// server and connection are torn down via t.Cleanup.
+func New(t *testing.T, cfg grpcserver.Config, svcs []grpcserver.Service, opts ...grpcserver.Option) *Server {
 	t.Helper()
 
-	srv := grpcserver.New(slog.New(slog.DiscardHandler), grpcserver.Config{}, opts...)
+	srv := grpcserver.New(slog.New(slog.DiscardHandler), cfg, opts...)
 	srv.Install(svcs...)
 
 	lis := bufconn.Listen(bufSize)

@@ -9,7 +9,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -27,6 +26,9 @@ type Config struct {
 	EnableReflection bool
 	// MetricsNamespace prefixes the gRPC metric names (default "grpc").
 	MetricsNamespace string
+	// TracerProvider records a server span per RPC (otelgrpc); nil → the global
+	// provider.
+	TracerProvider trace.TracerProvider
 
 	// --- performance / tuning ---
 
@@ -53,14 +55,14 @@ type KeepaliveConfig struct {
 
 // Server wraps a *grpc.Server and implements worker.Runnable.
 type Server struct {
-	log    *slog.Logger
-	cfg    Config
-	gs     *grpc.Server
-	health *health.Server
+	log     *slog.Logger
+	cfg     Config
+	gs      *grpc.Server
+	health  *health.Server
+	methods *methodSet
 }
 
 type options struct {
-	tracer      trace.Tracer
 	registry    prometheus.Registerer
 	unaryExtra  []grpc.UnaryServerInterceptor
 	streamExtra []grpc.StreamServerInterceptor
@@ -68,11 +70,6 @@ type options struct {
 
 // Option customizes the server.
 type Option func(*options)
-
-// WithTracer sets the tracer used for trace-id injection. Defaults to a no-op.
-func WithTracer(t trace.Tracer) Option {
-	return func(o *options) { o.tracer = t }
-}
 
 // WithMetrics registers gRPC collectors on reg (e.g. metrics.Metrics.Registry).
 func WithMetrics(reg prometheus.Registerer) Option {
@@ -93,7 +90,7 @@ func WithStreamInterceptors(in ...grpc.StreamServerInterceptor) Option {
 
 // New builds a Server. Register services via ServiceRegistrar before Start.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
-	o := options{tracer: noop.NewTracerProvider().Tracer("grpc")}
+	var o options
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -106,12 +103,13 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
 		m = newRPCMetrics(cfg.MetricsNamespace, o.registry)
 	}
 
-	// Order: recovery (outermost) -> trace -> logging -> metrics -> errormap
-	// (innermost) -> app interceptors -> handler. logging/metrics observe the
-	// already-mapped status code.
+	// Order: recovery (outermost) -> logging -> metrics -> errormap (the
+	// innermost built-in) -> app interceptors -> handler. logging/metrics observe
+	// the status code errormap already mapped; app interceptors see the
+	// handler's own error. The server span is opened before the chain, by the stats
+	// handler, so every interceptor runs inside it.
 	chain := []grpc.UnaryServerInterceptor{
 		recoveryUnary(log),
-		traceUnary(o.tracer),
 		loggingUnary(log),
 	}
 	if m != nil {
@@ -120,11 +118,10 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
 	chain = append(chain, errorMapUnary())
 	chain = append(chain, o.unaryExtra...)
 
-	// Same order for streams: recovery -> trace -> logging -> metrics -> errormap
+	// Same order for streams: recovery -> logging -> metrics -> errormap
 	// (innermost) -> app interceptors -> handler.
 	schain := []grpc.StreamServerInterceptor{
 		recoveryStream(log),
-		traceStream(o.tracer),
 		loggingStream(log),
 	}
 	if m != nil {
@@ -133,7 +130,9 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
 	schain = append(schain, errorMapStream())
 	schain = append(schain, o.streamExtra...)
 
+	methods := new(methodSet)
 	serverOpts := append([]grpc.ServerOption{
+		grpc.StatsHandler(serverSpans(cfg.TracerProvider, methods)),
 		grpc.ChainUnaryInterceptor(chain...),
 		grpc.ChainStreamInterceptor(schain...),
 	}, buildTuningOptions(cfg)...)
@@ -146,7 +145,7 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
 		reflection.Register(gs)
 	}
 
-	return &Server{log: log, cfg: cfg, gs: gs, health: h}
+	return &Server{log: log, cfg: cfg, gs: gs, health: h, methods: methods}
 }
 
 // buildTuningOptions translates the performance fields of Config into gRPC
@@ -230,6 +229,7 @@ func (s *Server) Start(ctx context.Context) error {
 // Serve serves on the provided listener until Stop. It is useful for tests
 // (e.g. a bufconn listener) and for callers that manage their own listener.
 func (s *Server) Serve(lis net.Listener) error {
+	s.methods.load(s.gs)
 	s.health.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	if err := s.gs.Serve(lis); err != nil {
 		return fmt.Errorf("grpc server: serve: %w", err)

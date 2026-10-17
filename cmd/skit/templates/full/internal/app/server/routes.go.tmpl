@@ -1,12 +1,9 @@
 package server
 
 import (
-	"cmp"
 	"context"
 	"log/slog"
 	"net/http"
-
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/assanoff/skit/httplog"
 	"github.com/assanoff/skit/middleware"
@@ -22,10 +19,11 @@ import (
 // Feature handlers register via their Routes(handle) method using the handle
 // seam, so they never depend on the router type.
 func Install(ctx context.Context, a *App, r *router.Router) {
-	handle := requestChain(ctx, a, r).HandleApp
+	handle := requestChain(a, r).HandleApp
 
 	// Sample route — replace with your domain handlers, e.g.:
 	//   a.d.WalletHandler(ctx).Routes(handle)
+	_ = ctx // resolves the handlers, as in the example above
 	handle("GET /hello", hello)
 }
 
@@ -34,18 +32,13 @@ func Install(ctx context.Context, a *App, r *router.Router) {
 // body-size limit. It wraps the business routes only, so the technical sets
 // mounted next to them stay out of the access log, the HTTP metrics and the
 // traces, and a long pprof profile is not cut off by the request timeout.
-func requestChain(ctx context.Context, a *App, r *router.Router) *router.Router {
+func requestChain(a *App, r *router.Router) *router.Router {
 	d := a.d
 	return r.With(
-		// otelhttp opens the server span of every business request, named after
-		// the route ("GET /hello"), and records its status. The span is
-		// otelhttp's: nothing below it ends the span.
-		otelhttp.NewMiddleware("http.server", otelhttp.WithSpanNameFormatter(spanName)),
-		// TraceRequest continues that span — it does not re-extract the headers
-		// over it — stores the tracer for otel.AddSpan, puts the trace_id the
-		// access log carries into the context and returns the span's
-		// traceparent with the response.
-		middleware.TraceRequest(d.Tracer(ctx)),
+		// Trace opens the server span of every business request, named after
+		// the route ("GET /hello"), and returns its traceparent. Everything below
+		// runs inside it: the access log lines carry its trace id.
+		middleware.Trace(middleware.TraceConfig{TracerProvider: d.TracerProvider}),
 		// RecoverPanics turns a panic below the logger into a 500 with the
 		// panic as its error, so the access log and the server span record it;
 		// the root recoverer (see handler) only sees what escapes this chain.
@@ -58,12 +51,6 @@ func requestChain(ctx context.Context, a *App, r *router.Router) *router.Router 
 		middleware.Timeout(d.Opts.HTTP.RequestTimeout),
 		middleware.SizeLimit(d.Opts.HTTP.BodySizeLimit),
 	)
-}
-
-// spanName names the server span after the matched route, so traces group by
-// endpoint rather than by a raw path with ids in it.
-func spanName(operation string, r *http.Request) string {
-	return cmp.Or(r.Pattern, operation)
 }
 
 func hello(_ context.Context, _ *http.Request) rest.ResponseEncoder {

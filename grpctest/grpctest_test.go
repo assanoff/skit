@@ -19,7 +19,7 @@ import (
 func TestServesOverBufconn(t *testing.T) {
 	is := is.New(t)
 
-	srv := grpctest.New(t, nil) // no app services; just the built-in health server
+	srv := grpctest.New(t, grpcserver.Config{}, nil) // no app services; just the built-in health server
 	client := healthpb.NewHealthClient(srv.Conn)
 
 	resp, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{})
@@ -33,6 +33,6 @@ func TestServesOverBufconn(t *testing.T) {
 func TestForwardsServerOptions(t *testing.T) {
 	is := is.New(t)
 
-	srv := grpctest.New(t, []grpcserver.Service{}) // empty service slice is valid
+	srv := grpctest.New(t, grpcserver.Config{}, []grpcserver.Service{}) // empty service slice is valid
 	is.True(srv.Conn != nil)
 }

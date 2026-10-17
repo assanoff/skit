@@ -45,7 +45,7 @@ func newTestHandler(store *mocks.StoreMock) *Handler {
 func newTestClient(t *testing.T, store *mocks.StoreMock) {{.Pkg}}v1.{{.Type}}ServiceClient {
 	t.Helper()
 	h := New({{.Pkg}}core.NewCore(testLogger(), store))
-	srv := grpctest.New(t, []grpcserver.Service{h})
+	srv := grpctest.New(t, grpcserver.Config{}, []grpcserver.Service{h})
 	return {{.Pkg}}v1.New{{.Type}}ServiceClient(srv.Conn)
 }
 

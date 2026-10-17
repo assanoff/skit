@@ -49,10 +49,6 @@ func New(ctx context.Context, opts config.ServerOpts, log *slog.Logger, options 
 	if err != nil {
 		return nil, err
 	}
-	// Start tracing before any part is added: it sets the global provider and
-	// propagator, which every part — not only the traced routes — relies on.
-	d.Tracer(ctx)
-
 	a := &App{d: d, m: metrics.New("{{.Snake}}")}
 	for _, add := range options {
 		if err := add(ctx, a); err != nil {

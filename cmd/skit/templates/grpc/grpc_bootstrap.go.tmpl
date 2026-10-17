@@ -40,8 +40,8 @@ func buildGRPCServer(ctx context.Context, a *App, addr string) *grpcserver.Serve
 	gs := grpcserver.New(a.d.Logger, grpcserver.Config{
 		Addr:             addr,
 		EnableReflection: a.d.Opts.GRPC.Reflection,
+		TracerProvider:   a.d.TracerProvider,
 	},
-		grpcserver.WithTracer(a.d.Tracer(ctx)),
 		grpcserver.WithMetrics(a.m.Registry),
 		grpcserver.WithProtoValidate(),
 	)
@@ -80,7 +80,7 @@ func GRPCGateway(addr string) Routes {
 			a.d.Logger.ErrorContext(ctx, "grpc gateway: build failed", "err", err)
 			return
 		}
-		api := requestChain(ctx, a, r)
+		api := requestChain(a, r)
 		api.Handle("/v1/", gw) // the generated google.api.http rules live under /v1
 		if a.d.Opts.GRPC.Docs {
 			api.Handle("GET /openapi.json", docs.SpecHandler())

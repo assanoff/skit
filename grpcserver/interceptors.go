@@ -8,15 +8,11 @@ import (
 	"runtime/debug"
 	"time"
 
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/assanoff/skit/errs"
-	skotel "github.com/assanoff/skit/otel"
 )
 
 // recoveryUnary turns a panic in a handler into an Internal status instead of
@@ -33,19 +29,6 @@ func recoveryUnary(log *slog.Logger) grpc.UnaryServerInterceptor {
 				err = status.Errorf(codes.Internal, "internal error")
 			}
 		}()
-		return handler(ctx, req)
-	}
-}
-
-// traceUnary extracts inbound trace context from gRPC metadata and ensures a
-// trace id is present in the context so logs can carry it.
-func traceUnary(tracer trace.Tracer) grpc.UnaryServerInterceptor {
-	prop := propagation.TraceContext{}
-	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if md, ok := metadata.FromIncomingContext(ctx); ok {
-			ctx = prop.Extract(ctx, metadataCarrier(md))
-		}
-		ctx = skotel.InjectTracing(ctx, tracer)
 		return handler(ctx, req)
 	}
 }
@@ -103,16 +86,6 @@ func toStatus(err error) error {
 
 // --- stream interceptors (symmetric to the unary chain above) ---
 
-// wrappedStream lets a stream interceptor replace the context seen by the handler
-// (grpc.ServerStream.Context is read-only otherwise).
-type wrappedStream struct {
-	grpc.ServerStream
-
-	ctx context.Context //nolint:containedctx // replaces the read-only stream context
-}
-
-func (w *wrappedStream) Context() context.Context { return w.ctx }
-
 // recoveryStream turns a panic in a streaming handler into an Internal status
 // instead of crashing the server.
 func recoveryStream(log *slog.Logger) grpc.StreamServerInterceptor {
@@ -128,20 +101,6 @@ func recoveryStream(log *slog.Logger) grpc.StreamServerInterceptor {
 			}
 		}()
 		return handler(srv, ss)
-	}
-}
-
-// traceStream extracts inbound trace context from gRPC metadata and ensures a
-// trace id is present in the stream's context so logs can carry it.
-func traceStream(tracer trace.Tracer) grpc.StreamServerInterceptor {
-	prop := propagation.TraceContext{}
-	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		ctx := ss.Context()
-		if md, ok := metadata.FromIncomingContext(ctx); ok {
-			ctx = prop.Extract(ctx, metadataCarrier(md))
-		}
-		ctx = skotel.InjectTracing(ctx, tracer)
-		return handler(srv, &wrappedStream{ServerStream: ss, ctx: ctx})
 	}
 }
 
@@ -181,27 +140,4 @@ func errorMapStream() grpc.StreamServerInterceptor {
 		}
 		return nil
 	}
-}
-
-// metadataCarrier adapts gRPC metadata to a propagation.TextMapCarrier.
-type metadataCarrier metadata.MD
-
-func (c metadataCarrier) Get(key string) string {
-	v := metadata.MD(c).Get(key)
-	if len(v) == 0 {
-		return ""
-	}
-	return v[0]
-}
-
-func (c metadataCarrier) Set(key, value string) {
-	metadata.MD(c).Set(key, value)
-}
-
-func (c metadataCarrier) Keys() []string {
-	keys := make([]string, 0, len(c))
-	for k := range c {
-		keys = append(keys, k)
-	}
-	return keys
 }

@@ -7,16 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/matryer/is"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/httpserver"
 	"github.com/assanoff/skit/logger"
@@ -123,35 +119,30 @@ func TestRequestChainWrapsInstallOnly(t *testing.T) {
 	is.True(strings.Contains(logs.String(), "/hello")) // /hello is in the access log
 }
 
-// Install opens a server span per business request, named after the route, and
-// returns its traceparent; the technical sets next to it are not traced.
+// traceparent is a W3C traceparent with trace flags 00: tests export nothing.
+var traceparent = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-00$`)
+
+// Install opens a server span per business request and returns its
+// traceparent, and the access log line carries its trace id; the technical sets
+// next to it are not traced.
 func TestInstallTracesRequests(t *testing.T) {
 	is := is.New(t)
-	sr := tracetest.NewSpanRecorder()
-	prev := otel.GetTracerProvider()
-	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr)))
-	t.Cleanup(func() { otel.SetTracerProvider(prev) })
-
-	a := newTestApp(t, io.Discard, WithServer(":8080", Debug, Install))
+	var logs bytes.Buffer
+	a := newTestApp(t, &logs, WithServer(":8080", Debug, Install))
 	h := handlerOf(t, a.servers[0])
 
 	for _, path := range techPaths {
-		get(h, path)
+		is.Equal(get(h, path).Header().Get("traceparent"), "") // not traced
 	}
-	is.Equal(len(sr.Ended()), 0) // the technical sets are not traced
 
-	rec := get(h, "/hello")
+	tp := get(h, "/hello").Header().Get("traceparent")
 
-	spans := sr.Ended()
-	is.Equal(len(spans), 1)
-	span := spans[0]
-	is.Equal(span.Name(), "GET /hello")
-	is.Equal(span.SpanKind(), trace.SpanKindServer)
-	code := attribute.Int("http.response.status_code", http.StatusOK)
-	is.True(slices.Contains(span.Attributes(), code)) // the status code is recorded
-	sc := span.SpanContext()
-	want := "00-" + sc.TraceID().String() + "-" + sc.SpanID().String() + "-01"
-	is.Equal(rec.Header().Get("traceparent"), want)
+	is.True(traceparent.MatchString(tp))
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	var line map[string]any
+	is.NoErr(json.Unmarshal([]byte(lines[len(lines)-1]), &line)) // the access log line
+	is.Equal(line["trace_id"], tp[3:35])
+	is.Equal(line["span_id"], tp[36:52])
 }
 
 // The server recovers a panic at its root, so a route set without a chain of
@@ -186,6 +177,7 @@ func TestDebugComponents(t *testing.T) {
 // is lazy, so nothing connects to Postgres until a route asks for it.
 func newTestApp(t *testing.T, w io.Writer, options ...Option) *App {
 	t.Helper()
+	t.Setenv("OTEL_TRACES_EXPORTER", "none") // trace ids without a collector
 
 	log := logger.New(w, logger.Config{Service: "test", Level: logger.LevelInfo})
 	a, err := New(context.Background(), config.ServerOpts{Service: "test"}, log, options...)

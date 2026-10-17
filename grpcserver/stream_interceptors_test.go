@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/matryer/is"
-	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -54,26 +53,6 @@ func TestErrorMapStream(t *testing.T) {
 
 	okHandler := func(srv any, ss grpc.ServerStream) error { return nil }
 	is.NoErr(interceptor(nil, &fakeStream{}, &grpc.StreamServerInfo{}, okHandler))
-}
-
-// traceStream must hand the handler a stream whose Context carries over the
-// inbound values (via wrappedStream) plus the injected tracing.
-func TestTraceStreamWrapsContext(t *testing.T) {
-	is := is.New(t)
-
-	type ctxKey struct{}
-	base := context.WithValue(context.Background(), ctxKey{}, "v")
-	interceptor := traceStream(noop.NewTracerProvider().Tracer("test"))
-
-	var seen context.Context
-	handler := func(srv any, ss grpc.ServerStream) error {
-		seen = ss.Context() //nolint:fatcontext // captured once to assert on, not nested
-		return nil
-	}
-	err := interceptor(nil, &fakeStream{ctx: base}, &grpc.StreamServerInfo{}, handler)
-
-	is.NoErr(err)
-	is.Equal(seen.Value(ctxKey{}), "v") // wrapped context preserves inbound values
 }
 
 // WithStreamInterceptors threads application stream interceptors into the built
