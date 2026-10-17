@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"context"
 	"log/slog"
 	"testing"
 )
@@ -30,7 +29,7 @@ const (
 
 func BenchmarkNoSpan(b *testing.B) {
 	log := benchLogger()
-	ctx := context.Background()
+	ctx := b.Context()
 	b.ReportAllocs()
 	for b.Loop() {
 		log.InfoContext(ctx, "request", "status", 200)
@@ -60,21 +59,23 @@ func TestAllocBudget(t *testing.T) {
 		t.Skip("allocation budget is checked without -race (make test runs it)")
 	}
 	log := benchLogger()
-	grouped := log.WithGroup("http")
-	span := spanCtx(t)
 	tests := []struct {
 		name   string
 		log    *slog.Logger
-		ctx    context.Context
+		span   bool
 		budget float64
 	}{
-		{"no span", log, context.Background(), allocsNoSpan},
-		{"span", log, span, allocsSpan},
-		{"grouped", grouped, span, allocsGrouped},
+		{"no span", log, false, allocsNoSpan},
+		{"span", log, true, allocsSpan},
+		{"grouped", log.WithGroup("http"), true, allocsGrouped},
 	}
 	for _, tc := range tests {
+		ctx := t.Context()
+		if tc.span {
+			ctx = spanCtx(t)
+		}
 		got := testing.AllocsPerRun(100, func() {
-			tc.log.InfoContext(tc.ctx, "request", "status", 200)
+			tc.log.InfoContext(ctx, "request", "status", 200)
 		})
 		if got > tc.budget {
 			t.Errorf("%s: %.0f allocs per record, budget %.0f", tc.name, got, tc.budget)

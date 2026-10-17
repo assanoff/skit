@@ -8,8 +8,9 @@ import (
 	"github.com/assanoff/skit/httpw"
 )
 
-// AccessLog logs one structured line per request. Because it logs through the
-// skit logger, each line carries the request's trace_id automatically.
+// AccessLog logs one structured line per request with the request's context.
+// With a logger built by logger.New or logger.NewWithHandler, each line also
+// carries the trace fields of the request's span.
 func AccessLog(log *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

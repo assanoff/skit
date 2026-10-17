@@ -32,7 +32,7 @@ func spanCtx(tb testing.TB) context.Context {
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID: tid, SpanID: sid, TraceFlags: trace.FlagsSampled, Remote: true,
 	})
-	return trace.ContextWithSpanContext(context.Background(), sc)
+	return trace.ContextWithSpanContext(tb.Context(), sc)
 }
 
 // lines decodes every JSON line written to buf.
@@ -55,7 +55,7 @@ func TestTraceFieldsFromSpanContext(t *testing.T) {
 	log := New(&buf, Config{Level: LevelInfo})
 
 	log.InfoContext(spanCtx(t), "with span")
-	log.InfoContext(context.Background(), "without span")
+	log.InfoContext(t.Context(), "without span")
 
 	got := lines(t, &buf)
 	is.Equal(len(got), 2)
@@ -112,9 +112,9 @@ func TestServiceIdentity(t *testing.T) {
 	var buf bytes.Buffer
 
 	New(&buf, Config{Service: "svc", Version: "v1.2.3", Level: LevelInfo}).
-		InfoContext(context.Background(), "full")
+		InfoContext(t.Context(), "full")
 	New(&buf, Config{Service: "svc", Level: LevelInfo}).
-		InfoContext(context.Background(), "no version")
+		InfoContext(t.Context(), "no version")
 
 	got := lines(t, &buf)
 	is.Equal(got[0]["service.name"], "svc")
@@ -131,8 +131,8 @@ func TestWithSharesHandler(t *testing.T) {
 	app := New(&buf, Config{Service: "svc", Level: LevelInfo})
 	access := app.With("logger", "access")
 
-	app.InfoContext(context.Background(), "business event")
-	access.InfoContext(context.Background(), "http.request")
+	app.InfoContext(t.Context(), "business event")
+	access.InfoContext(t.Context(), "http.request")
 
 	got := lines(t, &buf)
 	is.Equal(len(got), 2)
@@ -150,7 +150,7 @@ func TestDiscard(t *testing.T) {
 		Level:  LevelInfo,
 		Events: Events{Error: func(context.Context, slog.Record) { fired++ }},
 	})
-	log.ErrorContext(context.Background(), "dropped")
+	log.ErrorContext(t.Context(), "dropped")
 	is.Equal(fired, 0) // no record is built, so no hook fires
 }
 
@@ -158,7 +158,7 @@ func TestSourceIsShortened(t *testing.T) {
 	is := is.New(t)
 	var buf bytes.Buffer
 	New(&buf, Config{Level: LevelInfo, AddSource: true}).
-		InfoContext(context.Background(), "here")
+		InfoContext(t.Context(), "here")
 
 	src, _ := lines(t, &buf)[0]["source"].(string)
 	is.True(strings.HasPrefix(src, "logger_test.go:")) // file:line, no directory
@@ -167,7 +167,7 @@ func TestSourceIsShortened(t *testing.T) {
 func TestBuildInfo(t *testing.T) {
 	is := is.New(t)
 	var buf bytes.Buffer
-	BuildInfo(context.Background(), New(&buf, Config{Level: LevelInfo}))
+	BuildInfo(t.Context(), New(&buf, Config{Level: LevelInfo}))
 
 	got := lines(t, &buf)[0]
 	is.Equal(got["msg"], "build info")

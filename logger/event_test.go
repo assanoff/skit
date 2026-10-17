@@ -63,7 +63,7 @@ func TestEventHookFiresOnlyForConfiguredLevel(t *testing.T) {
 			errFired++
 		}},
 	})
-	ctx := context.Background()
+	ctx := t.Context()
 
 	log.InfoContext(ctx, "hello")
 	is.Equal(errFired, 0)
