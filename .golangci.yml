@@ -45,6 +45,7 @@ linters:
     - asciicheck
     - bidichk
     - depguard
+    - forbidigo
     - gocheckcompilerdirectives
     - gomoddirectives
     - gosec
@@ -92,6 +93,25 @@ linters:
           deny:
             - pkg: github.com/stretchr/testify
               desc: tests use github.com/matryer/is
+        # One semconv version: mixed versions drift attribute names and break the
+        # schema URL of the Resource. otel, contrib and semconv move together.
+        semconv:
+          list-mode: lax
+          allow: [go.opentelemetry.io/otel/semconv/v1.43.0]
+          deny:
+            - pkg: go.opentelemetry.io/otel/semconv
+              desc: semconv is pinned to v1.43.0
+        # SDK packages depend on the OTel API only; otel/setup installs the SDK
+        # and otel/otlp builds the exporter.
+        otel-sdk:
+          files: ["!$test", "!**/otel/setup/*.go", "!**/otel/otlp/*.go"]
+          deny:
+            - pkg: go.opentelemetry.io/otel/sdk
+              desc: use the OTel API; the SDK is installed by otel/setup
+            - pkg: go.opentelemetry.io/otel/exporters
+              desc: the exporter is built by otel/otlp
+            - pkg: go.opentelemetry.io/contrib/bridges
+              desc: bridges belong to otel/setup
     dupword:
       ignore: [nil] # "(nil, nil)" in doc comments
     errcheck:
@@ -100,6 +120,15 @@ linters:
       exclude-functions: [fmt.Fprint, fmt.Fprintf, fmt.Fprintln]
     exhaustive:
       default-signifies-exhaustive: true
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^trace\.Span\.RecordError$
+          msg: mark the span with otel.SetError (status Error and error.type); the details go to the log record
+        # Global OTel state is set by otel/setup only (excluded below).
+        - pattern: ^otel\.Set
+          pkg: ^go\.opentelemetry\.io/otel$
+          msg: pass a TracerProvider; otel/setup installs the global provider and propagator
     exhaustruct_v5:
       explicit-mode: true # only types marked //exhaustruct:enforce
     gocognit:
@@ -190,6 +219,9 @@ linters:
       # service routes into its own handler with slog.SetDefault.
       - path: ^(closer|dim)/
         linters: [sloglint]
+      # The bootstrap is the one place that sets the global OTel state.
+      - path: ^otel/setup/
+        linters: [forbidigo]
       # httplog is adapted third-party code kept close to upstream: only
       # correctness, resources and security are checked.
       - path: httplog/
