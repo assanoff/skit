@@ -44,6 +44,8 @@
 //     the span's traceparent in the response. TraceConfig.TracerProvider nil
 //     means the global provider; TraceConfig.Public marks requests from outside
 //     the trust boundary, whose span starts a new trace linked to the caller's.
+//   - SetRoute(r, route): name the server span after route, for a handler that
+//     routes by itself below Trace (a grpc-gateway mux mounted on a prefix).
 //   - AccessLog(log): emit one structured line per request using OpenTelemetry
 //     HTTP semantic-convention field names. A nil log skips logging.
 //   - Timeout(d): cancel the request context after d; a non-positive d disables

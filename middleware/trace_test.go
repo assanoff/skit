@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/matryer/is"
+	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/logger"
@@ -112,4 +114,51 @@ func TestTraceLogsTraceIDWithoutExport(t *testing.T) {
 	is.Equal(line["trace_flags"], "00")
 	is.Equal(w.Header().Get(middleware.RequestIDHeader), traceID)
 	is.Equal(w.Header().Get("Traceparent"), fmt.Sprintf("00-%s-%s-00", traceID, spanID))
+}
+
+// A handler that routes by itself below a prefix names the span after its own
+// route: otelhttp would put the prefix back after the handler otherwise.
+func TestSetRouteNamesSpanUnderPrefix(t *testing.T) {
+	is := is.New(t)
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	cfg := middleware.TraceConfig{TracerProvider: tp}
+	h := traced(cfg, "/v1/", func(_ http.ResponseWriter, r *http.Request) {
+		middleware.SetRoute(r, "/v1/widgets/{id}")
+	})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/widgets/42", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	spans := rec.Ended()
+	is.Equal(len(spans), 1)
+	is.Equal(spans[0].Name(), "GET /v1/widgets/{id}")
+	is.Equal(attr(spans[0], semconv.HTTPRouteKey), "/v1/widgets/{id}")
+}
+
+// A method the HTTP semantic conventions do not know is named HTTP, as
+// otelhttp names it.
+func TestTraceNamesUnknownMethod(t *testing.T) {
+	is := is.New(t)
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	cfg := middleware.TraceConfig{TracerProvider: tp}
+	h := traced(cfg, "/x", func(http.ResponseWriter, *http.Request) {})
+
+	req := httptest.NewRequestWithContext(t.Context(), "PURGE", "/x", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	spans := rec.Ended()
+	is.Equal(len(spans), 1)
+	is.Equal(spans[0].Name(), "HTTP /x")
+}
+
+// attr returns the string value of the span attribute key, or "".
+func attr(s sdktrace.ReadOnlySpan, key attribute.Key) string {
+	for _, kv := range s.Attributes() {
+		if kv.Key == key {
+			return kv.Value.AsString()
+		}
+	}
+	return ""
 }

@@ -74,7 +74,8 @@ func GRPCGateway(addr string) Routes {
 			return
 		}
 		gw, err := grpcgateway.New(ctx, grpcgateway.Config{
-			Endpoint: gatewayEndpoint(addr),
+			Endpoint:       gatewayEndpoint(addr),
+			TracerProvider: a.d.TracerProvider,
 		}, gatewayRegistrars()...)
 		if err != nil {
 			a.d.Logger.ErrorContext(ctx, "grpc gateway: build failed", "err", err)

@@ -27,6 +27,21 @@
 // metrics, auth) is added the stdlib way — by wrapping it with middleware
 // (middleware.Trace, middleware.AccessLog, ...) before handing it to httpserver.
 //
+// # Tracing
+//
+// Wrapped in middleware.Trace, a request through the gateway is one trace: the
+// HTTP server span, a client span per call to the gRPC server, and that
+// server's span. The HTTP span is named after the gateway route the mux
+// matched — "GET /v1/widgets/{id}" with http.route set to the same template —
+// even when the gateway is mounted on a prefix such as "/v1/". New adds the
+// client span handler to the connection it dials; a Config.ClientConn needs it
+// dialed in:
+//
+//	conn, err := grpc.NewClient(target,
+//		grpc.WithTransportCredentials(insecure.NewCredentials()),
+//		grpc.WithStatsHandler(grpcgateway.ClientHandler(tp)),
+//	)
+//
 // # Connection ownership
 //
 // When Config.ClientConn is nil, New dials Config.Endpoint and the Gateway owns
@@ -38,7 +53,9 @@
 //
 //   - Endpoint: gRPC target to proxy to; required unless ClientConn is set.
 //   - ClientConn: reuse an existing *grpc.ClientConn instead of dialing.
-//   - DialOptions: override the default insecure dial options.
+//   - DialOptions: override the default insecure dial options; New adds the
+//     client span handler to them.
 //   - MuxOptions: forwarded to runtime.NewServeMux (marshaler, error handler,
 //     header matchers, ...).
+//   - TracerProvider: records the client spans; nil → the global provider.
 package grpcgateway
