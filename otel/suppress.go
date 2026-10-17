@@ -2,6 +2,9 @@ package otel
 
 import "context"
 
+// suppressKey is the context key of the Suppress mark.
+type suppressKey struct{}
+
 // Suppress marks ctx as "do not trace anything started from here". Spans started
 // with a suppressed context — and their children — are dropped by the sampler
 // otel/setup installs: they are neither recorded nor exported, so the cost is
@@ -23,7 +26,7 @@ import "context"
 // stale the moment a span is renamed, and it also erases the only traces
 // one-shot CLI commands produce, since none of them opens a root span.
 func Suppress(ctx context.Context) context.Context {
-	return context.WithValue(ctx, suppressKey, true)
+	return context.WithValue(ctx, suppressKey{}, true)
 }
 
 // Unsuppress lifts Suppress for ctx and the contexts derived from it. A tick
@@ -32,7 +35,7 @@ func Suppress(ctx context.Context) context.Context {
 // parent context with all its values even for a new root, so the mark must be
 // lifted rather than left behind.
 func Unsuppress(ctx context.Context) context.Context {
-	return context.WithValue(ctx, suppressKey, false)
+	return context.WithValue(ctx, suppressKey{}, false)
 }
 
 // IsSuppressed reports whether ctx, or any context it was derived from, went
@@ -41,6 +44,6 @@ func IsSuppressed(ctx context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	v, _ := ctx.Value(suppressKey).(bool)
+	v, _ := ctx.Value(suppressKey{}).(bool)
 	return v
 }

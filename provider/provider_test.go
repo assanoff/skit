@@ -6,7 +6,6 @@ import (
 
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/otel"
 )
 
 // The providers wrap connect/dial/init paths that need live infrastructure
@@ -18,8 +17,5 @@ func TestConstructorsReturnFactories(t *testing.T) {
 	}
 	if RabbitMQ(slog.New(slog.DiscardHandler), rabbitmq.Config{Host: "localhost", Port: "5672"}) == nil {
 		t.Fatal("RabbitMQ returned a nil factory")
-	}
-	if Tracer(otel.Config{ServiceName: "svc", Endpoint: "localhost:4317"}) == nil {
-		t.Fatal("Tracer returned a nil factory")
 	}
 }

@@ -57,9 +57,10 @@
 //
 // Application middleware added later stays inside the earlier ones, so a global
 // localize-errors keeps wrapping a group's auth and can localize the error that
-// auth returns. Register the transport stack panic-first, then trace, then the
-// loggers and guards (see rest/mid). A raw handler registered with Handle runs the
-// transport stack but no application middleware.
+// auth returns. Register Panics on the root and the rest of the transport stack —
+// trace, then the loggers and guards — on the business group (see middleware). A
+// raw handler registered with Handle runs the transport stack but no application
+// middleware.
 //
 // # Recipes
 //
@@ -68,15 +69,19 @@
 //
 // Global cross-cutting — transport for infra, app for request semantics:
 //
-//	r := router.New(reqctxMid, localizeErrMid)                      // application: every typed route
-//	r.Use(middleware.Panics(log), middleware.TraceRequest(tracer),  // transport: every route incl. debug
-//		middleware.AccessLog(log))
+//	r := router.New(reqctxMid, localizeErrMid) // application: every typed route
+//	r.Use(middleware.Panics(log))              // transport: every route incl. debug
 //
-// A business sub-group with guards that must not touch debug/pprof routes (a
-// request timeout would cut off a long profile), then features register on it:
+// A business sub-group with the server span, the access log and guards that must
+// not touch debug/pprof routes (a request timeout would cut off a long profile),
+// then features register on it:
 //
-//	api := r.With(middleware.Timeout(5*time.Second), middleware.SizeLimit(1<<20)) // transport sub-group
-//	d.WidgetHandler(ctx).Routes(api.HandleApp)                      // feature owns its routes
+//	api := r.With( // transport sub-group
+//		middleware.Trace(middleware.TraceConfig{TracerProvider: tp}),
+//		middleware.AccessLog(log),
+//		middleware.Timeout(5*time.Second), middleware.SizeLimit(1<<20),
+//	)
+//	d.WidgetHandler(ctx).Routes(api.HandleApp) // feature owns its routes
 //	auditrest.NewHandlers(d.AuditLog(ctx)).Routes(api.HandleApp)
 //
 // Per-route auth (mixed access within one feature — reads public, writes guarded)

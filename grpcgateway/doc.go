@@ -25,7 +25,7 @@
 //
 // Because gw is an http.Handler, cross-cutting behavior (tracing, request
 // metrics, auth) is added the stdlib way — by wrapping it with middleware
-// (the middleware package, otelhttp, ...) before handing it to httpserver.
+// (middleware.Trace, middleware.AccessLog, ...) before handing it to httpserver.
 //
 // # Connection ownership
 //

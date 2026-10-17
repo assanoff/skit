@@ -2,12 +2,12 @@
 // services.
 //
 // It covers the cross-cutting concerns most HTTP services need: panic recovery,
-// trace-context injection, structured access logging, request timeouts,
-// body-size limits, CORS, security headers, response compression, and request-id
-// echo. Every middleware has the signature func(http.Handler)
-// http.Handler (aliased as Middleware), so it composes with router.Use,
-// router.With, and go-pkgz/routegroup. Because TraceRequest seeds a trace id and
-// AccessLog logs through the skit logger, log lines carry trace_id
+// the server span, structured access logging, request timeouts, body-size
+// limits, CORS, security headers, response compression, and request-id echo.
+// Every middleware has the signature func(http.Handler) http.Handler (aliased
+// as Middleware), so it composes with router.Use, router.With, and
+// go-pkgz/routegroup. Because Trace puts the server span into the request
+// context and AccessLog logs through the skit logger, log lines carry trace_id
 // automatically.
 //
 // These are the transport layer of the two-layer model (see the router package):
@@ -19,29 +19,31 @@
 //
 // # Ordering
 //
-// Register them outermost-first. Panics goes first so it wraps everything; the
-// server span next — this package opens none, use otelhttp.NewMiddleware — then
-// TraceRequest, so downstream logs and spans share the request's trace context;
-// then AccessLog, then the limit/timeout guards:
+// Panics goes on the root router, so it wraps everything. The rest wraps the
+// business routes only, in a group made with router.With: Trace first, after
+// routing, so the span is named after the route pattern; then AccessLog, then
+// the limit/timeout guards. Technical routes — probes, metrics, pprof — stay
+// outside the group: they get no span, no access-log line and no timeout.
 //
 //	r := router.New(appMids...)
-//	r.Use(
-//		middleware.Panics(log),                // recover -> 500, log stack
-//		otelhttp.NewMiddleware("http.server"), // server span per request
-//		middleware.TraceRequest(tracer),       // continue it, seed trace id, traceparent
-//		middleware.AccessLog(log),             // one structured line per request
-//		middleware.SizeLimit(1<<20),           // cap request body at 1 MiB
-//		middleware.Timeout(5*time.Second),     // cancel ctx after 5s
+//	r.Use(middleware.Panics(log)) // recover -> 500, log stack
+//	api := r.With(
+//		// server span per request, named after the route
+//		middleware.Trace(middleware.TraceConfig{TracerProvider: tp}),
+//		middleware.AccessLog(log),         // one structured line per request
+//		middleware.SizeLimit(1<<20),       // cap request body at 1 MiB
+//		middleware.Timeout(5*time.Second), // cancel ctx after 5s
 //	)
 //
 // # Middleware
 //
 //   - Panics(log): recover from panics, log the stack, respond 500. A nil log
 //     skips logging. http.ErrAbortHandler is panicked again for net/http.
-//   - TraceRequest(tracer): continue the server span an earlier middleware
-//     opened (or, without one, the incoming W3C trace context), store tracer for
-//     otel.AddSpan, ensure a trace id is available for logging and return the
-//     server span's traceparent in the response. It opens and ends no span.
+//   - Trace(cfg): open the server span of the request with otelhttp, named
+//     "{METHOD} {route}", continuing the incoming W3C trace context, and return
+//     the span's traceparent in the response. TraceConfig.TracerProvider nil
+//     means the global provider; TraceConfig.Public marks requests from outside
+//     the trust boundary, whose span starts a new trace linked to the caller's.
 //   - AccessLog(log): emit one structured line per request using OpenTelemetry
 //     HTTP semantic-convention field names. A nil log skips logging.
 //   - Timeout(d): cancel the request context after d; a non-positive d disables

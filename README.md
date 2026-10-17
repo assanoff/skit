@@ -17,16 +17,16 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 |---|---|
 | `errs` | Error type with stable codes, REST/gRPC mapping, validation, secret sanitization |
 | `logger` | `slog`-based logger: `trace_id` injection, level fan-out (stdout + Sentry), additive per-level side-effect hooks (`Events`, e.g. alert on error), caller-skip variants, access log |
-| `otel` | Tracing bootstrap, span helpers, `GetTraceID`, route-excluding sampler |
+| `otel` | Tracing API for SDK packages: `Tracer`, `SetError`, W3C propagation (`Carrier`/`ExtractFromCarrier`, `InjectToResponse`), `Suppress`; `otel/setup` installs the SDK (Resource, sampler from `OTEL_TRACES_SAMPLER`), `otel/otlp` builds the OTLP exporter from `OTEL_*` |
 | `dbx` | `sqlx`/`pgx` helpers: named queries, `WithinTran`, bulk insert/upsert/update, retries |
 | `dim` | Slim dependency-injection: lazy `Provider[T]`, `Once`/`OnceWithName`, `NewResource` with init/cleanup logging |
 | `closer` | Graceful-shutdown registry: process-global default (`Add`/`CloseSync`) + instances (`New`/`NewWithWait`), LIFO |
 | `config` | 12-factor config via go-flags: one struct → CLI flags + env vars + `--help`, dotenv for local, subcommand dispatch |
 | `rest` (+ `router`/`mid`) | Typed HTTP handlers over stdlib `ServeMux` + `routegroup`; routing (`router`) and typed application middleware (`rest/mid`: error localize/mask, panics, observability, cache, ETag) |
-| `middleware` | net/http **server** middleware (`func(http.Handler) http.Handler`): panic recovery, trace-context, access log, timeout, body-size limit (cf. `httpmw` for the **client** side) |
+| `middleware` | net/http **server** middleware (`func(http.Handler) http.Handler`): panic recovery, server span (`Trace`, otelhttp), access log, timeout, body-size limit (cf. `httpmw` for the **client** side) |
 | `httpserver` | `http.Handler`-on-a-listener as a `worker.Runnable`; the shared server core for REST, the gRPC-gateway and `debugsrv`; idle/header timeouts, `net/http` errors to your logger, stuck connections closed on shutdown |
 | `order`, `page`, `query` | Listing primitives shared by the domain and both transports: allowlisted sort (`order`), validated offset/cursor paging input (`page`), paginated result envelope (`query`) |
-| `grpcserver` | gRPC server as a `worker.Runnable`: recovery/trace/logging/metrics interceptors, `errs`→status mapping, health, reflection, transport tuning knobs |
+| `grpcserver` | gRPC server as a `worker.Runnable`: server span per RPC (otelgrpc), recovery/logging/metrics interceptors, `errs`→status mapping, health, reflection, transport tuning knobs |
 | `worker` | Unified worker abstraction: `Runnable`, `Group`, `Loop` (fixed) / `NewPacedLoop` (adaptive: drain-when-busy, idle-backoff), `Pool`, `Processor[T]`, `Backoff` |
 | `queue` | Durable work queue (`Schedule`/`Claim`/`MarkDone`/`MarkFailed`): Postgres (`FOR UPDATE SKIP LOCKED`) + in-memory, plugs into `worker.Processor` as a `Source`/`Sink` |
 | `poller` | Typed cache of a periodically-refreshed value (`Poller[T]`), a `worker.Runnable` |
@@ -51,7 +51,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `chx` | Optional ClickHouse helper (connect + goose migrations); pulls the ClickHouse driver only when imported |
 | `grpcgateway` | grpc-gateway REST↔gRPC transcoding as a `worker.Runnable`, sharing the app's server core |
 | `grpctest` | In-process gRPC test harness over `bufconn` running the real `grpcserver` interceptor chain |
-| `provider` | Ready-made `dim` factories for common dependencies (Postgres, Redis, RabbitMQ, tracer, Sentry, translator) |
+| `provider` | Ready-made `dim` factories for common dependencies (Postgres, Redis, RabbitMQ, Sentry, translator) |
 | `app` | Opinionated application entrypoint: wires config → deps → `worker.Group` and drives graceful shutdown via `closer` |
 | `to` | Small response-encoding helpers (`to.JSON`, JSON:API) — a convenience seam over `rest` |
 | `cmd/skit` | Scaffolding CLI: `skit new <module>` (embedded starter, `--full` service layout, or gonew passthrough with `--template`), plus per-model generators via `skit add …` |
@@ -298,9 +298,10 @@ requests lost on rollout, the release layout) and what is still open — see
 `grpcserver` runs alongside (or instead of) the REST server — both are `worker.Runnable`s
 supervised by `worker.Group`, toggled independently by config. It ships:
 
-- the same cross-cutting interceptors as REST (panic recovery, trace-id injection, structured
-  access logs, Prometheus metrics) plus automatic `*errs.Error` → gRPC `status` mapping (error
-  codes are aligned, so the mapping is a direct cast);
+- a server span per RPC (otelgrpc, `Config.TracerProvider`) and the same cross-cutting
+  interceptors as REST (panic recovery, structured access logs, Prometheus metrics) plus
+  automatic `*errs.Error` → gRPC `status` mapping (error codes are aligned, so the mapping
+  is a direct cast);
 - messages use the protobuf **Opaque API** via Protobuf **Editions** (`edition = "2023"`,
   `api_level = API_OPAQUE`) — Google's official path to faster, lower-allocation, lazy-decoding
   generated code (replaces the third-party vtprotobuf; no extra dependency or codec);

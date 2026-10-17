@@ -20,6 +20,10 @@ import (
 	"github.com/assanoff/skit/otel/setup"
 )
 
+// incoming is a traceparent from a caller's trace, unrelated to any span the
+// test starts.
+const incoming = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
 // hex32 matches a W3C trace id.
 var hex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
 

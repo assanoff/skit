@@ -9,8 +9,6 @@ import (
 	"uuid"
 
 	"github.com/jmoiron/sqlx"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -88,9 +86,6 @@ func TestRegistryPublishResolvesRoute(t *testing.T) {
 }
 
 func TestPublishInjectsTraceContext(t *testing.T) {
-	// The propagator is normally set by otel.InitTracing; set it directly here.
-	otel.SetTextMapPropagator(propagation.TraceContext{})
-
 	reg := NewRegistry()
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 	store := &fakeStore{}
