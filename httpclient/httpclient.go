@@ -1,14 +1,3 @@
-// Package httpclient builds configured *http.Client values for calling upstream
-// services, and helps consume their JSON responses. It is the transport half of
-// a typed service client (see `skit add http-client`): the generated client
-// package builds one of these in its constructor, then its methods assemble
-// requests and decode responses through DoJSON.
-//
-// The transport is composed from httpmw middlewares — retry (5xx/429 +
-// Retry-After), a User-Agent, an idempotency key, arbitrary headers — and, when
-// OAuth2 is configured, an OAuth2 client_credentials bearer. Composition order
-// (httpmw.Chain) puts retry outermost and auth innermost, so a retried attempt
-// re-attaches the current token.
 package httpclient
 
 import (
@@ -18,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/httpmw"
 )
@@ -53,6 +44,9 @@ type Config struct {
 	// Base is the innermost (wire) transport (default http.DefaultTransport).
 	// Business requests and the OAuth2 token fetch both go over it.
 	Base http.RoundTripper
+	// TracerProvider records a client span per attempt; nil → the global
+	// provider.
+	TracerProvider trace.TracerProvider
 }
 
 // New builds an *http.Client with the composed transport. It returns an error
@@ -91,6 +85,9 @@ func New(cfg Config) (*http.Client, error) {
 	for k, v := range cfg.Headers {
 		mws = append(mws, httpmw.SetHeader(k, v))
 	}
+	// Innermost of the decorations: the span of an attempt sees its final
+	// headers, and every attempt gets its own span and traceparent.
+	mws = append(mws, clientSpan(cfg.TracerProvider))
 
 	return &http.Client{
 		Timeout:   timeout,

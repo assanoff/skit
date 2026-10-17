@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/assanoff/skit/httpclient"
 	"github.com/assanoff/skit/httpmw"
 	"github.com/assanoff/skit/retry"
@@ -37,6 +39,9 @@ type Config struct {
 	// Base is the wire transport (default http.DefaultTransport){{if .OAuth}}; the token
 	// fetch goes over it too{{end}}. Tests pass an httptest server's Client().Transport.
 	Base http.RoundTripper
+	// TracerProvider records a client span per attempt; pass Deps.TracerProvider.
+	// nil → the global provider.
+	TracerProvider trace.TracerProvider
 {{if .OAuth}}
 	// OAuth2 client_credentials — all three required.
 	TokenURL     string
@@ -56,9 +61,10 @@ type Client struct {
 // constructed{{if .OAuth}} (e.g. missing OAuth2 credentials){{end}}.
 func New(cfg Config) (*Client, error) {
 	hc, err := httpclient.New(httpclient.Config{
-		Timeout:   cfg.Timeout,
-		Base:      cfg.Base,
-		UserAgent: "{{.Pkg}}-client",
+		Timeout:        cfg.Timeout,
+		Base:           cfg.Base,
+		UserAgent:      "{{.Pkg}}-client",
+		TracerProvider: cfg.TracerProvider,
 		Retry: &httpmw.RetryConfig{
 			Backoff: retry.Backoff{
 				Base: 100 * time.Millisecond, Max: 3 * time.Second, MaxAttempts: 3, Jitter: 0.2,

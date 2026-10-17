@@ -118,9 +118,7 @@ func TestGatewayOneTrace(t *testing.T) {
 }
 
 // find returns the span of kind named name.
-func find(
-	t *testing.T, spans []sdktrace.ReadOnlySpan, kind trace.SpanKind, name string,
-) sdktrace.ReadOnlySpan {
+func find(t *testing.T, spans []sdktrace.ReadOnlySpan, kind trace.SpanKind, name string) sdktrace.ReadOnlySpan {
 	t.Helper()
 	for _, s := range spans {
 		if s.SpanKind() == kind && s.Name() == name {

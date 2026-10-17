@@ -2,6 +2,7 @@ package httpmw
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -38,6 +39,9 @@ type RetryTransport struct {
 	statuses map[int]bool
 	cfg      RetryConfig
 }
+
+// resendKey is the context key of the resend count RetryTransport records.
+type resendKey struct{}
 
 // NewRetryTransport wraps next (or http.DefaultTransport when nil) with retry
 // behavior. The result is safe for concurrent use if next is.
@@ -91,7 +95,7 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			req.Body = body
 		}
 
-		resp, err = t.next.RoundTrip(req)
+		resp, err = t.next.RoundTrip(attemptRequest(req, attempt))
 		// A transport error or a non-retryable status ends the loop immediately.
 		if err != nil || !t.statuses[resp.StatusCode] || attempt >= maxAttempts {
 			return resp, err
@@ -122,6 +126,24 @@ func (t *RetryTransport) delay(attempt int, resp *http.Response) time.Duration {
 		}
 	}
 	return t.cfg.Backoff.NextWithRand(attempt, t.cfg.Rand())
+}
+
+// ResendCount returns how many times RetryTransport has resent the request
+// whose context is ctx: 0 for the first attempt, n for the n-th retry. A
+// transport below the retry reads it, e.g. for the http.request.resend_count
+// attribute of the attempt's client span.
+func ResendCount(ctx context.Context) int {
+	n, _ := ctx.Value(resendKey{}).(int)
+	return n
+}
+
+// attemptRequest returns req for the first attempt and, for a retry, a shallow
+// copy whose context carries the resend count (see ResendCount).
+func attemptRequest(req *http.Request, attempt int) *http.Request {
+	if attempt == 1 {
+		return req
+	}
+	return req.WithContext(context.WithValue(req.Context(), resendKey{}, attempt-1))
 }
 
 // rewindable returns a function that yields a fresh body reader for each

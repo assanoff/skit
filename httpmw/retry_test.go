@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/matryer/is"
+
 	"github.com/assanoff/skit/retry"
 )
 
@@ -176,4 +178,27 @@ func TestRetryAfterParsing(t *testing.T) {
 	if d, ok := retryAfter(past); !ok || d != 0 {
 		t.Fatalf("past http-date: got (%v,%v), want (0,true)", d, ok)
 	}
+}
+
+// Each attempt carries its resend count: 0, then 1, 2 for the retries.
+func TestRetryRecordsResendCount(t *testing.T) {
+	is := is.New(t)
+	var counts []int
+	next := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		counts = append(counts, ResendCount(r.Context()))
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Body:       http.NoBody,
+			Request:    r,
+		}, nil
+	})
+	rt := NewRetryTransport(next, RetryConfig{Backoff: fastBackoff(3)})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://upstream/x", nil)
+	resp, err := rt.RoundTrip(req)
+	is.NoErr(err)
+	_ = resp.Body.Close()
+
+	is.Equal(counts, []int{0, 1, 2})
+	is.Equal(ResendCount(req.Context()), 0) // the caller's request is untouched
 }

@@ -34,4 +34,10 @@
 //     backoff delay, clamped to Backoff.Max when Max > 0.
 //   - Rand (func() float64): source of backoff jitter in [0,1); defaults to
 //     math/rand/v2. Override for deterministic tests.
+//
+// # Resend count
+//
+// Each retry goes down the chain with ResendCount(ctx) set to its number (1,
+// 2, …); the first attempt reads 0. A transport below the retry uses it, e.g.
+// httpclient for the http.request.resend_count attribute of the attempt's span.
 package httpmw
