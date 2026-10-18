@@ -31,7 +31,8 @@ type RelayConfig struct {
 	PublishTimeout time.Duration
 	// Metrics is the registry of the publish metrics
 	// (skit_outbox_relay_published_total, …_relay_publish_failures_total,
-	// …_relay_publish_duration_seconds); nil disables them.
+	// …_relay_publish_duration_seconds) and of the loop's skit_worker_*; nil
+	// disables them.
 	Metrics prometheus.Registerer
 }
 
@@ -78,6 +79,7 @@ func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConf
 		Interval:           cfg.PollInterval,
 		MaxIdleInterval:    cfg.MaxPollInterval,
 		ImmediateFirstTick: true,
+		Metrics:            cfg.Metrics,
 	}, proc.PacedTick())
 }
 
@@ -134,8 +136,8 @@ type SweeperConfig struct {
 	LeaseTimeout time.Duration
 	// BatchSize bounds rows reclaimed per sweep (default 100).
 	BatchSize int
-	// Metrics is the registry of skit_outbox_sweeper_reclaimed_total; nil
-	// disables it.
+	// Metrics is the registry of skit_outbox_sweeper_reclaimed_total and of the
+	// loop's skit_worker_*; nil disables them.
 	Metrics prometheus.Registerer
 }
 
@@ -164,7 +166,11 @@ func NewSweeper(log *slog.Logger, store Store, cfg SweeperConfig) *worker.Loop {
 		addRows(reclaimed, n)
 		return nil
 	}
-	return worker.NewLoop(log, worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
+	return worker.NewLoop(log, worker.LoopConfig{
+		Name:     cfg.Name,
+		Interval: cfg.Interval,
+		Metrics:  cfg.Metrics,
+	}, tick)
 }
 
 // CleanerConfig configures the Cleaner worker.
@@ -174,8 +180,8 @@ type CleanerConfig struct {
 	Interval time.Duration
 	// Retention: sent/failed rows older than this are deleted (default 24h).
 	Retention time.Duration
-	// Metrics is the registry of skit_outbox_cleaner_deleted_total; nil
-	// disables it.
+	// Metrics is the registry of skit_outbox_cleaner_deleted_total and of the
+	// loop's skit_worker_*; nil disables them.
 	Metrics prometheus.Registerer
 }
 
@@ -201,7 +207,11 @@ func NewCleaner(log *slog.Logger, store Store, cfg CleanerConfig) *worker.Loop {
 		addRows(deleted, n)
 		return nil
 	}
-	return worker.NewLoop(log, worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
+	return worker.NewLoop(log, worker.LoopConfig{
+		Name:     cfg.Name,
+		Interval: cfg.Interval,
+		Metrics:  cfg.Metrics,
+	}, tick)
 }
 
 // decodeHeaders parses the JSONB headers blob into a string map for transport,

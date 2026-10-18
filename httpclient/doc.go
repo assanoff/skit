@@ -13,6 +13,8 @@
 // # Usage
 //
 //	hc, err := httpclient.New(httpclient.Config{
+//		Name:           "billing",
+//		Metrics:        d.Metrics,
 //		UserAgent:      "billing-client",
 //		Retry:          &httpmw.RetryConfig{Backoff: retry.Backoff{MaxAttempts: 3}},
 //		TracerProvider: d.TracerProvider,
@@ -34,8 +36,23 @@
 // conventions (AWSAccessKeyId, Signature, sig, X-Goog-Signature) read REDACTED.
 // Pass the request context: the span is a child of the span in it.
 //
+// # Metrics
+//
+// With Config.Metrics set, every attempt is recorded under the client's Name:
+//   - skit_http_client_requests_total by client, http_request_method,
+//     http_response_status_code and error_type;
+//   - skit_http_client_request_duration_seconds by client, with the span of
+//     the attempt as the exemplar.
+//
+// A response is recorded with its status code and an empty error_type; a
+// request that got no response with an empty status code and error_type
+// canceled, timeout or _OTHER. A method the HTTP semantic conventions do not
+// know is recorded as _OTHER.
+//
 // # Config
 //
+//   - Name: the client label of the metrics (default "default").
+//   - Metrics: the registry of the request metrics; nil disables them.
 //   - Timeout: per-request timeout, retries included (default DefaultTimeout).
 //   - Retry: retry 5xx/429 with Retry-After; nil disables retries.
 //   - OAuth2: client_credentials bearer; nil disables it.

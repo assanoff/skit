@@ -44,6 +44,9 @@
 //   - the sweeper: skit_outbox_sweeper_reclaimed_total;
 //   - the cleaner: skit_outbox_cleaner_deleted_total.
 //
+// Each worker is a worker.Loop, so the same registry also gets its
+// skit_worker_* by its Name.
+//
 // NewBacklog is the worker of the backlog gauges skit_outbox_pending,
 // skit_outbox_in_flight, skit_outbox_failed and
 // skit_outbox_oldest_pending_seconds: it reads them through a StatsReader

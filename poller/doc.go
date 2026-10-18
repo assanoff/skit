@@ -29,9 +29,12 @@
 //
 // # Config
 //
-//   - Name: identifies the poller in logs and panic metrics (default "poller").
+//   - Name: identifies the poller in logs (default "poller").
 //   - Interval: time between polls (required, > 0).
 //   - PollTimeout: bounds each Getter call (0 = inherit the run context).
 //   - OnError: invoked with each failed poll's error; may be nil.
-//   - OnPanic: safetick.PanicHandler invoked when a poll panics; may be nil.
+//
+// # Options
+//
+//   - WithOnPanic(h): a safetick.PanicHandler invoked when a poll panics.
 package poller

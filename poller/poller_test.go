@@ -68,10 +68,9 @@ func TestPollerRecoversPanic(t *testing.T) {
 	var panics atomic.Int64
 	p := New(nil, 0, func(context.Context) (int, error) {
 		panic("boom")
-	}, Config{
-		Interval: time.Hour,
-		OnPanic:  func(string, string) { panics.Add(1) },
-	})
+	}, Config{Interval: time.Hour}, WithOnPanic(func(string, string) {
+		panics.Add(1)
+	}))
 
 	// Must not propagate the panic.
 	p.Poll(context.Background())

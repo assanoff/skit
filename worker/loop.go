@@ -1,10 +1,14 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/assanoff/skit/internal/prom"
 	"github.com/assanoff/skit/safetick"
 )
 
@@ -33,7 +37,8 @@ type PacedTickFunc func(ctx context.Context) (Pace, error)
 
 // LoopConfig configures a Loop.
 type LoopConfig struct {
-	// Name identifies the loop in logs and panic metrics.
+	// Name identifies the loop in logs and metrics (default "worker"); give
+	// each loop its own.
 	Name string
 	// Interval between ticks (defaults to 1s if non-positive). In an adaptive loop
 	// (NewPacedLoop) this is the idle interval — the wait after a tick that found
@@ -43,8 +48,11 @@ type LoopConfig struct {
 	ImmediateFirstTick bool
 	// TickTimeout bounds each tick (0 = inherit the loop context with no extra bound).
 	TickTimeout time.Duration
-	// OnPanic is invoked when a tick panics (e.g. to bump a metric); may be nil.
-	OnPanic safetick.PanicHandler
+	// Metrics is the registry of the tick metrics (skit_worker_ticks_total,
+	// skit_worker_tick_duration_seconds,
+	// skit_worker_last_success_timestamp_seconds, by worker = Name); nil
+	// disables them.
+	Metrics prometheus.Registerer
 
 	// BusyInterval is the wait after a Busy tick in an adaptive loop (0 = run
 	// again immediately to drain the backlog). Ignored by a fixed loop.
@@ -62,31 +70,53 @@ type LoopConfig struct {
 // adaptively from the tick's reported Pace. This is the common shape behind the
 // outbox/queue background workers.
 type Loop struct {
-	cfg   LoopConfig
-	tick  TickFunc
-	paced PacedTickFunc
-	log   *slog.Logger
+	cfg     LoopConfig
+	tick    TickFunc
+	paced   PacedTickFunc
+	log     *slog.Logger
+	onPanic safetick.PanicHandler
+	runs    *prom.Runs
+}
+
+// LoopOption customizes a Loop.
+type LoopOption func(*Loop)
+
+// WithOnPanic sets a handler invoked when a tick panics. The panic is always
+// recovered, logged and counted regardless.
+func WithOnPanic(h safetick.PanicHandler) LoopOption {
+	return func(l *Loop) { l.onPanic = h }
 }
 
 // NewLoop builds a fixed-interval Loop. A non-positive Interval defaults to 1s
 // (so a zero-value config never panics in time.NewTicker), matching NewPacedLoop.
 // log may be nil.
-func NewLoop(log *slog.Logger, cfg LoopConfig, tick TickFunc) *Loop {
-	if cfg.Interval <= 0 {
-		cfg.Interval = time.Second
-	}
-	return &Loop{cfg: cfg, tick: tick, log: log}
+func NewLoop(log *slog.Logger, cfg LoopConfig, tick TickFunc, opts ...LoopOption) *Loop {
+	l := newLoop(log, cfg, opts)
+	l.tick = tick
+	return l
 }
 
 // NewPacedLoop builds an adaptive Loop: after each tick it waits BusyInterval
 // (default: immediately) when the tick reported Busy, or Interval — growing
 // toward MaxIdleInterval over consecutive idle ticks — when it reported Idle.
 // This drains a backlog quickly yet idles cheaply. log may be nil.
-func NewPacedLoop(log *slog.Logger, cfg LoopConfig, tick PacedTickFunc) *Loop {
+func NewPacedLoop(log *slog.Logger, cfg LoopConfig, tick PacedTickFunc, opts ...LoopOption) *Loop {
+	l := newLoop(log, cfg, opts)
+	l.paced = tick
+	return l
+}
+
+func newLoop(log *slog.Logger, cfg LoopConfig, opts []LoopOption) *Loop {
+	cfg.Name = cmp.Or(cfg.Name, "worker")
 	if cfg.Interval <= 0 {
 		cfg.Interval = time.Second
 	}
-	return &Loop{cfg: cfg, paced: tick, log: log}
+	ticks := prom.RunsOpts{Subsystem: "worker", Run: "tick", Label: "worker"}
+	l := &Loop{cfg: cfg, log: log, runs: prom.NewRuns(cfg.Metrics, ticks, cfg.Name)}
+	for _, opt := range opts {
+		opt(l)
+	}
+	return l
 }
 
 // Name implements Runnable.
@@ -162,31 +192,41 @@ func (l *Loop) growIdle(cur time.Duration) time.Duration {
 func (l *Loop) Stop(context.Context) error { return nil }
 
 func (l *Loop) runTick(ctx context.Context) {
-	defer safetick.RecoverTick(ctx, l.log, l.cfg.Name, l.cfg.OnPanic)
-
-	tickCtx, cancel := l.tickContext(ctx)
-	if cancel != nil {
-		defer cancel()
-	}
-
-	if err := l.tick(tickCtx); err != nil && l.log != nil {
-		l.log.ErrorContext(ctx, "worker tick error", "worker", l.cfg.Name, "err", err)
-	}
+	l.run(ctx, l.tick)
 }
 
-func (l *Loop) runPacedTick(ctx context.Context) (pace Pace) {
-	defer safetick.RecoverTick(ctx, l.log, l.cfg.Name, l.cfg.OnPanic)
+// runPacedTick runs an adaptive tick and returns its pace; a tick that
+// panicked is Idle.
+func (l *Loop) runPacedTick(ctx context.Context) Pace {
+	var pace Pace
+	l.run(ctx, func(ctx context.Context) error {
+		p, err := l.paced(ctx)
+		pace = p
+		return err
+	})
+	return pace
+}
+
+// run runs tick under panic recovery and TickTimeout, logs its error and
+// records it in the tick metrics.
+func (l *Loop) run(ctx context.Context, tick TickFunc) {
+	start := time.Now()
+	var err error
+	// finished stays false when tick panics: RecoverTick, deferred last, runs
+	// first and stops the panic, then Record counts the tick as a panic.
+	finished := false
+	defer func() { l.runs.Record(ctx, time.Since(start), finished, err) }()
+	defer safetick.RecoverTick(ctx, l.log, l.cfg.Name, l.onPanic)
 
 	tickCtx, cancel := l.tickContext(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
-
-	p, err := l.paced(tickCtx)
+	err = tick(tickCtx)
+	finished = true
 	if err != nil && l.log != nil {
 		l.log.ErrorContext(ctx, "worker tick error", "worker", l.cfg.Name, "err", err)
 	}
-	return p
 }
 
 func (l *Loop) tickContext(ctx context.Context) (context.Context, context.CancelFunc) {

@@ -36,9 +36,10 @@ type StatsReader interface {
 //
 // metrics is required: the worker exists only for its gauges, so a process
 // without metrics does not add it. A read that fails is logged and the gauges
-// keep the values of the last read. Every replica reads the whole table and
-// reports the same values, so a query takes max without(pod, instance), not
-// sum.
+// keep the values of the last read; how fresh they are tells
+// skit_worker_last_success_timestamp_seconds{worker="outbox-backlog"}.
+// Every replica reads the whole table and reports the same values, so a query
+// takes max without(pod, instance), not sum.
 func NewBacklog(log *slog.Logger, sr StatsReader, metrics prometheus.Registerer) *worker.Loop {
 	const interval = 30 * time.Second
 	b := newBacklog(sr, metrics)
@@ -47,6 +48,7 @@ func NewBacklog(log *slog.Logger, sr StatsReader, metrics prometheus.Registerer)
 		Interval:           interval,
 		ImmediateFirstTick: true,
 		TickTimeout:        interval,
+		Metrics:            metrics,
 	}, b.read)
 }
 

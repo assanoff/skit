@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 	"github.com/jmoiron/sqlx"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 // Postgres error codes we translate into sentinel errors.
@@ -39,10 +41,15 @@ type Config struct {
 	MaxIdleConns int
 	MaxOpenConns int
 	DisableTLS   bool
+	// Metrics is the registry of the pool metrics (go_sql_*, labeled db_name
+	// with Name and host with Host); nil disables them.
+	Metrics prometheus.Registerer
 }
 
 // Open opens a sqlx.DB using the pgx driver. It does not verify connectivity;
-// call StatusCheck for that.
+// call StatusCheck for that. With cfg.Metrics set it registers the pool
+// metrics; a pool of the same Host and Name already registered there is an
+// error, and the new pool is closed.
 func Open(cfg Config) (*sqlx.DB, error) {
 	sslMode := "require"
 	if cfg.DisableTLS {
@@ -71,8 +78,24 @@ func Open(cfg Config) (*sqlx.DB, error) {
 
 	db.SetMaxIdleConns(cfg.MaxIdleConns)
 	db.SetMaxOpenConns(cfg.MaxOpenConns)
+	if err := registerPool(db, cfg); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
 
 	return db, nil
+}
+
+// registerPool registers the pool metrics of db on cfg.Metrics, if set. They
+// read db.Stats on each scrape, without a query.
+func registerPool(db *sqlx.DB, cfg Config) error {
+	if cfg.Metrics == nil {
+		return nil
+	}
+	reg := prometheus.WrapRegistererWith(prometheus.Labels{"host": cfg.Host}, cfg.Metrics)
+	if err := reg.Register(collectors.NewDBStatsCollector(db.DB, cfg.Name)); err != nil {
+		return fmt.Errorf("dbx: register pool metrics of %s on %s: %w", cfg.Name, cfg.Host, err)
+	}
+	return nil
 }
 
 // SQLiteConfig configures a SQLite database opened by OpenSQLite.

@@ -23,7 +23,7 @@ func TestRun(t *testing.T) {
 
 func TestSchedulerBuilds(t *testing.T) {
 	is := is.New(t)
-	s, err := newTestCron().Scheduler()
+	s, err := newTestCron().Scheduler(nil)
 	is.NoErr(err)          // schedule spec is valid
 	is.Equal(s.Name(), Name)
 }

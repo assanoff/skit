@@ -58,6 +58,14 @@
 //	    // unique violation
 //	}
 //
+// # Metrics
+//
+// With Config.Metrics set, Open registers the pool metrics there: go_sql_*
+// (open, in-use and idle connections, waits, closes) labeled db_name with
+// Config.Name and host with Config.Host, so a replica on another host is its
+// own series. They read the pool stats on each scrape, without a query. A
+// second pool of the same Host and Name on one registry is an error of Open.
+//
 // # Querying
 //
 //   - ExecContext / NamedExecContext run statements; the RowsAffected
@@ -134,5 +142,6 @@
 //
 // Config fields: User, Password, Host, Name, Schema (sets search_path),
 // MaxIdleConns, MaxOpenConns, DisableTLS (DisableTLS=true selects
-// sslmode=disable, otherwise sslmode=require). Open always sets timezone=utc.
+// sslmode=disable, otherwise sslmode=require), Metrics (the registry of the
+// pool metrics; nil disables them). Open always sets timezone=utc.
 package dbx

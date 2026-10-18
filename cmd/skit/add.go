@@ -703,8 +703,9 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
        mux := queue.NewMux()
        _ = mux.Register(%[1]s.Kind, %[1]s.New(a.d.Logger).Handle)
        proc := worker.NewProcessor[queue.Task](a.d.Logger, q, mux, q, worker.ProcessorConfig{})
-       a.workers = append(a.workers, worker.NewPacedLoop(a.d.Logger,
-           worker.LoopConfig{Name: %[1]q + "-worker", Interval: time.Second}, proc.PacedTick()))
+       a.workers = append(a.workers, worker.NewPacedLoop(a.d.Logger, worker.LoopConfig{
+           Name: %[1]q + "-worker", Interval: time.Second, Metrics: a.d.Metrics,
+       }, proc.PacedTick()))
    }
    // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue", "github.com/assanoff/skit/worker"
 
@@ -724,7 +725,7 @@ Scaffolded the %[1]q periodic worker. Next:
    Worker.Disabled kill switch:
 
    if !a.d.Opts.Worker.Disabled {
-       a.workers = append(a.workers, %[1]s.New(a.d.Logger).Loop(a.d.Opts.Worker.Interval))
+       a.workers = append(a.workers, %[1]s.New(a.d.Logger).Loop(a.d.Opts.Worker.Interval, a.d.Metrics))
    }
    // import: %[1]s "%[2]s/internal/app/workers/%[1]s"
 
@@ -828,7 +829,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
    Postgres advisory-lock Locker:
 
    locker := lock.NewPG(a.d.DB(ctx), a.d.Logger)
-   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler()
+   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler(a.d.Metrics)
    if err != nil { return err }
    a.workers = append(a.workers, sched)
    // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
@@ -841,7 +842,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
    (internal/app/server/server.go), building a Redis Locker:
 
    locker := lock.NewRedis(a.d.Redis(ctx), a.d.Logger)
-   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler()
+   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler(a.d.Metrics)
    if err != nil { return err }
    a.workers = append(a.workers, sched)
    // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
@@ -852,7 +853,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 		fmt.Fprintf(out, `
 2. Wire it into initWorkers (internal/app/server/server.go):
 
-   sched, err := %[1]s.New(a.d.Logger).Scheduler()
+   sched, err := %[1]s.New(a.d.Logger).Scheduler(a.d.Metrics)
    if err != nil { return err }
    a.workers = append(a.workers, sched)
    // import: %[1]s "%[2]s/internal/app/crons/%[1]s"
@@ -1353,7 +1354,7 @@ Scaffolded the %[1]q upstream client (%[2]s transport). Next:
    that uses it and inject *%[1]s.Client:
 
    type %[4]sGateway interface { Get%[4]s(ctx context.Context, id string) (%[1]s.Item, error) }
-   // build it in deps/wiring: %[1]s.New(%[1]s.Config{BaseURL: ...%[5]s})
+   // build it in deps/wiring: %[1]s.New(%[1]s.Config{BaseURL: ..., Metrics: c.Metrics%[5]s})
 
 4. go test ./internal/clients/%[1]s/...
 `, data.Pkg, kind, oauthDep(oauth), data.Type, oauthConfigHint(oauth))

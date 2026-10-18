@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/httpclient"
@@ -42,6 +43,9 @@ type Config struct {
 	// TracerProvider records a client span per attempt; pass Deps.TracerProvider.
 	// nil → the global provider.
 	TracerProvider trace.TracerProvider
+	// Metrics is the registry of the request metrics (skit_http_client_*,
+	// client="{{.Pkg}}"); pass Deps.Metrics. nil disables them.
+	Metrics prometheus.Registerer
 {{if .OAuth}}
 	// OAuth2 client_credentials — all three required.
 	TokenURL     string
@@ -61,6 +65,8 @@ type Client struct {
 // constructed{{if .OAuth}} (e.g. missing OAuth2 credentials){{end}}.
 func New(cfg Config) (*Client, error) {
 	hc, err := httpclient.New(httpclient.Config{
+		Name:           "{{.Pkg}}",
+		Metrics:        cfg.Metrics,
 		Timeout:        cfg.Timeout,
 		Base:           cfg.Base,
 		UserAgent:      "{{.Pkg}}-client",

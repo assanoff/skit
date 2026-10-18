@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/httpmw"
@@ -24,6 +26,13 @@ const maxErrorBody = 8 << 10
 // OAuth2, when set, requires its own required fields. The zero Config yields a
 // plain client with DefaultTimeout and no retry/auth.
 type Config struct {
+	// Name names the client in its metrics, the client label (default
+	// "default"); give each client its own, e.g. the upstream's name.
+	Name string
+	// Metrics is the registry of the request metrics
+	// (skit_http_client_requests_total,
+	// skit_http_client_request_duration_seconds); nil disables them.
+	Metrics prometheus.Registerer
 	// Timeout is the per-request client timeout (default DefaultTimeout). It
 	// bounds the whole call including retries.
 	Timeout time.Duration
@@ -86,8 +95,13 @@ func New(cfg Config) (*http.Client, error) {
 		mws = append(mws, httpmw.SetHeader(k, v))
 	}
 	// Innermost of the decorations: the span of an attempt sees its final
-	// headers, and every attempt gets its own span and traceparent.
+	// headers, and every attempt gets its own span and traceparent. The
+	// metrics below the span record each attempt with its span as the
+	// exemplar.
 	mws = append(mws, clientSpan(cfg.TracerProvider))
+	if cfg.Metrics != nil {
+		mws = append(mws, metricsTransport(newClientMetrics(cfg.Metrics, cmp.Or(cfg.Name, "default"))))
+	}
 
 	return &http.Client{
 		Timeout:   timeout,

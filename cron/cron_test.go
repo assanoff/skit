@@ -2,11 +2,15 @@ package cron
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/matryer/is"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestAddValidatesSpec(t *testing.T) {
@@ -64,4 +68,34 @@ func TestSchedulerRecoversPanic(t *testing.T) {
 
 	is.True(after.Load() >= 2)            // kept firing despite each run panicking
 	is.Equal(panics.Load(), after.Load()) // the handler sees every panic
+}
+
+// Every run is counted under its job name by result, a panic too.
+func TestSchedulerRecordsRuns(t *testing.T) {
+	is := is.New(t)
+	reg := prometheus.NewRegistry()
+	s := New(nil, Config{Name: "test", Metrics: reg})
+	ends := []func() error{
+		func() error { return nil },
+		func() error { return errors.New("boom") },
+		func() error { panic("boom") },
+	}
+	is.NoErr(s.Add("@daily", "cleanup", func(context.Context) error {
+		end := ends[0]
+		ends = ends[1:]
+		return end()
+	}))
+
+	for range 3 {
+		s.run(t.Context(), s.entries[0])
+	}
+
+	want := `
+# HELP skit_cron_runs_total Runs by cron_job and result: ok, error or panic.
+# TYPE skit_cron_runs_total counter
+skit_cron_runs_total{cron_job="cleanup",result="error"} 1
+skit_cron_runs_total{cron_job="cleanup",result="ok"} 1
+skit_cron_runs_total{cron_job="cleanup",result="panic"} 1
+`
+	is.NoErr(testutil.GatherAndCompare(reg, strings.NewReader(want), "skit_cron_runs_total"))
 }

@@ -15,7 +15,7 @@ type Getter[T any] func(ctx context.Context) (T, error)
 
 // Config configures a Poller.
 type Config struct {
-	// Name identifies the poller in logs and panic metrics (defaults to "poller").
+	// Name identifies the poller in logs (defaults to "poller").
 	Name string
 	// Interval between polls (defaults to 1s if non-positive).
 	Interval time.Duration
@@ -24,16 +24,28 @@ type Config struct {
 	// OnError is invoked with each failed poll's error; may be nil (the error is
 	// then only logged).
 	OnError func(error)
-	// OnPanic is invoked when a poll panics; may be nil.
-	OnPanic safetick.PanicHandler
+}
+
+// Option customizes a Poller.
+type Option func(*options)
+
+type options struct {
+	onPanic safetick.PanicHandler
+}
+
+// WithOnPanic sets a handler invoked when a poll panics. The panic is always
+// recovered and logged regardless.
+func WithOnPanic(h safetick.PanicHandler) Option {
+	return func(o *options) { o.onPanic = h }
 }
 
 // Poller caches the latest value returned by its Getter, refreshing it on a
 // fixed interval. Reads via Current are safe for concurrent use.
 type Poller[T any] struct {
-	cfg    Config
-	getter Getter[T]
-	log    *slog.Logger
+	cfg     Config
+	getter  Getter[T]
+	log     *slog.Logger
+	onPanic safetick.PanicHandler
 
 	mu      sync.RWMutex
 	current T
@@ -41,14 +53,18 @@ type Poller[T any] struct {
 
 // New builds a Poller seeded with initial, which Current returns until the first
 // successful poll. log may be nil.
-func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config) *Poller[T] {
+func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config, opts ...Option) *Poller[T] {
 	if cfg.Name == "" {
 		cfg.Name = "poller"
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = time.Second
 	}
-	return &Poller[T]{cfg: cfg, getter: getter, log: log, current: initial}
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return &Poller[T]{cfg: cfg, getter: getter, log: log, onPanic: o.onPanic, current: initial}
 }
 
 // Name identifies the poller in the supervisor and logs.
@@ -79,7 +95,7 @@ func (p *Poller[T]) Stop(context.Context) error { return nil }
 // On error the value is left unchanged and OnError (if set) is invoked. A panic
 // in the Getter is recovered so a single bad poll cannot crash the supervisor.
 func (p *Poller[T]) Poll(ctx context.Context) {
-	defer safetick.RecoverTick(ctx, p.log, p.cfg.Name, p.cfg.OnPanic)
+	defer safetick.RecoverTick(ctx, p.log, p.cfg.Name, p.onPanic)
 
 	pollCtx := ctx
 	if p.cfg.PollTimeout > 0 {

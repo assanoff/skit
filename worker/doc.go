@@ -76,11 +76,22 @@
 //	_ = key // pool.Cancel(key) stops that one job
 //	defer pool.Shutdown(context.Background())
 //
+// # Metrics
+//
+// With LoopConfig.Metrics set, a Loop records every tick under its Name:
+//   - skit_worker_ticks_total by worker and result (ok, error, panic);
+//   - skit_worker_tick_duration_seconds by worker;
+//   - skit_worker_last_success_timestamp_seconds by worker, from the first
+//     tick that ended without an error.
+//
+// A Processor is counted by the ticks of the Loop it runs in.
+//
 // # Config
 //
-// LoopConfig: Name, Interval (required; the idle interval for an adaptive
-// loop), ImmediateFirstTick, TickTimeout, OnPanic, and the adaptive fields
-// BusyInterval and MaxIdleInterval.
+// LoopConfig: Name (default "worker"), Interval (default 1s; the idle interval
+// for an adaptive loop), ImmediateFirstTick, TickTimeout, Metrics, and the
+// adaptive fields BusyInterval and MaxIdleInterval. Option WithOnPanic sets a
+// handler invoked when a tick panics.
 //
 // ProcessorConfig: Name (default "processor"), BatchSize (default 100),
 // HandleTimeout, IsTerminal (nil = all failures retryable), Now (default

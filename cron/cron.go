@@ -11,6 +11,12 @@
 //
 // Specs accept the standard 5-field cron syntax (minute hour dom month dow) and
 // the @-descriptors (@hourly, @daily, @weekly, @monthly, @every <dur>).
+//
+// With Config.Metrics set, every run is recorded under its job name:
+// skit_cron_runs_total by cron_job and result (ok, error, panic),
+// skit_cron_run_duration_seconds and skit_cron_last_success_timestamp_seconds
+// by cron_job. The label is cron_job, not job: Prometheus puts its own job
+// label on every series.
 package cron
 
 import (
@@ -20,8 +26,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	robfig "github.com/robfig/cron/v3"
 
+	"github.com/assanoff/skit/internal/prom"
 	"github.com/assanoff/skit/safetick"
 )
 
@@ -42,6 +50,7 @@ type entry struct {
 	spec string
 	name string
 	job  Job
+	runs *prom.Runs
 }
 
 // Scheduler fires registered Jobs on their cron specs. Build it, Add jobs, then
@@ -49,29 +58,32 @@ type entry struct {
 type Scheduler struct {
 	name    string
 	log     *slog.Logger
+	metrics prometheus.Registerer
 	onPanic safetick.PanicHandler
 	entries []entry
 }
 
 // Config configures a Scheduler.
 type Config struct {
-	// Name identifies the scheduler in logs and panic metrics (defaults to
-	// "cron").
+	// Name identifies the scheduler in logs (defaults to "cron").
 	Name string
+	// Metrics is the registry of the run metrics of the jobs; nil disables
+	// them.
+	Metrics prometheus.Registerer
 }
 
 // Option customizes a Scheduler.
 type Option func(*Scheduler)
 
-// WithOnPanic sets a handler invoked when a job panics (e.g. to bump a
-// metric). The panic is always recovered and logged regardless.
+// WithOnPanic sets a handler invoked when a job panics. The panic is always
+// recovered, logged and counted regardless.
 func WithOnPanic(h safetick.PanicHandler) Option {
 	return func(s *Scheduler) { s.onPanic = h }
 }
 
 // New builds an empty Scheduler. log may be nil.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Scheduler {
-	s := &Scheduler{name: cmp.Or(cfg.Name, "cron"), log: log}
+	s := &Scheduler{name: cmp.Or(cfg.Name, "cron"), log: log, metrics: cfg.Metrics}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -80,7 +92,7 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Scheduler {
 
 // Add registers job to run on spec. The spec is validated immediately, so a
 // typo fails at wiring time rather than silently never firing. jobName labels
-// the job in logs.
+// the job in logs and metrics; give each job its own.
 func (s *Scheduler) Add(spec, jobName string, job Job) error {
 	if job == nil {
 		return fmt.Errorf("cron %q: nil job for %q", s.name, jobName)
@@ -88,7 +100,14 @@ func (s *Scheduler) Add(spec, jobName string, job Job) error {
 	if _, err := specParser.Parse(spec); err != nil {
 		return fmt.Errorf("cron %q: invalid spec %q for %q: %w", s.name, spec, jobName, err)
 	}
-	s.entries = append(s.entries, entry{spec: spec, name: jobName, job: job})
+	s.entries = append(s.entries, entry{
+		spec: spec,
+		name: jobName,
+		job:  job,
+		runs: prom.NewRuns(s.metrics, prom.RunsOpts{
+			Subsystem: "cron", Run: "run", Label: "cron_job",
+		}, jobName),
+	})
 	return nil
 }
 
@@ -121,16 +140,23 @@ func (s *Scheduler) Start(ctx context.Context) error {
 // canceled (the worker.Group cancels it on shutdown), so Stop is a no-op.
 func (s *Scheduler) Stop(context.Context) error { return nil }
 
-// run executes one job firing under panic recovery, skipping it if the context
-// is already canceled (shutdown in progress).
+// run executes one job firing under panic recovery and records it, skipping
+// it if the context is already canceled (shutdown in progress).
 func (s *Scheduler) run(ctx context.Context, e entry) {
 	if ctx.Err() != nil {
 		return
 	}
+	started := time.Now()
+	var err error
+	// finished stays false when the job panics: RecoverTick, deferred last,
+	// runs first and stops the panic, then Record counts the run as a panic.
+	finished := false
+	defer func() { e.runs.Record(ctx, time.Since(started), finished, err) }()
 	defer safetick.RecoverTick(ctx, s.log, s.name+"/"+e.name, s.onPanic)
 
-	started := time.Now()
-	if err := e.job(ctx); err != nil && s.log != nil {
+	err = e.job(ctx)
+	finished = true
+	if err != nil && s.log != nil {
 		s.log.ErrorContext(ctx, "cron job failed",
 			"cron", s.name, "job", e.name, "err", err,
 			"elapsed", time.Since(started).String(),

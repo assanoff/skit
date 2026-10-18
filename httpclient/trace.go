@@ -23,7 +23,7 @@ func clientSpan(tp trace.TracerProvider) httpmw.Middleware {
 		return otelhttp.NewTransport(spanAttrs{next: next},
 			otelhttp.WithTracerProvider(cmp.Or(tp, otel.GetTracerProvider())),
 			otelhttp.WithPropagators(skotel.Propagator()),
-			// HTTP client metrics come from package metrics; otelhttp records
+			// HTTP client metrics come from Config.Metrics; otelhttp records
 			// only spans.
 			otelhttp.WithMeterProvider(noop.NewMeterProvider()),
 		)

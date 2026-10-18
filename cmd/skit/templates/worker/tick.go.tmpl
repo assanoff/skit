@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/assanoff/skit/worker"
 )
 
@@ -35,13 +37,15 @@ func (w *Worker) Tick(ctx context.Context) error {
 }
 
 // Loop wraps Tick in a fixed-interval worker.Loop (a worker.Runnable); a
-// non-positive interval falls back to DefaultInterval.
-func (w *Worker) Loop(interval time.Duration) *worker.Loop {
+// non-positive interval falls back to DefaultInterval. reg is the registry of
+// the tick metrics (skit_worker_*, pass Deps.Metrics); nil disables them.
+func (w *Worker) Loop(interval time.Duration, reg prometheus.Registerer) *worker.Loop {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
 	return worker.NewLoop(w.log, worker.LoopConfig{
 		Name:     "{{.Pkg}}-worker",
 		Interval: interval,
+		Metrics:  reg,
 	}, w.Tick)
 }
