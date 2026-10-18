@@ -4,31 +4,47 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 	"uuid"
 
 	kgo "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/internal/brokertrace"
+	"github.com/assanoff/skit/otel"
 )
+
+// scope names the tracer of this package.
+const scope = "github.com/assanoff/skit/broker/kafka"
 
 // Publisher publishes broker.Messages to Kafka as CloudEvents v1.0
 // structured-mode JSON. It writes with RequireAll acks, so Publish returns nil
 // only after every in-sync replica has the record — at-least-once delivery.
 type Publisher struct {
-	log    *slog.Logger
 	w      *kgo.Writer
 	source string
+	tracer trace.Tracer
 }
 
 // Compile-time check.
 var _ broker.Publisher = (*Publisher)(nil)
 
-// NewPublisher builds a Kafka publisher. source is the CloudEvents source
-// stamped on messages that don't carry their own.
-func NewPublisher(cfg Config, source string, log *slog.Logger) (*Publisher, error) {
-	if source == "" {
+// PublisherConfig configures a Publisher.
+type PublisherConfig struct {
+	// Source is the CloudEvents source stamped on messages that don't carry
+	// their own (required).
+	Source string
+	// TracerProvider records the span of every publish; nil → the global
+	// provider.
+	TracerProvider trace.TracerProvider
+}
+
+// NewPublisher builds a Kafka publisher on the brokers of cfg.
+func NewPublisher(cfg Config, pcfg PublisherConfig) (*Publisher, error) {
+	if pcfg.Source == "" {
 		return nil, errors.New("kafka: new publisher: source is required")
 	}
 	if len(cfg.Brokers) == 0 {
@@ -42,11 +58,13 @@ func NewPublisher(cfg Config, source string, log *slog.Logger) (*Publisher, erro
 		RequiredAcks:           kgo.RequireAll,
 		AllowAutoTopicCreation: true,
 	}
-	return &Publisher{log: log, w: w, source: source}, nil
+	return &Publisher{w: w, source: pcfg.Source, tracer: otel.Tracer(pcfg.TracerProvider, scope)}, nil
 }
 
 // Publish sends m to the Kafka topic m.Topic, keyed by m.Key, as a CloudEvents
-// record and blocks until the brokers acknowledge it.
+// record and blocks until the brokers acknowledge it. The span "send <topic>"
+// covers the write; without a trace context in m.Headers it is the creation
+// context of the message and goes out in its headers.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Topic == "" {
 		return errors.New("kafka publish: topic is required")
@@ -63,6 +81,19 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 		m.Time = time.Now().UTC()
 	}
 
+	attrs := []attribute.KeyValue{semconv.MessagingSystemKafka, semconv.MessagingMessageID(m.ID)}
+	if m.Key != "" {
+		attrs = append(attrs, semconv.MessagingKafkaMessageKey(m.Key))
+	}
+	ctx, span, headers := brokertrace.StartSend(ctx, p.tracer, m.Topic, m.Headers, attrs...)
+	m.Headers = headers
+	err := p.send(ctx, m)
+	brokertrace.End(span, err)
+	return err
+}
+
+// send writes m as a CloudEvents record and waits for the acknowledgement.
+func (p *Publisher) send(ctx context.Context, m broker.Message) error {
 	body, err := broker.MarshalCloudEvent(m)
 	if err != nil {
 		return fmt.Errorf("kafka publish: %w", err)

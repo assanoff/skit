@@ -10,6 +10,13 @@
 // requeue, so a broker.Requeue verdict retries the same message in place with a
 // bounded backoff before it is committed (dropped) — add a dead-letter topic for
 // poison messages. Subscription.Filters has no Kafka equivalent and is ignored.
+//
+// Every publish is a span "send <topic>" with messaging.system kafka and the
+// message key; a message without a trace context in its headers gets the
+// PRODUCER span as its creation context, one that carries it is sent under a
+// CLIENT child of it. NewPublisher takes the brokers in Config and the
+// CloudEvents source and the TracerProvider in PublisherConfig. The consumer
+// span comes from broker.Instrument around the handler.
 package kafka
 
 // Config holds the Kafka connection settings shared by the publisher and

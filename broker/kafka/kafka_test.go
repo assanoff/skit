@@ -72,10 +72,10 @@ func TestNewAppliesDefaults(t *testing.T) {
 }
 
 func TestNewPublisherValidates(t *testing.T) {
-	if _, err := NewPublisher(Config{Brokers: []string{"b"}}, "", testLog()); err == nil {
+	if _, err := NewPublisher(Config{Brokers: []string{"b"}}, PublisherConfig{}); err == nil {
 		t.Error("expected error when source is empty")
 	}
-	if _, err := NewPublisher(Config{}, "svc", testLog()); err == nil {
+	if _, err := NewPublisher(Config{}, PublisherConfig{Source: "svc"}); err == nil {
 		t.Error("expected error when brokers are empty")
 	}
 }

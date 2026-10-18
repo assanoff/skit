@@ -59,10 +59,29 @@
 // the same metrics come from every transport:
 //
 //	h := broker.Instrument(app.HandlePaid, broker.InstrumentConfig{
-//	    Consumer: "orders",
-//	    Metrics:  reg,
+//	    Consumer:       "orders",
+//	    System:         "rabbitmq",
+//	    Metrics:        reg,
+//	    TracerProvider: tp,
 //	})
 //	cons, err := rabbitmq.NewConsumer(conn, log, cfg, h)
 //
 // Publishing is measured by the outbox relay.
+//
+// # Tracing
+//
+// The adapters' publishers record every send as a span "send <destination>".
+// A message without a trace context in its headers gets the PRODUCER span as
+// its creation context, written into its headers; a message that carries one —
+// the outbox relay sends the context the event was created in — is sent under
+// a CLIENT child of it.
+//
+// Instrument records the handling of every message as a CONSUMER span
+// "process <topic>". The creation context from the headers is both the parent
+// and the link of that span. The OpenTelemetry messaging conventions ask for
+// the link and allow the parent for a single message, as this package
+// documents here: a request, the event it created and the handling of that
+// event are one trace under one sampling decision. A handler that processes a
+// batch would link every message's context instead. Requeue, Discard and a
+// panic mark the span failed, with error.type set to the verdict.
 package broker

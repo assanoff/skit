@@ -2,7 +2,6 @@ package rabbitmq
 
 import (
 	"fmt"
-	"log/slog"
 	"net/url"
 
 	rmq "github.com/wagslane/go-rabbitmq"
@@ -40,17 +39,15 @@ func (c Config) amqpURL() string {
 // single Conn is shared by all publishers and consumers in the process.
 type Conn struct {
 	*rmq.Conn
-
-	log *slog.Logger
 }
 
 // Dial opens a managed connection to RabbitMQ.
-func Dial(log *slog.Logger, cfg Config) (*Conn, error) {
+func Dial(cfg Config) (*Conn, error) {
 	conn, err := rmq.NewConn(cfg.amqpURL(), rmq.WithConnectionOptionsLogging)
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: dial: %w", err)
 	}
-	return &Conn{Conn: conn, log: log}, nil
+	return &Conn{Conn: conn}, nil
 }
 
 // Close closes the underlying connection. Safe to register as a closer cleanup.

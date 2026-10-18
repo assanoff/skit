@@ -266,11 +266,11 @@ func New(ctx context.Context, log *slog.Logger, cfg Config) (*Deps, error) {
 		return nil, err
 	}
 
-	conn, err := rabbitmq.Dial(log, cfg.Rabbit)
+	conn, err := rabbitmq.Dial(cfg.Rabbit)
 	if err != nil {
 		return nil, err
 	}
-	pub, err := rabbitmq.NewPublisher(conn, log, rabbitmq.PublisherConfig{Source: "orders"})
+	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "orders"})
 	if err != nil {
 		return nil, err
 	}

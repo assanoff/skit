@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/dim"
@@ -14,13 +13,13 @@ import (
 // Publisher/Consumer on the returned *rabbitmq.Conn separately.
 //
 //	c.BrokerConn, cleanup = dim.NewResource("BrokerConn",
-//		provider.RabbitMQ(log, rabbitmq.Config{
+//		provider.RabbitMQ(rabbitmq.Config{
 //			User: opts.Broker.User, Password: opts.Broker.Password,
 //			Host: opts.Broker.Host, Port: opts.Broker.Port,
 //		}))
-func RabbitMQ(log *slog.Logger, cfg rabbitmq.Config) func(ctx context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
+func RabbitMQ(cfg rabbitmq.Config) func(ctx context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
 	return func(_ context.Context) (*rabbitmq.Conn, dim.CleanupFunc, error) {
-		conn, err := rabbitmq.Dial(log, cfg)
+		conn, err := rabbitmq.Dial(cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("provider: dial rabbitmq: %w", err)
 		}

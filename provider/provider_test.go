@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"log/slog"
 	"testing"
 
 	"github.com/assanoff/skit/broker/rabbitmq"
@@ -15,7 +14,7 @@ func TestConstructorsReturnFactories(t *testing.T) {
 	if Postgres(dbx.Config{Host: "localhost:5432", Name: "x"}) == nil {
 		t.Fatal("Postgres returned a nil factory")
 	}
-	if RabbitMQ(slog.New(slog.DiscardHandler), rabbitmq.Config{Host: "localhost", Port: "5672"}) == nil {
+	if RabbitMQ(rabbitmq.Config{Host: "localhost", Port: "5672"}) == nil {
 		t.Fatal("RabbitMQ returned a nil factory")
 	}
 }

@@ -4,14 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 	"uuid"
 
 	rmq "github.com/wagslane/go-rabbitmq"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/internal/brokertrace"
+	"github.com/assanoff/skit/otel"
 )
+
+// scope names the tracer of this package.
+const scope = "github.com/assanoff/skit/broker/rabbitmq"
 
 // TopicMapper maps a transport-neutral (topic, key) pair to the RabbitMQ
 // (exchange, routingKey) it should publish to. Override the default via
@@ -34,10 +40,10 @@ func defaultTopicMapper(topic, key string) (exchange, routingKey string) {
 // publisher confirmation per publish, giving at-least-once delivery: Publish
 // returns nil only after the broker has durably accepted the message.
 type Publisher struct {
-	log    *slog.Logger
 	pub    *rmq.Publisher
 	source string
 	mapper TopicMapper
+	tracer trace.Tracer
 }
 
 // Compile-time check.
@@ -48,6 +54,9 @@ type PublisherConfig struct {
 	// Source is the CloudEvents source stamped on messages that don't carry
 	// their own (required).
 	Source string
+	// TracerProvider records the span of every publish; nil → the global
+	// provider.
+	TracerProvider trace.TracerProvider
 }
 
 // PublisherOption customizes a Publisher.
@@ -64,7 +73,7 @@ func WithTopicMapper(m TopicMapper) PublisherOption {
 }
 
 // NewPublisher builds a confirm-mode publisher.
-func NewPublisher(conn *Conn, log *slog.Logger, cfg PublisherConfig, opts ...PublisherOption) (*Publisher, error) {
+func NewPublisher(conn *Conn, cfg PublisherConfig, opts ...PublisherOption) (*Publisher, error) {
 	if cfg.Source == "" {
 		return nil, errors.New("rabbitmq: new publisher: source is required")
 	}
@@ -76,7 +85,12 @@ func NewPublisher(conn *Conn, log *slog.Logger, cfg PublisherConfig, opts ...Pub
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: new publisher: %w", err)
 	}
-	pub := &Publisher{log: log, pub: p, source: cfg.Source, mapper: defaultTopicMapper}
+	pub := &Publisher{
+		pub:    p,
+		source: cfg.Source,
+		mapper: defaultTopicMapper,
+		tracer: otel.Tracer(cfg.TracerProvider, scope),
+	}
 	for _, opt := range opts {
 		opt(pub)
 	}
@@ -85,7 +99,9 @@ func NewPublisher(conn *Conn, log *slog.Logger, cfg PublisherConfig, opts ...Pub
 
 // Publish maps m's Topic/Key to a RabbitMQ exchange/routing key, sends it as a
 // persistent CloudEvents message, then blocks on the broker's publisher
-// confirmation.
+// confirmation. The span "send <exchange>" covers the send and the
+// confirmation; without a trace context in m.Headers it is the creation
+// context of the message and goes out in its headers.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Topic == "" {
 		return errors.New("rabbitmq publish: topic is required")
@@ -106,6 +122,20 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 		m.Time = time.Now().UTC()
 	}
 
+	ctx, span, headers := brokertrace.StartSend(ctx, p.tracer, exchange, m.Headers,
+		semconv.MessagingSystemRabbitMQ,
+		semconv.MessagingMessageID(m.ID),
+		semconv.MessagingRabbitMQDestinationRoutingKey(routingKey),
+	)
+	m.Headers = headers
+	err := p.send(ctx, m, exchange, routingKey)
+	brokertrace.End(span, err)
+	return err
+}
+
+// send publishes m to exchange under routingKey and waits for the broker's
+// confirmation.
+func (p *Publisher) send(ctx context.Context, m broker.Message, exchange, routingKey string) error {
 	body, err := broker.MarshalCloudEvent(m)
 	if err != nil {
 		return fmt.Errorf("rabbitmq publish: %w", err)

@@ -14,13 +14,16 @@
 //
 // Wire a publisher and a consumer against one connection:
 //
-//	conn, err := rabbitmq.Dial(log, rabbitmq.Config{
+//	conn, err := rabbitmq.Dial(rabbitmq.Config{
 //	    User: "guest", Password: "guest", Host: "localhost", Port: "5672",
 //	})
 //	if err != nil { /* ... */ }
 //	defer conn.Close()
 //
-//	pub, err := rabbitmq.NewPublisher(conn, log, rabbitmq.PublisherConfig{Source: "myapp"})
+//	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{
+//	    Source:         "myapp",
+//	    TracerProvider: tp,
+//	})
 //	if err != nil { /* ... */ }
 //	defer pub.Close()
 //	err = pub.Publish(ctx, broker.Message{
@@ -30,13 +33,14 @@
 //	    Topic:           "widgets", // → exchange; Key → routing key
 //	})
 //
+//	h := broker.Instrument(func(ctx context.Context, m broker.Message) broker.Action {
+//	    // ... process m ...
+//	    return broker.Ack
+//	}, broker.InstrumentConfig{Consumer: "widgets", System: "rabbitmq", TracerProvider: tp})
 //	cons, err := rabbitmq.NewConsumer(conn, log, rabbitmq.ConsumerConfig{
 //	    Queue:    "widgets.worker",
 //	    Exchange: "widgets",
-//	}, func(ctx context.Context, m broker.Message) broker.Action {
-//	    // ... process m ...
-//	    return broker.Ack
-//	})
+//	}, h)
 //	if err != nil { /* ... */ }
 //	group.Add(cons) // a worker.Runnable; Start blocks until ctx is canceled
 //
@@ -47,19 +51,28 @@
 // single-key topic still routes with no configuration). Override the mapping
 // with WithTopicMapper when topic naming does not map 1:1 to exchanges:
 //
-//	pub, err := rabbitmq.NewPublisher(conn, log, rabbitmq.PublisherConfig{Source: "myapp"},
+//	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "myapp"},
 //	    rabbitmq.WithTopicMapper(func(topic, key string) (exchange, rk string) {
 //	        return "events", topic + "." + key
 //	    }))
+//
+// # Tracing
+//
+// Every publish is a span "send <exchange>" with messaging.system rabbitmq and
+// the routing key. A message without a trace context in its headers gets the
+// PRODUCER span as its creation context, written into the AMQP headers; a
+// message that carries one — the outbox relay sends the context the event was
+// created in — is sent under a CLIENT child of it. The consumer span comes
+// from broker.Instrument around the handler.
 //
 // # Config
 //
 //   - Config: connection settings (User/Password/Host/Port/VHost), or a full
 //     URL that overrides the component fields.
-//   - Publisher: NewPublisher(conn, log, PublisherConfig, opts...); runs in
-//     confirm mode for at-least-once delivery. PublisherConfig field: Source
-//     (required; the CloudEvents source stamped on messages that carry none).
-//     Option: WithTopicMapper.
+//   - Publisher: NewPublisher(conn, PublisherConfig, opts...); runs in
+//     confirm mode for at-least-once delivery. PublisherConfig fields: Source
+//     (required; the CloudEvents source stamped on messages that carry none),
+//     TracerProvider (nil → the global provider). Option: WithTopicMapper.
 //   - Consumer: NewConsumer(conn, log, ConsumerConfig, handler). ConsumerConfig
 //     fields: Queue (required), Exchange, ExchangeKind (default "topic"),
 //     RoutingKeys (default ["#"] when Exchange is set), Concurrency (default 1),

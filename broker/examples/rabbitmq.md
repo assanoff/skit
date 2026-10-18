@@ -70,12 +70,12 @@ type Deps struct {
 }
 
 func New(log *slog.Logger, cfg Config) (*Deps, error) {
-	conn, err := rabbitmq.Dial(log, cfg.Rabbit)
+	conn, err := rabbitmq.Dial(cfg.Rabbit)
 	if err != nil {
 		return nil, err
 	}
 
-	pub, err := rabbitmq.NewPublisher(conn, log, rabbitmq.PublisherConfig{Source: "orders"})
+	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "orders"})
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ if err := addConsumers(log, g, d, app); err != nil {
 `addConsumers` создают kafka-адаптеры:
 
 ```go
-pub, err := kafka.NewPublisher(kafka.Config{Brokers: cfg.Brokers}, "orders", log)
+pub, err := kafka.NewPublisher(kafka.Config{Brokers: cfg.Brokers}, kafka.PublisherConfig{Source: "orders"})
 cons, err := kafka.NewConsumer(kafka.ConsumerConfig{ /* … */ }, log, app.HandlePaid)
 ```
 
