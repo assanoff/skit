@@ -5,9 +5,9 @@ import (
 	"log/slog"
 )
 
-const (
-	ErrorKey = "error"
-)
+// ErrorKey is the key of the error of a request log; its value is the error
+// itself, as in every log record of the service.
+const ErrorKey = "err"
 
 type ctxKeyLogAttrs struct{}
 

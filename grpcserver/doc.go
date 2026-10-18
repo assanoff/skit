@@ -32,6 +32,13 @@
 // carries its trace as the exemplar. Like spans, health checks and reflection
 // are not recorded.
 //
+// # Logging
+//
+// Every RPC is one info record, "grpc.request" ("grpc.stream" for a stream),
+// with the fields of the RPC semantic conventions and the values the metrics
+// record: rpc.method without its leading "/", rpc.response.status_code by its
+// canonical name and rpc.server.call.duration in seconds.
+//
 // # Usage
 //
 //	srv := grpcserver.New(log, grpcserver.Config{

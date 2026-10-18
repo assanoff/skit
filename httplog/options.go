@@ -21,8 +21,8 @@ type Options struct {
 	// This enables log output in different formats compatible with various logging
 	// platforms and standards (ECS, OTEL, GCP, etc.) by providing the schema.
 	//
+	// httplog.SchemaOTEL (OpenTelemetry, the default)
 	// httplog.SchemaECS (Elastic Common Schema)
-	// httplog.SchemaOTEL (OpenTelemetry)
 	// httplog.SchemaGCP (Google Cloud Platform)
 	//
 	// Append .Concise(true) to reduce log verbosity (e.g. for localhost development).
@@ -99,7 +99,7 @@ type Options struct {
 
 var defaultOptions = Options{
 	Level:               slog.LevelInfo,
-	Schema:              SchemaECS,
+	Schema:              SchemaOTEL,
 	RecoverPanics:       true,
 	LogRequestHeaders:   []string{"Content-Type", "Origin"},
 	LogResponseHeaders:  []string{"Content-Type"},

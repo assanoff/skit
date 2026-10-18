@@ -2,6 +2,8 @@ package httplog
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -51,9 +53,12 @@ func TestClientIP(t *testing.T) {
 		return r
 	}
 
-	is.Equal(clientIP(mk("1.2.3.4:5678", nil)), "1.2.3.4:5678")                                      // falls back to RemoteAddr
-	is.Equal(clientIP(mk("x", map[string]string{"X-Real-IP": "9.9.9.9"})), "9.9.9.9")                // then X-Real-IP
-	is.Equal(clientIP(mk("x", map[string]string{"X-Forwarded-For": "8.8.8.8, 7.7.7.7"})), "8.8.8.8") // first XFF hop, trimmed
+	is.Equal(clientIP(mk("1.2.3.4:5678", nil)), "1.2.3.4") // RemoteAddr without the port
+	is.Equal(clientIP(mk("[::1]:5678", nil)), "::1")
+	is.Equal(clientIP(mk("x", nil)), "x") // a RemoteAddr without a port stays as it is
+	// X-Real-IP is not read, as the server span does not read it.
+	is.Equal(clientIP(mk("1.2.3.4:5678", map[string]string{"X-Real-IP": "9.9.9.9"})), "1.2.3.4")
+	is.Equal(clientIP(mk("x", map[string]string{"X-Forwarded-For": "8.8.8.8, 7.7.7.7"})), "8.8.8.8") // first XFF hop
 }
 
 func TestLogBody(t *testing.T) {
@@ -134,7 +139,7 @@ func TestRequestLoggerLogsRequestWithCustomAttr(t *testing.T) {
 	out := buf.String()
 	is.Equal(rec.Code, http.StatusCreated)
 	is.True(strings.Contains(out, "GET /widgets => HTTP 201"))        // the summary message
-	is.True(strings.Contains(out, `"http.response.status_code":201`)) // mapped via the ECS schema
+	is.True(strings.Contains(out, `"http.response.status_code":201`)) // mapped via the OTel schema
 	is.True(strings.Contains(out, `"user_id":"u1"`))                  // the SetAttrs attribute is included
 }
 
@@ -152,7 +157,7 @@ func TestRequestLoggerSetError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
-	is.True(strings.Contains(buf.String(), "kaboom")) // SetError surfaced the error in the log
+	is.Equal(logLine(t, &buf)["err"], "kaboom") // SetError surfaced the error under ErrorKey
 }
 
 func TestRequestLoggerRecoversPanic(t *testing.T) {
@@ -169,7 +174,9 @@ func TestRequestLoggerRecoversPanic(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil)) // must not propagate the panic
 
 	is.Equal(rec.Code, http.StatusInternalServerError) // RecoverPanics defaults to true -> 500
-	is.True(strings.Contains(buf.String(), "panic: boom"))
+	line := logLine(t, &buf)
+	is.Equal(line["err"], "panic: boom")
+	is.True(line["exception.stacktrace"] != nil)
 }
 
 func TestRequestLoggerRecoversPanicWithStrayUpgradeHeader(t *testing.T) {
@@ -226,4 +233,75 @@ func TestRequestLoggerWritesThroughHandler(t *testing.T) {
 
 	is.Equal(rec.Code, http.StatusOK)
 	is.True(strings.Contains(buf.String(), "GET /ping => HTTP 200")) // logs through the given logger's handler
+}
+
+// logLine decodes the one JSON record in buf.
+func logLine(t *testing.T, buf *bytes.Buffer) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("decode log line %q: %v", buf.String(), err)
+	}
+	return m
+}
+
+// The concise OTel schema records the fields the server span and the HTTP
+// metrics share, and the message leaves the query out.
+func TestRequestLoggerRecordsRequestFields(t *testing.T) {
+	is := is.New(t)
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	created := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux := http.NewServeMux()
+	mux.Handle("GET /widgets/{id}", RequestLogger(log, &Options{Schema: SchemaOTEL.Concise(true)})(created))
+	req := httptest.NewRequest(http.MethodGet, "/widgets/42?token=secret", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+
+	mux.ServeHTTP(httptest.NewRecorder(), req)
+
+	line := logLine(t, &buf)
+	is.True(strings.HasPrefix(line["msg"].(string), "GET /widgets/42 => HTTP 201"))
+	is.True(!strings.Contains(buf.String(), "secret")) // no query in the message or a field
+	is.Equal(line["http.request.method"], "GET")
+	is.Equal(line["http.route"], "/widgets/{id}")
+	is.Equal(line["http.response.status_code"], 201.0)
+	is.Equal(line["client.address"], "10.0.0.1")
+	_, ok := line["http.server.request.duration"].(float64)
+	is.True(ok) // seconds
+}
+
+// A method the HTTP semantic conventions do not know is recorded as _OTHER;
+// outside a route there is no http.route.
+func TestRequestLoggerRecordsOtherMethod(t *testing.T) {
+	is := is.New(t)
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	h := RequestLogger(log, nil)(noop)
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("PURGE", "/cache", nil))
+
+	line := logLine(t, &buf)
+	is.Equal(line["http.request.method"], "_OTHER")
+	_, ok := line["http.route"]
+	is.True(!ok)
+}
+
+// A client that went away is recorded under ErrorKey.
+func TestRequestLoggerRecordsClientAbort(t *testing.T) {
+	is := is.New(t)
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	h := RequestLogger(log, nil)(noop)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx))
+
+	line := logLine(t, &buf)
+	is.Equal(line["err"], ErrClientAborted.Error())
+	is.Equal(line["error.type"], "ClientAborted")
 }

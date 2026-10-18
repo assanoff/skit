@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/matryer/is"
 	"google.golang.org/grpc"
@@ -73,4 +74,17 @@ func TestErrorMapUnary(t *testing.T) {
 	resp, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{}, okHandler)
 	is.NoErr(err)
 	is.Equal(resp, "v")
+}
+
+// The log line of an RPC names its fields as the RPC semantic conventions do.
+func TestRPCLogArgs(t *testing.T) {
+	is := is.New(t)
+
+	args := rpcLogArgs("/test.Echo/Ping", status.Error(codes.NotFound, "no widget"), 1500*time.Millisecond)
+
+	is.Equal(args, []any{
+		"rpc.method", "test.Echo/Ping",
+		"rpc.response.status_code", "NOT_FOUND",
+		"rpc.server.call.duration", 1.5,
+	})
 }

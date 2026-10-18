@@ -54,6 +54,7 @@ type Schema struct {
 	RequestURL         string // Full request URL
 	RequestMethod      string // HTTP method (e.g. GET, POST)
 	RequestPath        string // URL path component
+	RequestRoute       string // Route template (e.g. /v1/widgets/{id})
 	RequestRemoteIP    string // Client IP address
 	RequestHost        string // Host header value
 	RequestScheme      string // URL scheme (http, https)
@@ -129,6 +130,7 @@ var (
 		RequestURL:         "url.full",
 		RequestMethod:      "http.request.method",
 		RequestPath:        "url.path",
+		RequestRoute:       "http.route",
 		RequestRemoteIP:    "client.address",
 		RequestHost:        "server.address",
 		RequestScheme:      "url.scheme",
@@ -246,10 +248,10 @@ func (s *Schema) ReplaceAttr(groups []string, a slog.Attr) slog.Attr {
 	return a
 }
 
-// Concise returns a simplified schema with essential fields only.
-// If concise is true, it reduces log verbosity.
-//
-// This is useful for localhost development to reduce log verbosity.
+// Concise returns a simplified schema with essential fields only: the method,
+// route, status code and duration of the request, the client address, the
+// error, and the headers and bodies the Options log. If concise is false, it
+// returns s.
 func (s *Schema) Concise(concise bool) *Schema {
 	if !concise {
 		return s
@@ -257,12 +259,18 @@ func (s *Schema) Concise(concise bool) *Schema {
 
 	return &Schema{
 		ErrorMessage:       s.ErrorMessage,
+		ErrorType:          s.ErrorType,
 		ErrorStackTrace:    s.ErrorStackTrace,
+		RequestMethod:      s.RequestMethod,
+		RequestRoute:       s.RequestRoute,
+		RequestRemoteIP:    s.RequestRemoteIP,
 		RequestHeaders:     s.RequestHeaders,
 		RequestBody:        s.RequestBody,
 		RequestBytesUnread: s.RequestBytesUnread,
 		ResponseHeaders:    s.ResponseHeaders,
 		ResponseBody:       s.ResponseBody,
+		ResponseStatus:     s.ResponseStatus,
+		ResponseDuration:   s.ResponseDuration,
 		GroupDelimiter:     s.GroupDelimiter,
 	}
 }

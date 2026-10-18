@@ -2,11 +2,13 @@ package httplog
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -15,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/assanoff/skit/httpw"
+	"github.com/assanoff/skit/middleware"
 )
 
 var ErrClientAborted = fmt.Errorf("request aborted: client disconnected before response was sent")
@@ -49,6 +52,12 @@ func isAbortHandler(rec any) bool {
 // correlation and sinks of the rest of the application — one handler, distinct
 // instances. Pass a dedicated child, e.g. log.With("logger", "access"), to tag
 // access lines. A nil Options falls back to the package defaults.
+//
+// The method (middleware.Method), route (middleware.Route), status code and
+// client address are the values the server span and the HTTP metrics record,
+// under the names of the Schema (SchemaOTEL by default). The message leaves the
+// query out: it may carry tokens and personal data. An error — SetError, a
+// client that went away, a panic — goes under ErrorKey as an error value.
 func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Handler {
 	// Work on a copy so filling in defaults never mutates the caller's Options
 	// (or the package-global defaultOptions when o is nil).
@@ -63,10 +72,7 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 		opts.LogBodyMaxLen = defaultOptions.LogBodyMaxLen
 	}
 	o = &opts
-	s := o.Schema
-	if s == nil {
-		s = SchemaECS
-	}
+	s := cmp.Or(o.Schema, SchemaOTEL)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +114,7 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 						defer panic(rec)
 					}
 
-					logAttrs = appendAttrs(logAttrs, slog.String(s.ErrorMessage, fmt.Sprintf("panic: %v", rec)))
+					logAttrs = appendAttrs(logAttrs, slog.Any(ErrorKey, fmt.Errorf("panic: %v", rec)))
 
 					if !isAbortHandler(rec) {
 						pc := make([]uintptr, 10)   // Capture up to 10 stack frames.
@@ -161,7 +167,7 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 
 				logAttrs = appendAttrs(logAttrs,
 					slog.String(s.RequestURL, requestURL(r)),
-					slog.String(s.RequestMethod, r.Method),
+					slog.String(s.RequestMethod, middleware.Method(r)),
 					slog.String(s.RequestPath, r.URL.Path),
 					slog.String(s.RequestRemoteIP, clientIP(r)),
 					slog.String(s.RequestHost, r.Host),
@@ -176,6 +182,10 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 					responseDuration(s.ResponseDuration, duration),
 					slog.Int(s.ResponseBytes, ww.BytesWritten()),
 				)
+
+				if route := middleware.Route(r); route != "" {
+					logAttrs = appendAttrs(logAttrs, slog.String(s.RequestRoute, route))
+				}
 
 				if err := ctx.Err(); errors.Is(err, context.Canceled) {
 					logAttrs = appendAttrs(logAttrs, slog.Any(ErrorKey, ErrClientAborted), slog.String(s.ErrorType, "ClientAborted"))
@@ -204,7 +214,7 @@ func RequestLogger(logger *slog.Logger, o *Options) func(http.Handler) http.Hand
 					logAttrs = groupAttrs(logAttrs, s.GroupDelimiter)
 				}
 
-				msg := fmt.Sprintf("%s %s => HTTP %v (%v)", r.Method, r.URL, statusCode, duration)
+				msg := fmt.Sprintf("%s %s => HTTP %v (%v)", r.Method, r.URL.Path, statusCode, duration)
 				logger.LogAttrs(ctx, lvl, msg, logAttrs...)
 			}()
 
@@ -297,15 +307,17 @@ func logBody(body *bytes.Buffer, header http.Header, o *Options) string {
 	return fmt.Sprintf("[body redacted for Content-Type: %s]", contentType)
 }
 
-// clientIP resolves the client address for the request log, preferring the
-// first X-Forwarded-For hop, then X-Real-IP, then RemoteAddr.
+// clientIP resolves the client address for the request log as the server span
+// does: the first X-Forwarded-For hop, else the host of RemoteAddr, without the
+// port.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		first, _, _ := strings.Cut(xff, ",")
 		return strings.TrimSpace(first)
 	}
-	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-		return strings.TrimSpace(xrip)
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
-	return r.RemoteAddr
+	return host
 }

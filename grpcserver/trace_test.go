@@ -132,4 +132,6 @@ func TestLogCarriesTraceIDWithoutExport(t *testing.T) {
 	traceID, _ := line["trace_id"].(string)
 	is.True(hex32.MatchString(traceID))
 	is.Equal(line["trace_flags"], "00")
+	is.Equal(line["rpc.method"], "test.Echo/Ping")
+	is.Equal(line["rpc.response.status_code"], "OK")
 }

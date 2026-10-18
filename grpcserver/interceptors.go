@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -38,13 +40,21 @@ func loggingUnary(log *slog.Logger) grpc.UnaryServerInterceptor {
 		start := time.Now()
 		resp, err := handler(ctx, req)
 		if log != nil {
-			log.InfoContext(ctx, "grpc.request",
-				"rpc.method", info.FullMethod,
-				"rpc.grpc.status_code", status.Code(err).String(),
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			log.InfoContext(ctx, "grpc.request", rpcLogArgs(info.FullMethod, err, time.Since(start))...)
 		}
 		return resp, err
+	}
+}
+
+// rpcLogArgs are the fields of the log line of an RPC of fullMethod that ended
+// with err after d, under the names of the RPC semantic conventions: the
+// method without its leading "/", the canonical status code ("NOT_FOUND") and
+// the duration in seconds — the values the metrics record.
+func rpcLogArgs(fullMethod string, err error, d time.Duration) []any {
+	return []any{
+		string(semconv.RPCMethodKey), strings.TrimPrefix(fullMethod, "/"),
+		string(semconv.RPCResponseStatusCodeKey), codeName(status.Code(err)),
+		"rpc.server.call.duration", d.Seconds(),
 	}
 }
 
@@ -115,11 +125,7 @@ func loggingStream(log *slog.Logger) grpc.StreamServerInterceptor {
 		start := time.Now()
 		err := handler(srv, ss)
 		if log != nil {
-			log.InfoContext(ss.Context(), "grpc.stream",
-				"rpc.method", info.FullMethod,
-				"rpc.grpc.status_code", status.Code(err).String(),
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			log.InfoContext(ss.Context(), "grpc.stream", rpcLogArgs(info.FullMethod, err, time.Since(start))...)
 		}
 		return err
 	}
