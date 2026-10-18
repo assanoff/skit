@@ -30,8 +30,7 @@ func TestMustRegisterPanicsOnConflict(t *testing.T) {
 
 	defer func() {
 		if recover() == nil {
-			t.Error(`MustRegister(reg, gauge "test_total") after a counter of that name ` +
-				"did not panic, want panic")
+			t.Error(`MustRegister(reg, gauge "test_total") after a counter of that name did not panic, want panic`)
 		}
 	}()
 	// Same name, different type (gauge vs counter) → genuine conflict.
