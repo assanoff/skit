@@ -49,4 +49,20 @@
 // CloudEvents body with publisher confirms; its Consumer decodes deliveries back
 // into Messages and dispatches them to a broker.Handler. Application and domain
 // code depend only on broker.Publisher / broker.Handler, never on the adapter.
+//
+// # Metrics
+//
+// Instrument wraps a Handler and records skit_broker_consumed_total by consumer
+// and action (ack, requeue, discard, panic) and
+// skit_broker_handle_duration_seconds by consumer on the registry of its
+// config. Wrap the handler before passing it to an adapter or to Process, so
+// the same metrics come from every transport:
+//
+//	h := broker.Instrument(app.HandlePaid, broker.InstrumentConfig{
+//	    Consumer: "orders",
+//	    Metrics:  reg,
+//	})
+//	cons, err := rabbitmq.NewConsumer(conn, log, cfg, h)
+//
+// Publishing is measured by the outbox relay.
 package broker

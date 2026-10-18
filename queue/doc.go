@@ -83,6 +83,20 @@
 // PG.Cleanup reaps done/dead-lettered rows finished before a cutoff; run it
 // periodically via worker.Loop.
 //
+// # Metrics
+//
+// A Mux built with WithMetrics records skit_queue_handled_total by kind and
+// result (ok, error) and skit_queue_handle_duration_seconds by kind. NewBacklog
+// builds the worker.Loop that reads PG.Stats every 30 seconds into the gauges
+// skit_queue_pending, skit_queue_leased and skit_queue_dead; add it to the
+// group of a process that has metrics:
+//
+//	mux := queue.NewMux(queue.WithMetrics(reg))
+//	group.Add(queue.NewBacklog(log, q, reg))
+//
+// The Loop that runs the processor records its ticks itself when its
+// LoopConfig has the same registry.
+//
 // # Options
 //
 //   - Options.LeaseTimeout: how long a claimed task stays leased before another
@@ -90,6 +104,8 @@
 //   - Options.RetryDelay: how long a retryable (non-terminal) failure waits
 //     before it is claimable again (default 30s). NewInMem takes the same
 //     Options as NewPG.
+//   - WithFallback(fn): the Mux handler for a Kind with no registered handler.
+//   - WithMetrics(reg): the registry of the Mux metrics.
 //   - ScheduleParams: Name (optional dedup key — empty means always insert),
 //     Kind (handler routing key, required), Payload (opaque body), Delay
 //     (postpones the earliest claim time).

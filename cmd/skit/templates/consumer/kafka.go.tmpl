@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	kgo "github.com/segmentio/kafka-go"
 
 	"github.com/assanoff/skit/broker"
@@ -27,9 +28,10 @@ const (
 
 // kafkaRunnable is the Kafka consumer for this handler, generated into the
 // service so you own the consume loop. skit supplies only the infrastructure:
-// the decode+panic-guard+verdict primitive (broker.Process). Edit the reader
-// config, retry policy, or commit strategy freely — or replace the loop
-// wholesale; Handle in {{.Pkg}}.go stays untouched.
+// the decode+panic-guard+verdict primitive (broker.Process) and the handler
+// metrics (broker.Instrument). Edit the reader config, retry policy, or commit
+// strategy freely — or replace the loop wholesale; Handle in {{.Pkg}}.go stays
+// untouched.
 type kafkaRunnable struct {
 	log     *slog.Logger
 	brokers []string
@@ -44,8 +46,11 @@ type kafkaRunnable struct {
 	once    sync.Once
 }
 
-// Runnable returns the worker.Runnable to register on the worker group.
-func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts) (worker.Runnable, error) {
+// Runnable returns the worker.Runnable to register on the worker group. Every
+// attempt at a message is recorded in skit_broker_* on reg; a nil reg turns the
+// metrics off.
+func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts, reg prometheus.Registerer) (worker.Runnable, error) {
+	const name = "{{.Pkg}}-consumer"
 	conc := opts.Concurrency
 	if conc <= 0 {
 		conc = 1
@@ -56,8 +61,8 @@ func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts) (worker.
 		topic:   opts.Topic,
 		group:   opts.Group,
 		conc:    conc,
-		h:       c.Handle,
-		name:    "{{.Pkg}}-consumer",
+		h:       broker.Instrument(c.Handle, broker.InstrumentConfig{Consumer: name, Metrics: reg}),
+		name:    name,
 	}, nil
 }
 

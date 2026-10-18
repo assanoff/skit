@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	rmq "github.com/wagslane/go-rabbitmq"
 
 	"github.com/assanoff/skit/broker"
@@ -19,8 +20,9 @@ import (
 // service so you own the topology and the consume loop. skit supplies only the
 // infrastructure: the managed connection (rabbitmq.Conn), the
 // decode+panic-guard+verdict primitive (broker.Process), and the verdict→AMQP
-// mapping (rabbitmq.ToAction). Edit the exchange kind, bindings, or concurrency
-// freely — or replace the loop wholesale; Handle in {{.Pkg}}.go stays untouched.
+// mapping (rabbitmq.ToAction), and the handler metrics (broker.Instrument). Edit
+// the exchange kind, bindings, or concurrency freely — or replace the loop
+// wholesale; Handle in {{.Pkg}}.go stays untouched.
 type rmqRunnable struct {
 	log  *slog.Logger
 	rc   *rmq.Consumer
@@ -30,8 +32,9 @@ type rmqRunnable struct {
 }
 
 // Runnable declares the queue/exchange/bindings from config and returns the
-// worker.Runnable to register on the worker group.
-func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (worker.Runnable, error) {
+// worker.Runnable to register on the worker group. Every message is recorded in
+// skit_broker_* on reg; a nil reg turns the metrics off.
+func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts, reg prometheus.Registerer) (worker.Runnable, error) {
 	name := "{{.Pkg}}-consumer"
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
@@ -60,7 +63,8 @@ func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts) (work
 	if err != nil {
 		return nil, fmt.Errorf("%s: new rabbitmq consumer: %w", name, err)
 	}
-	return &rmqRunnable{log: c.log, rc: rc, h: c.Handle, name: name}, nil
+	h := broker.Instrument(c.Handle, broker.InstrumentConfig{Consumer: name, Metrics: reg})
+	return &rmqRunnable{log: c.log, rc: rc, h: h, name: name}, nil
 }
 
 // Name implements worker.Runnable.

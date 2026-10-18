@@ -207,3 +207,27 @@ func (q *PG) Cleanup(ctx context.Context, before time.Time) (int64, error) {
 	}
 	return n, nil
 }
+
+// Stats reads the backlog of the queue at now: the tasks ready to claim, the
+// leased ones and the dead letters. Every call counts the whole table.
+func (q *PG) Stats(ctx context.Context, now time.Time) (Stats, error) {
+	const query = `
+SELECT
+    count(*) FILTER (WHERE done_at IS NULL AND lease_id IS NULL AND run_at <= :now) AS pending,
+    count(*) FILTER (WHERE done_at IS NULL AND lease_id IS NOT NULL)               AS leased,
+    count(*) FILTER (WHERE done_at IS NOT NULL)                                    AS dead
+FROM queue_tasks`
+	args := struct {
+		Now time.Time `db:"now"`
+	}{Now: now}
+
+	var row struct {
+		Pending int64 `db:"pending"`
+		Leased  int64 `db:"leased"`
+		Dead    int64 `db:"dead"`
+	}
+	if err := dbx.NamedQueryStruct(ctx, q.log, q.db, query, args, &row); err != nil {
+		return Stats{}, fmt.Errorf("queue stats: %w", err)
+	}
+	return Stats{Pending: row.Pending, Leased: row.Leased, Dead: row.Dead}, nil
+}

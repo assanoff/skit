@@ -225,6 +225,29 @@ group.Add(worker.NewLoop(log, worker.LoopConfig{
 }))
 ```
 
+## Metrics
+
+`WithMetrics` makes a `Mux` record every task it handles on the registry:
+
+- `skit_queue_handled_total{kind,result}` — `result` is `ok` or `error`;
+- `skit_queue_handle_duration_seconds{kind}`.
+
+`kind` is the kind given to `Register`; a task of another kind is recorded as
+`<fallback>` with `WithFallback` and as `<unknown>` without it. A panicking
+handler ends the tick, so the `worker.Loop` counts it in
+`skit_worker_ticks_total{result="panic"}` when its `LoopConfig.Metrics` is set.
+
+`NewBacklog` builds the `worker.Loop` that reads `PG.Stats` every 30 seconds into
+the gauges `skit_queue_pending` (ready to claim), `skit_queue_leased` and
+`skit_queue_dead` (dead letters). Every replica reports the same values, so a
+dashboard takes `max`, not `sum`.
+
+```go
+mux := queue.NewMux(queue.WithMetrics(reg))
+group.Add(worker.NewPacedLoop(log, worker.LoopConfig{Name: "jobs", Metrics: reg}, proc.PacedTick()))
+group.Add(queue.NewBacklog(log, q, reg))
+```
+
 ## Testing with InMem
 
 `NewInMem` has the same lease/retry/dedup semantics as Postgres but needs no

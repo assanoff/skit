@@ -128,7 +128,8 @@ func addOutboxWorkers(ctx context.Context, a *App) {
 func initConsumers(ctx context.Context, a *App) error { //nolint:revive // ctx is for the consumers wired here
 	// Wire queue consumers here; a RabbitMQ one goes behind Broker.Enabled, e.g.:
 	//   if a.d.Opts.Broker.Enabled {
-	//   	c, err := rabbitmq.NewConsumer(a.d.BrokerConn(ctx), a.d.Logger, cfg, handler)
+	//   	h := broker.Instrument(handler, broker.InstrumentConfig{Consumer: cfg.Name, Metrics: a.d.Metrics})
+	//   	c, err := rabbitmq.NewConsumer(a.d.BrokerConn(ctx), a.d.Logger, cfg, h)
 	//   	if err != nil {
 	//   		return err
 	//   	}

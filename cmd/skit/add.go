@@ -545,7 +545,7 @@ the transport lives in %[1]s_rmq.go. Next:
    (server.WithConsumers):
 
    if a.d.Opts.Broker.Enabled {
-       cons, err := %[1]s.New(a.d.Logger).Runnable(a.d.BrokerConn(ctx), a.d.Opts.%[2]sConsumer)
+       cons, err := %[1]s.New(a.d.Logger).Runnable(a.d.BrokerConn(ctx), a.d.Opts.%[2]sConsumer, a.d.Metrics)
        if err != nil {
            return err
        }
@@ -573,7 +573,7 @@ the transport lives in %[1]s_kafka.go. Next:
    Runnable builds the Kafka consumer from config — supply the brokers (from your
    own config/env):
 
-   cons, err := %[1]s.New(a.d.Logger).Runnable(kafka.Config{Brokers: a.d.Opts.Kafka.Brokers}, a.d.Opts.%[2]sConsumer)
+   cons, err := %[1]s.New(a.d.Logger).Runnable(kafka.Config{Brokers: a.d.Opts.Kafka.Brokers}, a.d.Opts.%[2]sConsumer, a.d.Metrics)
    if err != nil {
        return err
    }
@@ -590,7 +590,8 @@ the transport lives in %[1]s_kafka.go. Next:
 Scaffolded the %[1]q consumer handler (broker-agnostic). NOTE: skit has no %[5]s
 adapter yet — use rmq or kafka. The handler (%[1]s.go) and config are ready; wire
 the transport by hand once the adapter lands (mirror the rmq/kafka case: build a
-broker.Subscription from config and bind it to %[1]s.New(d.Logger).Handle).
+broker.Subscription from config and bind it to %[1]s.New(d.Logger).Handle wrapped
+in broker.Instrument).
 
 1. go mod tidy
 
@@ -700,13 +701,15 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
    the Worker.Disabled kill switch:
 
    if !a.d.Opts.Worker.Disabled {
-       mux := queue.NewMux()
+       mux := queue.NewMux(queue.WithMetrics(a.d.Metrics))
        _ = mux.Register(%[1]s.Kind, %[1]s.New(a.d.Logger).Handle)
        proc := worker.NewProcessor[queue.Task](a.d.Logger, q, mux, q, worker.ProcessorConfig{})
        a.workers = append(a.workers, worker.NewPacedLoop(a.d.Logger, worker.LoopConfig{
            Name: %[1]q + "-worker", Interval: time.Second, Metrics: a.d.Metrics,
        }, proc.PacedTick()))
    }
+   // One per process, not per worker: the skit_queue_{pending,leased,dead} gauges.
+   a.workers = append(a.workers, queue.NewBacklog(a.d.Logger, q, a.d.Metrics))
    // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue", "github.com/assanoff/skit/worker"
 
 4. Enqueue work: q.Schedule(ctx, queue.ScheduleParams{Kind: %[1]s.Kind, Payload: ...})

@@ -19,6 +19,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/assanoff/skit/auditlog"
 	"github.com/assanoff/skit/auditlog/auditbus"
 	"github.com/assanoff/skit/queue"
@@ -86,6 +88,9 @@ type WorkerConfig struct {
 	Interval time.Duration
 	// Batch caps tasks claimed per tick (default 100).
 	Batch int
+	// Metrics is the registry for the skit_queue_* metrics of the audit tasks
+	// and the skit_worker_* metrics of the loop; nil — metrics off.
+	Metrics prometheus.Registerer
 }
 
 // NewWorker returns a worker.Loop that claims audit tasks and records them via
@@ -103,7 +108,7 @@ func NewWorker(q queue.Queue, core *auditlog.Core, log *slog.Logger, cfg WorkerC
 		batch = 100
 	}
 	w := &Worker{core: core}
-	mux := queue.NewMux()
+	mux := queue.NewMux(queue.WithMetrics(cfg.Metrics))
 	if err := mux.Register(Kind, w.handle); err != nil {
 		return nil, fmt.Errorf("auditqueue: new worker: %w", err)
 	}
@@ -117,6 +122,7 @@ func NewWorker(q queue.Queue, core *auditlog.Core, log *slog.Logger, cfg WorkerC
 		Name:               "auditlog-queue",
 		Interval:           cfg.Interval,
 		ImmediateFirstTick: true,
+		Metrics:            cfg.Metrics,
 	}, proc.Tick()), nil
 }
 
