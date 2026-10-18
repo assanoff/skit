@@ -71,9 +71,9 @@ func (k kindMetrics) observe(ctx context.Context, d time.Duration, err error) {
 	k.ok.Inc()
 }
 
-// newGauge builds the gauge skit_queue_<name> and registers it on metrics.
-func newGauge(metrics prometheus.Registerer, name, help string) prometheus.Gauge {
-	return prom.MustRegister(metrics, prometheus.NewGauge(prometheus.GaugeOpts{
+// newGauge builds the gauge skit_queue_<name> and registers it on reg.
+func newGauge(reg prometheus.Registerer, name, help string) prometheus.Gauge {
+	return prom.MustRegister(reg, prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: metricsNamespace, Subsystem: metricsSubsystem,
 		Name: name,
 		Help: help,

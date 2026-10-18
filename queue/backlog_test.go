@@ -38,13 +38,13 @@ skit_queue_pending 7
 func TestBacklogRead(t *testing.T) {
 	is := is.New(t)
 	reg := prometheus.NewRegistry()
-	sr := &fakeStats{st: Stats{Pending: 7, Leased: 2, Dead: 1}}
-	b := newBacklog(sr, reg)
+	fakeSR := &fakeStats{st: Stats{Pending: 7, Leased: 2, Dead: 1}}
+	b := newBacklog(fakeSR, reg)
 
 	is.NoErr(b.read(t.Context()))
 	is.NoErr(testutil.GatherAndCompare(reg, strings.NewReader(backlogWant)))
 
-	sr.st, sr.err = Stats{}, context.DeadlineExceeded
+	fakeSR.st, fakeSR.err = Stats{}, context.DeadlineExceeded
 	err := b.read(t.Context())
 	is.True(errors.Is(err, context.DeadlineExceeded))
 	is.NoErr(testutil.GatherAndCompare(reg, strings.NewReader(backlogWant)))

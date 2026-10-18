@@ -49,7 +49,7 @@ type MuxOption func(*muxOptions)
 // muxOptions collects the options of NewMux.
 type muxOptions struct {
 	fallback JobFunc
-	metrics  prometheus.Registerer
+	reg      prometheus.Registerer
 }
 
 // WithFallback sets the handler invoked for a Kind with no registered handler.
@@ -68,10 +68,11 @@ func WithFallback(fn JobFunc) MuxOption {
 // kind is the kind given to Register; a task of another kind is recorded as
 // "<fallback>" with WithFallback and as "<unknown>" without it. A handler that
 // panics is not recorded here: the panic ends the tick, and the Loop counts it
-// in skit_worker_ticks_total{result="panic"}.
+// in skit_worker_ticks_total{result="panic"}. A nil reg turns the metrics off:
+// the Mux records them, but nothing exposes them.
 func WithMetrics(reg prometheus.Registerer) MuxOption {
 	return func(o *muxOptions) {
-		o.metrics = reg
+		o.reg = reg
 	}
 }
 
@@ -82,26 +83,12 @@ func NewMux(opts ...MuxOption) *Mux {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	metrics := newMuxMetrics(o.metrics)
+	metrics := newMuxMetrics(o.reg)
 	return &Mux{
 		routes:   make(map[string]route),
 		fallback: fallbackRoute(metrics, o.fallback),
 		metrics:  metrics,
 	}
-}
-
-// fallbackRoute routes the kinds without a handler to fn, or to ErrUnknownKind
-// when fn is nil.
-func fallbackRoute(metrics *muxMetrics, fn JobFunc) route {
-	if fn == nil {
-		return route{fn: unknownKind, metrics: metrics.kind(kindUnknown)}
-	}
-	return route{fn: fn, metrics: metrics.kind(kindFallback)}
-}
-
-// unknownKind fails a task whose kind has no handler.
-func unknownKind(_ context.Context, t Task) error {
-	return fmt.Errorf("%w: %q", ErrUnknownKind, t.Kind)
 }
 
 // Register binds fn to kind. It returns an error — never panics — on an empty
@@ -142,6 +129,20 @@ func (m *Mux) lookup(kind string) route {
 		return r
 	}
 	return m.fallback
+}
+
+// fallbackRoute routes the kinds without a handler to fn, or to ErrUnknownKind
+// when fn is nil.
+func fallbackRoute(metrics *muxMetrics, fn JobFunc) route {
+	if fn == nil {
+		return route{fn: unknownKind, metrics: metrics.kind(kindUnknown)}
+	}
+	return route{fn: fn, metrics: metrics.kind(kindFallback)}
+}
+
+// unknownKind fails a task whose kind has no handler.
+func unknownKind(_ context.Context, t Task) error {
+	return fmt.Errorf("%w: %q", ErrUnknownKind, t.Kind)
 }
 
 var _ worker.Handler[Task] = (*Mux)(nil)

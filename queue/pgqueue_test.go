@@ -1,7 +1,6 @@
 package queue_test
 
 import (
-	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func TestPGStats(t *testing.T) {
 	}
 
 	is := is.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
 	q := queue.NewPG(slog.New(slog.DiscardHandler), pg.DB, queue.Options{})
 	is.NoErr(q.EnsureSchema(ctx))
