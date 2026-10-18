@@ -76,10 +76,7 @@ func TestClientSpanPerAttempt(t *testing.T) {
 
 // attr returns the value of the span attribute key; the zero Value when unset.
 func attr(s sdktrace.ReadOnlySpan, key attribute.Key) attribute.Value {
-	for _, kv := range s.Attributes() {
-		if kv.Key == key {
-			return kv.Value
-		}
-	}
-	return attribute.Value{}
+	set := attribute.NewSet(s.Attributes()...)
+	v, _ := set.Value(key)
+	return v
 }

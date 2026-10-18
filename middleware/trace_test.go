@@ -155,10 +155,7 @@ func TestTraceNamesUnknownMethod(t *testing.T) {
 
 // attr returns the string value of the span attribute key, or "".
 func attr(s sdktrace.ReadOnlySpan, key attribute.Key) string {
-	for _, kv := range s.Attributes() {
-		if kv.Key == key {
-			return kv.Value.AsString()
-		}
-	}
-	return ""
+	set := attribute.NewSet(s.Attributes()...)
+	v, _ := set.Value(key)
+	return v.AsString()
 }

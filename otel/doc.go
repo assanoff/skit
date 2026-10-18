@@ -5,16 +5,16 @@
 //
 // # Tracers
 //
-// A component takes a trace.TracerProvider in its Config and gets its tracer
-// once, in the constructor. The scope is the package import path; nil means the
-// global provider:
+// An SDK component takes a trace.TracerProvider in its Config and gets its
+// tracer once, in the constructor. The scope is the package import path; nil
+// means the global provider:
 //
 //	type Config struct {
 //		TracerProvider trace.TracerProvider // nil → global
 //	}
 //
-//	func New(cfg Config) *Store {
-//		return &Store{tracer: otel.Tracer(cfg.TracerProvider, "example.com/app/store")}
+//	func New(cfg Config) *Relay {
+//		return &Relay{tracer: otel.Tracer(cfg.TracerProvider, "github.com/assanoff/skit/outbox")}
 //	}
 //
 // Spans are opened with tracer.Start. Neither the tracer nor the provider

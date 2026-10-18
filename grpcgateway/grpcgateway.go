@@ -1,7 +1,6 @@
 package grpcgateway
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -124,7 +122,7 @@ func (g *Gateway) Close() error {
 // A nil tp means the global provider.
 func ClientHandler(tp trace.TracerProvider) stats.Handler {
 	return otelgrpc.NewClientHandler(
-		otelgrpc.WithTracerProvider(cmp.Or(tp, otel.GetTracerProvider())),
+		otelgrpc.WithTracerProvider(tp), // nil → the global provider
 		otelgrpc.WithPropagators(skotel.Propagator()),
 		// RPC metrics come from package metrics; otelgrpc records only spans.
 		otelgrpc.WithMeterProvider(noop.NewMeterProvider()),

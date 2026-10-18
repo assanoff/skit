@@ -1,12 +1,10 @@
 package grpcserver
 
 import (
-	"cmp"
 	"strings"
 	"sync/atomic"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -52,7 +50,7 @@ func (m *methodSet) has(fullMethod string) bool {
 // WithMetrics, so otelgrpc records none.
 func serverSpans(tp trace.TracerProvider, methods *methodSet) stats.Handler {
 	return otelgrpc.NewServerHandler(
-		otelgrpc.WithTracerProvider(cmp.Or(tp, otel.GetTracerProvider())),
+		otelgrpc.WithTracerProvider(tp), // nil → the global provider
 		otelgrpc.WithPropagators(skotel.Propagator()),
 		otelgrpc.WithMeterProvider(noop.NewMeterProvider()),
 		otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {

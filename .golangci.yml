@@ -222,6 +222,7 @@ linters:
       # The bootstrap is the one place that sets the global OTel state.
       - path: ^otel/setup/
         linters: [forbidigo]
+        text: 'otel\.Set'
       # httplog is adapted third-party code kept close to upstream: only
       # correctness, resources and security are checked.
       - path: httplog/

@@ -40,6 +40,9 @@ type spanAttrs struct {
 // RoundTrip implements http.RoundTripper.
 func (s spanAttrs) RoundTrip(r *http.Request) (*http.Response, error) {
 	span := trace.SpanFromContext(r.Context())
+	if !span.IsRecording() {
+		return s.next.RoundTrip(r)
+	}
 	if n := httpmw.ResendCount(r.Context()); n > 0 {
 		span.SetAttributes(semconv.HTTPRequestResendCount(n))
 	}

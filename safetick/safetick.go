@@ -2,9 +2,9 @@ package safetick
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"runtime/debug"
+
+	"github.com/assanoff/skit/logger"
 )
 
 // PanicHandler is called when a panic is recovered, e.g. to bump a metric.
@@ -25,10 +25,7 @@ func RecoverTick(ctx context.Context, log *slog.Logger, worker string, onPanic P
 		}
 		if log != nil {
 			log.ErrorContext(ctx, "worker tick panic recovered",
-				"worker", worker,
-				"err", fmt.Errorf("panic: %v", r),
-				"exception.stacktrace", string(debug.Stack()),
-			)
+				logger.PanicArgs(r, "worker", worker)...)
 		}
 	}
 }
@@ -45,8 +42,7 @@ func Guard(ctx context.Context, log *slog.Logger, worker string, onPanic PanicHa
 			}
 			if log != nil {
 				log.ErrorContext(ctx, "guarded call panic recovered",
-					"worker", worker, "err", fmt.Errorf("panic: %v", r),
-					"exception.stacktrace", string(debug.Stack()))
+					logger.PanicArgs(r, "worker", worker)...)
 			}
 		}
 	}()

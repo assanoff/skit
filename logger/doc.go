@@ -75,6 +75,8 @@
 //
 //   - Errors go under the key "err" with an error value: log.ErrorContext(ctx,
 //     "save failed", "err", err).
+//   - A recovered panic is logged with PanicArgs: err plus
+//     exception.stacktrace.
 //   - Custom levels stay within [-8, 15], the range OpenTelemetry severity
 //     numbers map to.
 //

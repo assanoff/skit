@@ -10,6 +10,7 @@ import (
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/matryer/is"
+	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
@@ -131,10 +132,7 @@ func find(t *testing.T, spans []sdktrace.ReadOnlySpan, kind trace.SpanKind, name
 
 // route returns the http.route of span, or "".
 func route(span sdktrace.ReadOnlySpan) string {
-	for _, kv := range span.Attributes() {
-		if kv.Key == semconv.HTTPRouteKey {
-			return kv.Value.AsString()
-		}
-	}
-	return ""
+	set := attribute.NewSet(span.Attributes()...)
+	v, _ := set.Value(semconv.HTTPRouteKey)
+	return v.AsString()
 }

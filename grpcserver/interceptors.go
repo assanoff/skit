@@ -3,9 +3,7 @@ package grpcserver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"runtime/debug"
 	"time"
 
 	"google.golang.org/grpc"
@@ -13,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/assanoff/skit/errs"
+	"github.com/assanoff/skit/logger"
 )
 
 // recoveryUnary turns a panic in a handler into an Internal status instead of
@@ -23,8 +22,7 @@ func recoveryUnary(log *slog.Logger) grpc.UnaryServerInterceptor {
 			if r := recover(); r != nil {
 				if log != nil {
 					log.ErrorContext(ctx, "grpc handler panic recovered",
-						"method", info.FullMethod, "err", fmt.Errorf("panic: %v", r),
-						"exception.stacktrace", string(debug.Stack()))
+						logger.PanicArgs(r, "method", info.FullMethod)...)
 				}
 				err = status.Errorf(codes.Internal, "internal error")
 			}
@@ -94,8 +92,7 @@ func recoveryStream(log *slog.Logger) grpc.StreamServerInterceptor {
 			if r := recover(); r != nil {
 				if log != nil {
 					log.ErrorContext(ss.Context(), "grpc stream handler panic recovered",
-						"method", info.FullMethod, "err", fmt.Errorf("panic: %v", r),
-						"exception.stacktrace", string(debug.Stack()))
+						logger.PanicArgs(r, "method", info.FullMethod)...)
 				}
 				err = status.Errorf(codes.Internal, "internal error")
 			}

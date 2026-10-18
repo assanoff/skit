@@ -2,12 +2,11 @@ package middleware
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"runtime/debug"
 
 	"github.com/assanoff/skit/httpw"
+	"github.com/assanoff/skit/logger"
 )
 
 // Panics recovers a panic, logs it once with the stack, and responds with 500.
@@ -37,9 +36,7 @@ func Panics(log *slog.Logger) Middleware {
 				}
 				if log != nil {
 					log.ErrorContext(ctx, "panic recovered",
-						"err", fmt.Errorf("panic: %v", p),
-						"exception.stacktrace", string(debug.Stack()),
-						"method", r.Method, "path", r.URL.Path)
+						logger.PanicArgs(p, "method", r.Method, "path", r.URL.Path)...)
 				}
 				// Only send 500 if the handler hadn't already started writing
 				// a response; otherwise this is a superfluous WriteHeader that

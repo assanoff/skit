@@ -7,8 +7,8 @@
 // Every middleware has the signature func(http.Handler) http.Handler (aliased
 // as Middleware), so it composes with router.Use, router.With, and
 // go-pkgz/routegroup. Because Trace puts the server span into the request
-// context and AccessLog logs through the skit logger, log lines carry trace_id
-// automatically.
+// context, an AccessLog over a logger built by package logger writes trace_id
+// on every line.
 //
 // These are the transport layer of the two-layer model (see the router package):
 // they wrap the encoded response and every route — including raw http.Handlers

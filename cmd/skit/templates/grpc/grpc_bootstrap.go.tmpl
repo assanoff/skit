@@ -33,9 +33,10 @@ func WithGRPC(addr string) Option {
 }
 
 // buildGRPCServer assembles the gRPC server on addr: the skit interceptor chain
-// (recovery, trace, logging, metrics, error-map) plus protovalidate — every
-// request message is checked against its .proto buf.validate rules before the
-// handler runs, so handlers need not re-check them.
+// (recovery, logging, metrics, error-map) inside the server span, plus
+// protovalidate — every request message is checked against its .proto
+// buf.validate rules before the handler runs, so handlers need not re-check
+// them.
 func buildGRPCServer(ctx context.Context, a *App, addr string) *grpcserver.Server {
 	gs := grpcserver.New(a.d.Logger, grpcserver.Config{
 		Addr:             addr,

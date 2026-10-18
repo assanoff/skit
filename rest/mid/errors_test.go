@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/matryer/is"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -123,13 +124,9 @@ func TestErrorsMarksSpan(t *testing.T) {
 			is.Equal(len(got), 1)
 			is.Equal(got[0].Status().Code, tc.status)
 			is.Equal(len(got[0].Events()), 0) // no exception event
-			errType := ""
-			for _, a := range got[0].Attributes() {
-				if a.Key == semconv.ErrorTypeKey {
-					errType = a.Value.AsString()
-				}
-			}
-			is.Equal(errType, tc.errType)
+			set := attribute.NewSet(got[0].Attributes()...)
+			errType, _ := set.Value(semconv.ErrorTypeKey)
+			is.Equal(errType.AsString(), tc.errType)
 		})
 	}
 }

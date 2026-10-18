@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strconv"
+
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 // Level mirrors slog.Level for convenience.
@@ -45,12 +47,12 @@ func New(w io.Writer, cfg Config) *slog.Logger {
 	if w == io.Discard {
 		return slog.New(slog.DiscardHandler)
 	}
-	h := slog.NewJSONHandler(w, &slog.HandlerOptions{
-		Level:       cfg.Level,
-		AddSource:   cfg.AddSource,
-		ReplaceAttr: replaceAttr,
-	})
-	return NewWithHandler(h, cfg)
+	opts := &slog.HandlerOptions{Level: cfg.Level, AddSource: cfg.AddSource}
+	if cfg.AddSource {
+		// Without ReplaceAttr slog writes time, level and msg on its fast path.
+		opts.ReplaceAttr = replaceAttr
+	}
+	return NewWithHandler(slog.NewJSONHandler(w, opts), cfg)
 }
 
 // NewWithHandler builds a logger over a custom slog.Handler (e.g. one made by
@@ -84,10 +86,10 @@ func NewWithHandler(h slog.Handler, cfg Config) *slog.Logger {
 func identity(cfg Config) []slog.Attr {
 	var attrs []slog.Attr
 	if cfg.Service != "" {
-		attrs = append(attrs, slog.String("service.name", cfg.Service))
+		attrs = append(attrs, slog.String(string(semconv.ServiceNameKey), cfg.Service))
 	}
 	if cfg.Version != "" {
-		attrs = append(attrs, slog.String("service.version", cfg.Version))
+		attrs = append(attrs, slog.String(string(semconv.ServiceVersionKey), cfg.Version))
 	}
 	return attrs
 }

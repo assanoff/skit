@@ -164,6 +164,27 @@ func TestSourceIsShortened(t *testing.T) {
 	is.True(strings.HasPrefix(src, "logger_test.go:")) // file:line, no directory
 }
 
+func TestPanicArgs(t *testing.T) {
+	is := is.New(t)
+	var buf bytes.Buffer
+	log := New(&buf, Config{Level: LevelInfo})
+
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				log.ErrorContext(t.Context(), "panic recovered", PanicArgs(p, "worker", "relay")...)
+			}
+		}()
+		panic("boom")
+	}()
+
+	got := lines(t, &buf)[0]
+	is.Equal(got["err"], "panic: boom")
+	is.Equal(got["worker"], "relay")
+	stack, _ := got["exception.stacktrace"].(string)
+	is.True(strings.Contains(stack, "TestPanicArgs")) // the stack of the panic
+}
+
 func TestBuildInfo(t *testing.T) {
 	is := is.New(t)
 	var buf bytes.Buffer

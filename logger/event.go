@@ -115,16 +115,7 @@ func (h *eventHandler) recordWithContext(r slog.Record) slog.Record {
 	if len(h.goas) == 0 {
 		return r
 	}
-
-	own := make([]slog.Attr, 0, r.NumAttrs())
-	r.Attrs(func(a slog.Attr) bool {
-		own = append(own, a)
-		return true
-	})
-
-	out := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
-	out.AddAttrs(foldGOA(h.goas, own)...)
-	return out
+	return foldRecord(h.goas, r)
 }
 
 // foldGOA replays the accumulated steps over the record's own attrs, honoring

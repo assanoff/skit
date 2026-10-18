@@ -2,12 +2,11 @@ package mid
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"runtime/debug"
 
 	"github.com/assanoff/skit/errs"
+	"github.com/assanoff/skit/logger"
 	"github.com/assanoff/skit/rest"
 )
 
@@ -30,9 +29,7 @@ func Panics(log *slog.Logger) rest.MidFunc {
 				if rec := recover(); rec != nil {
 					if log != nil {
 						log.ErrorContext(ctx, "panic recovered",
-							"err", fmt.Errorf("panic: %v", rec),
-							"exception.stacktrace", string(debug.Stack()),
-							"method", r.Method, "path", r.URL.Path)
+							logger.PanicArgs(rec, "method", r.Method, "path", r.URL.Path)...)
 					}
 					resp = errs.Newf(errs.Internal, "internal server error").
 						WithMessageID("internal.panic")

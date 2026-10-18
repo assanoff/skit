@@ -1,6 +1,7 @@
 package otlp
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -28,10 +29,8 @@ func NewExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
 		return nil, fmt.Errorf("otlp: OTEL_TRACES_EXPORTER=%q: only otlp and none are supported", name)
 	}
 
-	protocol := envValue("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL")
-	if protocol == "" {
-		protocol = envValue("OTEL_EXPORTER_OTLP_PROTOCOL")
-	}
+	protocol := cmp.Or(envValue("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"),
+		envValue("OTEL_EXPORTER_OTLP_PROTOCOL"))
 	if protocol != "" && protocol != "grpc" {
 		return nil, fmt.Errorf("otlp: OTLP protocol %q: only grpc is supported", protocol)
 	}
