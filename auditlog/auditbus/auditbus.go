@@ -51,9 +51,14 @@ func Register(bus *eventbus.Bus, rec auditlog.Recorder) {
 
 // Publish emits an audit Event on the bus for the registered consumer
 // (best-effort). Call bus.Call with the same data when the producer must abort on
-// a failed audit write.
+// a failed audit write. An Event that does not encode, such as one whose Payload
+// is not JSON, is an error.
 func Publish(ctx context.Context, bus *eventbus.Bus, ev Event) error {
-	return bus.Publish(ctx, eventbus.MustData(Domain, Action, ev))
+	d, err := eventbus.NewData(Domain, Action, ev)
+	if err != nil {
+		return err
+	}
+	return bus.Publish(ctx, d)
 }
 
 // Record writes a single audit Event through core synchronously, returning the

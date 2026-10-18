@@ -37,3 +37,24 @@ func TestPublishRecordsViaBus(t *testing.T) {
 		t.Fatalf("expected one record for model 1 by u1, got %+v", saved)
 	}
 }
+
+// A Payload that is not JSON is an error of Publish, not a panic on the
+// request path.
+func TestPublishInvalidPayload(t *testing.T) {
+	bus := eventbus.New(nil)
+	tests := []struct {
+		name    string
+		payload json.RawMessage
+	}{
+		{name: "empty", payload: json.RawMessage{}},
+		{name: "form", payload: json.RawMessage("name=a")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := auditbus.Event{ModelType: "widget", ModelID: "1", Payload: tt.payload}
+			if err := auditbus.Publish(t.Context(), bus, ev); err == nil {
+				t.Errorf("Publish(Event{Payload: %q}) = nil, want an encode error", tt.payload)
+			}
+		})
+	}
+}

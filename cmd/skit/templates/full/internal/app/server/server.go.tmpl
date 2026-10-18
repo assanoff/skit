@@ -27,7 +27,6 @@ import (
 // is a worker.Runnable; Runnables hands them all to app.Run.
 type App struct {
 	d *deps.Deps
-	m *metrics.Metrics
 
 	servers   []listener
 	workers   []worker.Runnable
@@ -49,7 +48,7 @@ func New(ctx context.Context, opts config.ServerOpts, log *slog.Logger, options 
 	if err != nil {
 		return nil, err
 	}
-	a := &App{d: d, m: metrics.New("{{.Snake}}")}
+	a := &App{d: d}
 	for _, add := range options {
 		if err := add(ctx, a); err != nil {
 			// app.Run never runs, so release what the options already built.
@@ -115,7 +114,7 @@ func initWorkers(ctx context.Context, a *App) error {
 // transaction.
 func addOutboxWorkers(ctx context.Context, a *App) {
 	ob := a.d.Outbox(ctx)
-	om := outbox.NewMetrics(a.m.Registry)
+	om := outbox.NewMetrics(a.d.Metrics)
 	a.workers = append(a.workers,
 		outbox.NewRelay(a.d.Logger, ob, a.d.Publisher(ctx), outbox.RelayConfig{Metrics: om}),
 		outbox.NewSweeper(a.d.Logger, ob, outbox.SweeperConfig{Metrics: om}),
@@ -123,7 +122,7 @@ func addOutboxWorkers(ctx context.Context, a *App) {
 	)
 	// Backlog gauges query the store on each scrape; register when supported.
 	if sr, ok := ob.(outbox.StatsReader); ok {
-		a.m.Registry.MustRegister(outbox.NewBacklogCollector(sr, a.d.Logger))
+		a.d.Metrics.MustRegister(outbox.NewBacklogCollector(sr, a.d.Logger))
 	}
 }
 
@@ -154,9 +153,10 @@ func Handler(ctx context.Context, opts config.ServerOpts, log *slog.Logger) (htt
 }
 
 // initDeps builds the Deps container and runs the initializers (registering
-// cleanups with the global closer).
+// cleanups with the global closer). The metrics registry comes first, so every
+// initializer can hand it to the components it builds.
 func initDeps(opts config.ServerOpts, log *slog.Logger) (*deps.Deps, error) {
-	d := &deps.Deps{Opts: opts, Logger: log}
+	d := &deps.Deps{Opts: opts, Logger: log, Metrics: metrics.New()}
 	if err := app.InitDeps(d, deps.Initializers); err != nil {
 		return nil, err
 	}

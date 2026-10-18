@@ -7,7 +7,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/assanoff/skit/metrics"
+	"github.com/assanoff/skit/internal/prom"
 )
 
 // metricsNamespace/Subsystem name every collector this package registers, so
@@ -33,32 +33,33 @@ type Metrics struct {
 	cleaned       prometheus.Counter
 }
 
-// NewMetrics builds the outbox counters and registers them on reg (idempotently,
-// via metrics.Register). reg may be nil to disable them.
+// NewMetrics builds the outbox counters and registers them on reg. Called again
+// with the same reg, it returns the counters already registered. reg may be nil
+// to disable them.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
-		published: metrics.Register(reg, prometheus.NewCounter(prometheus.CounterOpts{
+		published: prom.MustRegister(reg, prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: metricsNamespace, Subsystem: metricsSubsystem,
 			Name: "relay_published_total",
 			Help: "Events the relay published to the broker successfully.",
 		})),
-		publishFailed: metrics.Register(reg, prometheus.NewCounter(prometheus.CounterOpts{
+		publishFailed: prom.MustRegister(reg, prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: metricsNamespace, Subsystem: metricsSubsystem,
 			Name: "relay_publish_failures_total",
 			Help: "Relay publish attempts that returned an error.",
 		})),
-		publishDur: metrics.Register(reg, prometheus.NewHistogram(prometheus.HistogramOpts{
+		publishDur: prom.MustRegister(reg, prometheus.NewHistogram(prometheus.HistogramOpts{
 			Namespace: metricsNamespace, Subsystem: metricsSubsystem,
 			Name:    "relay_publish_duration_seconds",
 			Help:    "Latency of a single relay publish call.",
 			Buckets: prometheus.DefBuckets,
 		})),
-		swept: metrics.Register(reg, prometheus.NewCounter(prometheus.CounterOpts{
+		swept: prom.MustRegister(reg, prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: metricsNamespace, Subsystem: metricsSubsystem,
 			Name: "sweeper_reclaimed_total",
 			Help: "Expired leases the sweeper returned to pending.",
 		})),
-		cleaned: metrics.Register(reg, prometheus.NewCounter(prometheus.CounterOpts{
+		cleaned: prom.MustRegister(reg, prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: metricsNamespace, Subsystem: metricsSubsystem,
 			Name: "cleaner_deleted_total",
 			Help: "Terminal rows the cleaner deleted past retention.",

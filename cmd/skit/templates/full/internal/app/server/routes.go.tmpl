@@ -47,7 +47,7 @@ func requestChain(a *App, r *router.Router) *router.Router {
 			Schema:        httplog.SchemaOTEL.Concise(true),
 			RecoverPanics: true,
 		}),
-		a.m.Middleware(),
+		d.Metrics.Middleware(),
 		middleware.Timeout(d.Opts.HTTP.RequestTimeout),
 		middleware.SizeLimit(d.Opts.HTTP.BodySizeLimit),
 	)

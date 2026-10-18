@@ -1,57 +1,67 @@
-// Package metrics provides a Prometheus registry, a scrape handler, an HTTP
-// request middleware, and the building block for extensible, conflict-free
-// metrics across the SDK and the application.
+// Package metrics is the one Prometheus registry of a process: the base
+// preset, the HTTP server metrics and the scrape handler.
 //
-// # One shared registry
+// # One registry
 //
-// The model is a single registry, dependency-injected. The application builds
-// one Metrics (which owns a *prometheus.Registry) at startup and passes that
-// registry to every component that exposes metrics — SDK subsystems and the
-// application's own business metrics alike. One registry means one /metrics
-// endpoint and one place series can collide, so collisions are caught at
-// startup rather than going silently unscraped.
+// The service builds one Metrics in the Deps literal, before the initializers,
+// and passes it to every component that records metrics — SDK packages and the
+// service's own code alike. Metrics embeds *prometheus.Registry, so m itself is
+// the prometheus.Registerer a component takes. Nothing registers on
+// prometheus.DefaultRegisterer.
 //
-//	m := metrics.New("myapp")        // app-wide registry + HTTP collectors
-//	http.Handle("/metrics", m.Handler())
+//	d := &deps.Deps{Opts: opts, Logger: log, Metrics: metrics.New()}
 //
-// # Each package owns its metrics
+//	r.Handle("GET /metrics", d.Metrics.Handler())
+//	om := outbox.NewMetrics(d.Metrics)
 //
-// A subsystem defines its own collectors next to its code and registers them on
-// the injected registry. It never reaches for the global default registry, so
-// importing it has no global side effects and two subsystems never fight over
-// registration. The outbox package is the model: outbox.NewMetrics(reg) builds
-// skit_outbox_* collectors; the application just hands it m.Registry.
+// New registers the base preset: go_*, process_* and go_build_info (the module
+// path, version and checksum of the main module from the go build stamp).
 //
-//	om := outbox.NewMetrics(m.Registry)               // SDK subsystem metrics
-//	relay := outbox.NewRelay(log, store, pub, outbox.RelayConfig{Metrics: om})
-//	m.Registry.MustRegister(outbox.NewBacklogCollector(store, log)) // a custom collector
+// # Names
 //
-// # Adding your own metrics
+// SDK metrics are named skit_<subsystem>_<name>_<unit> whatever the service:
+// services and pods differ by the target labels Prometheus adds (job,
+// namespace, pod), so one dashboard serves every service. Durations are in
+// seconds, counters end in _total. Label values come from closed sets only —
+// a route template, a status code, a component name — never an id or an error
+// text.
 //
-// Application metrics use the same registry; distinct namespaces/subsystems
-// keep names from colliding with the SDK's:
+// # HTTP server
 //
-//	ordersTotal := metrics.Register(m.Registry, prometheus.NewCounterVec(
-//	    prometheus.CounterOpts{Namespace: "myapp", Subsystem: "orders", Name: "created_total"},
-//	    []string{"channel"}))
-//	ordersTotal.WithLabelValues("web").Inc()
+// Middleware records skit_http_server_requests_total by method, route and
+// status code, skit_http_server_request_duration_seconds by method and route,
+// and skit_http_server_requests_in_flight. The labels are named after the HTTP
+// semantic conventions — http_request_method, http_route,
+// http_response_status_code — as the span attributes are. Put it into the
+// group of business routes, after middleware.Trace:
 //
-// # Conflict-free registration
+//	api := r.With(
+//		middleware.Trace(middleware.TraceConfig{TracerProvider: d.TracerProvider}),
+//		httplog.RequestLogger(accessLog, opts),
+//		d.Metrics.Middleware(),
+//	)
 //
-// Register is the primitive that makes this safe and ergonomic: it registers a
-// collector and returns it, returns the already-registered equivalent instead
-// of panicking on a duplicate (so constructing a subsystem's metrics twice — in
-// tests, or across workers sharing a registry — is idempotent), and panics only
-// on a genuine name clash between *different* collectors, surfacing the wiring
-// bug at startup. A nil registry disables registration while leaving the
-// collector's methods as safe no-ops, so a component can take an optional
-// registry and stay metrics-agnostic.
+// # Exemplars
 //
-// # Naming
+// The duration of a request whose span is sampled carries its trace_id and
+// span_id as the exemplar. Handler serves OpenMetrics to a scraper that
+// accepts it; Prometheus stores exemplars with
+// --enable-feature=exemplar-storage.
 //
-// Use Namespace + Subsystem + Name on every collector. Convention here: the SDK
-// uses the "skit" namespace with a per-subsystem Subsystem (e.g.
-// skit_outbox_*); the application uses its own namespace. Distinct
-// (namespace, subsystem, name) tuples are what guarantee no conflicts on the
-// shared registry.
+// # Business metrics
+//
+// A domain package builds its collectors once, with promauto.With on the
+// registry it gets in its Config; with a nil registry the collectors work but
+// are not registered, so neither the core nor its tests check for nil. Name
+// them <service>_<subsystem>_<name>_<unit>.
+//
+//	// core/order/metrics.go
+//	func newMetrics(reg prometheus.Registerer) orderMetrics {
+//		f := promauto.With(reg)
+//		return orderMetrics{
+//			created: f.NewCounterVec(prometheus.CounterOpts{
+//				Name: "shop_order_created_total", Help: "Orders created.",
+//			}, []string{"channel"}),
+//		}
+//	}
 package metrics

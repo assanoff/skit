@@ -43,7 +43,7 @@ func buildGRPCServer(ctx context.Context, a *App, addr string) *grpcserver.Serve
 		EnableReflection: a.d.Opts.GRPC.Reflection,
 		TracerProvider:   a.d.TracerProvider,
 	},
-		grpcserver.WithMetrics(a.m.Registry),
+		grpcserver.WithMetrics(a.d.Metrics),
 		grpcserver.WithProtoValidate(),
 	)
 	installGRPC(ctx, gs, a.d)
