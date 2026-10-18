@@ -66,6 +66,18 @@
 // own series. They read the pool stats on each scrape, without a query. A
 // second pool of the same Host and Name on one registry is an error of Open.
 //
+// # Tracing
+//
+// Open records every query of the pool as a CLIENT span on
+// Config.TracerProvider, named after the database (Config.Name). BEGIN and
+// COMMIT are queries too, so a transaction shows as its own spans; StatusCheck
+// pings past the tracer. The span carries db.system.name, db.namespace,
+// server.address, server.port and db.query.text: the query as written, cut to
+// 2 KiB. The arguments are never recorded — pass values as arguments, never in
+// the query text. A Postgres error sets db.response.status_code and error.type
+// to its SQLSTATE; no rows is not an error. A query from a suppressed context
+// (otel.Suppress, the ticks of worker.Loop) records nothing.
+//
 // # Querying
 //
 //   - ExecContext / NamedExecContext run statements; the RowsAffected

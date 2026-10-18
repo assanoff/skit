@@ -70,10 +70,20 @@
 // bound as query parameters — no NOW()/CURRENT_TIMESTAMP in SQL — so the clock
 // is injectable in tests.
 //
-// Tracing: Publish captures the W3C trace context from the publishing ctx into
-// the event's headers (otel.Carrier), so the relay carries it onto the broker
-// message and a consumer can continue the producer's trace with
-// otel.ExtractFromCarrier. With no active trace context the headers stay empty.
+// # Tracing
+//
+// Publish captures the W3C trace context of the publishing ctx — the context
+// the event is created in — into the headers of the event (otel.Carrier). With
+// no active trace context the headers stay empty.
+//
+// The relay opens no spans of its own. Its ticks run suppressed (worker.Loop),
+// so an idle relay records nothing, and neither do the lease and the marks of
+// the store. Each event is published with the suppression lifted
+// (worker.Processor), and the relay passes its headers on to the broker
+// message: the broker.Publisher of an adapter sends it under a CLIENT child of
+// the creation context, and broker.Instrument on the consumer side continues
+// the same trace. A request, the event it created, its send and its handling
+// are one trace.
 //
 // # Wiring (once, at startup)
 //

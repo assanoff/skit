@@ -10,11 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Postgres error codes we translate into sentinel errors.
@@ -44,12 +46,16 @@ type Config struct {
 	// Metrics is the registry of the pool metrics (go_sql_*, labeled db_name
 	// with Name and host with Host); nil disables them.
 	Metrics prometheus.Registerer
+	// TracerProvider records a span of every query; nil → the global
+	// provider.
+	TracerProvider trace.TracerProvider
 }
 
 // Open opens a sqlx.DB using the pgx driver. It does not verify connectivity;
-// call StatusCheck for that. With cfg.Metrics set it registers the pool
-// metrics; a pool of the same Host and Name already registered there is an
-// error, and the new pool is closed.
+// call StatusCheck for that. Every query is recorded as a span on
+// cfg.TracerProvider. With cfg.Metrics set it registers the pool metrics; a
+// pool of the same Host and Name already registered there is an error, and the
+// new pool is closed.
 func Open(cfg Config) (*sqlx.DB, error) {
 	sslMode := "require"
 	if cfg.DisableTLS {
@@ -71,10 +77,12 @@ func Open(cfg Config) (*sqlx.DB, error) {
 		RawQuery: q.Encode(),
 	}
 
-	db, err := sqlx.Open("pgx", u.String())
+	pgCfg, err := pgx.ParseConfig(u.String())
 	if err != nil {
 		return nil, fmt.Errorf("dbx: open: %w", err)
 	}
+	pgCfg.Tracer = newQueryTracer(cfg.TracerProvider, pgCfg)
+	db := sqlx.NewDb(stdlib.OpenDB(*pgCfg), "pgx")
 
 	db.SetMaxIdleConns(cfg.MaxIdleConns)
 	db.SetMaxOpenConns(cfg.MaxOpenConns)
