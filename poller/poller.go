@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/assanoff/skit/otel"
 	"github.com/assanoff/skit/safetick"
 )
 
@@ -71,8 +72,12 @@ func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config, opts 
 func (p *Poller[T]) Name() string { return p.cfg.Name }
 
 // Start polls immediately, then on every Interval, until ctx is canceled. It
-// implements worker.Runnable: Start blocks until shutdown.
+// implements worker.Runnable: Start blocks until shutdown. The polls run under
+// otel.Suppress, so they export no traces; a direct Poll keeps the trace of its
+// caller.
 func (p *Poller[T]) Start(ctx context.Context) error {
+	// A poll has no request behind it; each would export a trace of its own.
+	ctx = otel.Suppress(ctx)
 	ticker := time.NewTicker(p.cfg.Interval)
 	defer ticker.Stop()
 

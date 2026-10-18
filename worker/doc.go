@@ -86,12 +86,24 @@
 //
 // A Processor is counted by the ticks of the Loop it runs in.
 //
+// # Tracing
+//
+// A tick has no request behind it, so by default a Loop runs it under
+// otel.Suppress: the queries of an idle poll export no traces. A Processor
+// lifts the mark for each item's handler, which then sets the item's trace —
+// the outbox relay continues the trace that created the event — while the
+// claim and the marks stay suppressed. With LoopConfig.Trace a Loop records
+// every tick as the root span of its own trace, named after the Loop, and
+// everything the tick does nests under it; a failed tick sets the span's
+// error, a panic sets error.type "panic".
+//
 // # Config
 //
 // LoopConfig: Name (default "worker"), Interval (default 1s; the idle interval
-// for an adaptive loop), ImmediateFirstTick, TickTimeout, Metrics, and the
-// adaptive fields BusyInterval and MaxIdleInterval. Option WithOnPanic sets a
-// handler invoked when a tick panics.
+// for an adaptive loop), ImmediateFirstTick, TickTimeout, Metrics, Trace,
+// TracerProvider (nil → the global provider), and the adaptive fields
+// BusyInterval and MaxIdleInterval. Option WithOnPanic sets a handler invoked
+// when a tick panics.
 //
 // ProcessorConfig: Name (default "processor"), BatchSize (default 100),
 // HandleTimeout, IsTerminal (nil = all failures retryable), Now (default

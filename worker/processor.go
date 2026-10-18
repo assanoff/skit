@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/assanoff/skit/errs"
+	"github.com/assanoff/skit/otel"
 )
 
 // Source leases a batch of pending items for processing. Implementations must be
@@ -157,7 +158,10 @@ func (p *Processor[T]) processN(ctx context.Context) (int, error) {
 func (p *Processor[T]) handleOne(ctx context.Context, item T) {
 	now := p.cfg.Now()
 
-	handleErr := p.bounded(ctx, func(c context.Context) error {
+	// The tick is suppressed; the item is work worth tracing, so its handler
+	// runs with the mark lifted and sets the trace of the item itself. The
+	// mark below stays suppressed.
+	handleErr := p.bounded(otel.Unsuppress(ctx), func(c context.Context) error {
 		return p.h.Handle(c, item)
 	})
 

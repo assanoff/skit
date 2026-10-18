@@ -7,10 +7,17 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/assanoff/skit/internal/prom"
+	"github.com/assanoff/skit/internal/runspan"
+	"github.com/assanoff/skit/otel"
 	"github.com/assanoff/skit/safetick"
 )
+
+// scope names the tracer of this package.
+const scope = "github.com/assanoff/skit/worker"
 
 // TickFunc performs one unit of periodic work. Returning an error logs it but
 // does not stop the loop; the loop stops only when its context is canceled.
@@ -53,6 +60,13 @@ type LoopConfig struct {
 	// skit_worker_last_success_timestamp_seconds, by worker = Name); nil
 	// disables them.
 	Metrics prometheus.Registerer
+	// Trace records each tick as the root span of its own trace, named Name.
+	// false (the default) suppresses the tick instead (otel.Suppress): nothing
+	// under it is traced but the items a Processor handles, which lift the mark.
+	Trace bool
+	// TracerProvider records the tick spans when Trace is set; nil → the global
+	// provider.
+	TracerProvider trace.TracerProvider
 
 	// BusyInterval is the wait after a Busy tick in an adaptive loop (0 = run
 	// again immediately to drain the backlog). Ignored by a fixed loop.
@@ -76,6 +90,7 @@ type Loop struct {
 	log     *slog.Logger
 	onPanic safetick.PanicHandler
 	runs    *prom.Runs
+	tracer  trace.Tracer // nil unless the ticks are traced
 }
 
 // LoopOption customizes a Loop.
@@ -113,6 +128,9 @@ func newLoop(log *slog.Logger, cfg LoopConfig, opts []LoopOption) *Loop {
 	}
 	ticks := prom.RunsOpts{Subsystem: "worker", Run: "tick", Label: "worker"}
 	l := &Loop{cfg: cfg, log: log, runs: prom.NewRuns(cfg.Metrics, ticks, cfg.Name)}
+	if cfg.Trace {
+		l.tracer = otel.Tracer(cfg.TracerProvider, scope)
+	}
 	for _, opt := range opts {
 		opt(l)
 	}
@@ -208,14 +226,19 @@ func (l *Loop) runPacedTick(ctx context.Context) Pace {
 }
 
 // run runs tick under panic recovery and TickTimeout, logs its error and
-// records it in the tick metrics.
+// records it in the tick metrics and, when the loop traces its ticks, in the
+// span of the tick.
 func (l *Loop) run(ctx context.Context, tick TickFunc) {
 	start := time.Now()
+	ctx, span := l.startTick(ctx)
 	var err error
 	// finished stays false when tick panics: RecoverTick, deferred last, runs
-	// first and stops the panic, then Record counts the tick as a panic.
+	// first and stops the panic, then the tick is recorded as a panic.
 	finished := false
-	defer func() { l.runs.Record(ctx, time.Since(start), finished, err) }()
+	defer func() {
+		l.runs.Record(ctx, time.Since(start), finished, err)
+		runspan.End(span, finished, err)
+	}()
 	defer safetick.RecoverTick(ctx, l.log, l.cfg.Name, l.onPanic)
 
 	tickCtx, cancel := l.tickContext(ctx)
@@ -227,6 +250,15 @@ func (l *Loop) run(ctx context.Context, tick TickFunc) {
 	if err != nil && l.log != nil {
 		l.log.ErrorContext(ctx, "worker tick error", "worker", l.cfg.Name, "err", err)
 	}
+}
+
+// startTick returns the context of a tick: suppressed, or under the root span
+// of the tick when the loop traces its ticks.
+func (l *Loop) startTick(ctx context.Context) (context.Context, trace.Span) {
+	if l.tracer == nil {
+		return otel.Suppress(ctx), noop.Span{}
+	}
+	return runspan.Start(ctx, l.tracer, l.cfg.Name)
 }
 
 func (l *Loop) tickContext(ctx context.Context) (context.Context, context.CancelFunc) {

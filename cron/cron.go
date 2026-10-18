@@ -17,6 +17,11 @@
 // skit_cron_run_duration_seconds and skit_cron_last_success_timestamp_seconds
 // by cron_job. The label is cron_job, not job: Prometheus puts its own job
 // label on every series.
+//
+// Every run is the root span of its own trace, named after the job and taken
+// from Config.TracerProvider: a run has no request behind it, and what the job
+// does — queries, calls, published events — nests under that span. A failed
+// run sets the span's error; a panic sets error.type "panic".
 package cron
 
 import (
@@ -28,10 +33,16 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	robfig "github.com/robfig/cron/v3"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/internal/prom"
+	"github.com/assanoff/skit/internal/runspan"
+	"github.com/assanoff/skit/otel"
 	"github.com/assanoff/skit/safetick"
 )
+
+// scope names the tracer of this package.
+const scope = "github.com/assanoff/skit/cron"
 
 // specParser accepts standard 5-field specs plus @-descriptors (including
 // @every). It is used both to validate specs in Add and to drive the running
@@ -59,6 +70,7 @@ type Scheduler struct {
 	name    string
 	log     *slog.Logger
 	metrics prometheus.Registerer
+	tracer  trace.Tracer
 	onPanic safetick.PanicHandler
 	entries []entry
 }
@@ -70,6 +82,9 @@ type Config struct {
 	// Metrics is the registry of the run metrics of the jobs; nil disables
 	// them.
 	Metrics prometheus.Registerer
+	// TracerProvider records the root span of every run; nil → the global
+	// provider.
+	TracerProvider trace.TracerProvider
 }
 
 // Option customizes a Scheduler.
@@ -83,7 +98,12 @@ func WithOnPanic(h safetick.PanicHandler) Option {
 
 // New builds an empty Scheduler. log may be nil.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Scheduler {
-	s := &Scheduler{name: cmp.Or(cfg.Name, "cron"), log: log, metrics: cfg.Metrics}
+	s := &Scheduler{
+		name:    cmp.Or(cfg.Name, "cron"),
+		log:     log,
+		metrics: cfg.Metrics,
+		tracer:  otel.Tracer(cfg.TracerProvider, scope),
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -147,11 +167,15 @@ func (s *Scheduler) run(ctx context.Context, e entry) {
 		return
 	}
 	started := time.Now()
+	ctx, span := runspan.Start(ctx, s.tracer, e.name)
 	var err error
 	// finished stays false when the job panics: RecoverTick, deferred last,
-	// runs first and stops the panic, then Record counts the run as a panic.
+	// runs first and stops the panic, then the run is recorded as a panic.
 	finished := false
-	defer func() { e.runs.Record(ctx, time.Since(started), finished, err) }()
+	defer func() {
+		e.runs.Record(ctx, time.Since(started), finished, err)
+		runspan.End(span, finished, err)
+	}()
 	defer safetick.RecoverTick(ctx, s.log, s.name+"/"+e.name, s.onPanic)
 
 	err = e.job(ctx)

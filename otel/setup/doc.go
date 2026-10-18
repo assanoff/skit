@@ -18,6 +18,7 @@
 //		Version:     version,
 //		Environment: "production",
 //		Exporter:    exp,
+//		Metrics:     reg,
 //		Global:      true,
 //	})
 //	if err != nil {
@@ -63,6 +64,19 @@
 // the rest at DEBUG. Nothing goes to stderr as plain text, and a failing
 // collector never reaches ERROR.
 //
+// # Metrics
+//
+// With a registry in Config.Metrics, New sets target_info to 1, labeled with
+// every attribute of the Resource under its Prometheus name (service.name →
+// service_name, k8s.pod.name → k8s_pod_name): a dashboard sees which service,
+// version and environment run in each target and joins the metrics to the
+// traces by service_name. It also counts the spans passed to the Exporter in
+// skit_otel_exported_spans_total by result (ok, error); without an Exporter
+// the counter does not exist. Spans the batcher drops on a full queue never
+// reach the exporter and are not counted; they pile up when exports fail, which
+// result="error" shows. Build the registry before setup, so the process
+// exposes these next to its own metrics.
+//
 // # Config
 //
 //   - Service, Version, Namespace, Environment: the identity of the process;
@@ -70,6 +84,8 @@
 //   - Sampler: overrides the sampler from the environment; tests set it.
 //   - Exporter: otlp.NewExporter in a process, tracetest in tests; nil → no
 //     export.
+//   - Metrics: the registry for target_info and skit_otel_*; nil → no
+//     metrics. Tests leave it nil.
 //   - Global: install the provider, the propagator (W3C TraceContext only) and
 //     the diagnostics process-wide; true in a process, false in tests.
 //   - ShutdownTimeout: bound for Shutdown; 0 → 5s.

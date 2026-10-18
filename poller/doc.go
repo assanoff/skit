@@ -7,7 +7,9 @@
 // the cached value unchanged. Typical uses are feature flags, dynamic config,
 // exchange rates, or any slowly-changing remote value callers want cheaply and
 // concurrently. A Poller is a worker.Runnable, so it can be supervised in a
-// worker.Group alongside servers and other workers.
+// worker.Group alongside servers and other workers. Start runs the polls under
+// otel.Suppress, so they export no traces; a direct Poll keeps the trace of its
+// caller.
 //
 // # Usage
 //

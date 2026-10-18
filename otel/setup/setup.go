@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -39,6 +40,9 @@ type Config struct {
 	// tracetest in tests. nil → no span is sampled or exported; trace ids are
 	// still created and propagated.
 	Exporter sdktrace.SpanExporter
+	// Metrics is the registry for target_info and skit_otel_*; nil — metrics
+	// off.
+	Metrics prometheus.Registerer
 	// Global installs the provider, the propagator and the OTel error handler
 	// and logger process-wide: true in a process, false in tests.
 	Global bool
@@ -66,12 +70,15 @@ func New(ctx context.Context, log *slog.Logger, cfg Config) (*Telemetry, error) 
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Metrics != nil {
+		setTargetInfo(cfg.Metrics, res)
+	}
 	opts := []sdktrace.TracerProviderOption{
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sampler(ctx, log, cfg)),
 	}
 	if cfg.Exporter != nil {
-		opts = append(opts, sdktrace.WithBatcher(cfg.Exporter))
+		opts = append(opts, sdktrace.WithBatcher(exporter(cfg)))
 	}
 	tp := sdktrace.NewTracerProvider(opts...)
 

@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/assanoff/skit/otel"
 )
 
 func TestPollerStartSeedsAndRefreshes(t *testing.T) {
@@ -80,5 +82,25 @@ func TestPollerRecoversPanic(t *testing.T) {
 	}
 	if p.Current() != 0 {
 		t.Errorf("value should be unchanged after panic, got %d", p.Current())
+	}
+}
+
+// The polls of Start run suppressed: they export no traces.
+func TestPollerStartSuppressesPolls(t *testing.T) {
+	seen := make(chan bool, 1)
+	p := New(nil, false, func(ctx context.Context) (bool, error) {
+		select {
+		case seen <- otel.IsSuppressed(ctx):
+		default:
+		}
+		return true, nil
+	}, Config{Name: "test", Interval: time.Hour})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = p.Start(ctx) }()
+
+	if !<-seen {
+		t.Error("the first poll of Start is not suppressed")
 	}
 }

@@ -26,6 +26,38 @@
 // a route template, a status code, a component name — never an id or an error
 // text.
 //
+// # Presets
+//
+// Every SDK package records its own metrics on the registry its config gets;
+// a nil registry turns them off:
+//
+//   - metrics: skit_http_server_* — m.Middleware().
+//   - grpcserver: skit_grpc_server_handled_total by method and code,
+//     skit_grpc_server_handling_seconds by method, skit_grpc_server_in_flight
+//     — Config.Metrics.
+//   - httpclient: skit_http_client_requests_total by client, method, status
+//     code and error type, skit_http_client_request_duration_seconds by client
+//     — Config.Name and Config.Metrics.
+//   - rest/mid: skit_rest_outcomes_total by code — Config.Metrics.
+//   - dbx: go_sql_* by db_name and host — Config.Metrics.
+//   - outbox: skit_outbox_relay_*, skit_outbox_sweeper_reclaimed_total,
+//     skit_outbox_cleaner_deleted_total — the configs of the workers; the
+//     backlog gauges — NewBacklog.
+//   - queue: skit_queue_handled_total by kind and result,
+//     skit_queue_handle_duration_seconds by kind — WithMetrics; the backlog
+//     gauges — NewBacklog.
+//   - broker: skit_broker_consumed_total by consumer and action,
+//     skit_broker_handle_duration_seconds by consumer — Instrument.
+//   - worker: skit_worker_ticks_total by worker and result,
+//     skit_worker_tick_duration_seconds and
+//     skit_worker_last_success_timestamp_seconds by worker —
+//     LoopConfig.Metrics.
+//   - cron: skit_cron_runs_total by cron_job and result,
+//     skit_cron_run_duration_seconds and
+//     skit_cron_last_success_timestamp_seconds by cron_job — Config.Metrics.
+//   - otel/setup: target_info and skit_otel_exported_spans_total by result —
+//     Config.Metrics.
+//
 // # HTTP server
 //
 // Middleware records skit_http_server_requests_total by method, route and
@@ -64,4 +96,24 @@
 //			}, []string{"channel"}),
 //		}
 //	}
+//
+// # State by polling
+//
+// A gauge of state is read one of two ways, by what the read costs. A cheap
+// read from memory runs on every scrape, in a GaugeFunc. An expensive or
+// remote read — an SQL aggregate, another service — runs in a worker.Loop of
+// the worker group, which sets the gauge; the skit_worker_* of the Loop show
+// how fresh the value is. Every replica that reads a whole table reports the
+// same value, so a query takes max without(pod, instance), not sum. The
+// examples show both ways.
+//
+// # Dashboards
+//
+// The dashboards directory holds six Grafana dashboards of the presets:
+// service (HTTP and gRPC servers, HTTP clients, REST outcomes, the Go runtime,
+// the build and the health of the telemetry), dbx, outbox, queue, broker, and
+// worker with cron. Their variables are datasource, namespace, job and pod and
+// no service name is written in them, so one import serves every service. A
+// test builds every preset on one registry and fails when a dashboard queries
+// a metric that does not exist.
 package metrics

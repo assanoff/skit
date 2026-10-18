@@ -11,6 +11,10 @@ import (
 	"github.com/matryer/is"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestAddValidatesSpec(t *testing.T) {
@@ -98,4 +102,34 @@ skit_cron_runs_total{cron_job="cleanup",result="ok"} 1
 skit_cron_runs_total{cron_job="cleanup",result="panic"} 1
 `
 	is.NoErr(testutil.GatherAndCompare(reg, strings.NewReader(want), "skit_cron_runs_total"))
+}
+
+// Every run is the root span of its own trace, named after the job; the job's
+// work nests under it and a failed run marks it failed.
+func TestSchedulerTracesRuns(t *testing.T) {
+	is := is.New(t)
+	rec := tracetest.NewSpanRecorder()
+	s := New(nil, Config{TracerProvider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))})
+	var inRun bool
+	is.NoErr(s.Add("@hourly", "report", func(ctx context.Context) error {
+		inRun = trace.SpanFromContext(ctx).SpanContext().IsValid()
+		return nil
+	}))
+	is.NoErr(s.Add("@hourly", "cleanup", func(context.Context) error {
+		return errors.New("disk full")
+	}))
+
+	for _, e := range s.entries {
+		s.run(t.Context(), e)
+	}
+
+	is.True(inRun) // the job runs under the span of its run
+	spans := rec.Ended()
+	is.Equal(len(spans), 2)
+	is.Equal(spans[0].Name(), "report")
+	is.Equal(spans[0].SpanKind(), trace.SpanKindInternal)
+	is.True(!spans[0].Parent().IsValid()) // a root
+	is.Equal(spans[0].Status().Code, codes.Unset)
+	is.Equal(spans[1].Name(), "cleanup")
+	is.Equal(spans[1].Status().Code, codes.Error)
 }

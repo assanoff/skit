@@ -191,6 +191,7 @@ linters:
         - .Write(       # ResponseWriter / io.Writer wrappers pass the error through
         - .Handle(      # slog.Handler wrappers
         - .RoundTrip(   # http.RoundTripper wrappers
+        - .ExportSpans( # sdktrace.SpanExporter wrappers
         - status.Error( # a gRPC status must not be wrapped
   exclusions:
     generated: lax
