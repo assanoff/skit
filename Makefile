@@ -14,6 +14,9 @@ GORELEASE   ?= golang.org/x/exp/cmd/gorelease@v0.0.0-20261009195045-ca0d7ba23607
 # does not override. A local binary still works: make lint LINT=golangci-lint.
 LINT         = $(GO) run $(GOLANGCI)
 
+# The Collector image `collector-check` validates docs/collector against.
+OTELCOL     ?= otel/opentelemetry-collector-contrib:0.161.0
+
 # Convenience tools outside any gate; latest is fine.
 GONEW       ?= golang.org/x/tools/cmd/gonew@latest
 TPARSE      ?= github.com/mfridman/tparse@latest
@@ -117,6 +120,10 @@ lint-rules: ## Project rules: no else, one-line functions fit in 80 columns
 .PHONY: gen-check
 gen-check: ## Scaffold a service with every `skit add` module and run its make check (needs buf)
 	@scripts/gen-check.sh
+
+.PHONY: collector-check
+collector-check: ## Validate the reference Collector config in docs/collector (needs docker)
+	docker run --rm -v "$(CURDIR)/docs/collector:/etc/otelcol:ro" $(OTELCOL) validate --config=/etc/otelcol/collector.yaml
 
 .PHONY: vuln
 vuln: ## Known vulnerabilities in reachable code

@@ -1,0 +1,123 @@
+# Reference OpenTelemetry Collector config for skit services in Kubernetes.
+# Run it as a DaemonSet (one per node): file_log reads the container logs of
+# the node. See README.md for what each part relies on. Checked with
+# `make collector-check` against otel/opentelemetry-collector-contrib:0.161.0.
+
+receivers:
+  # Spans from the services: otel/otlp exports them to
+  # OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://$(NODE_IP):4317.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+  # The services log JSON to stdout (logger.New); the runtime writes it to
+  # /var/log/pods. The collector's own logs stay out.
+  file_log:
+    include: [/var/log/pods/*/*/*.log]
+    exclude: [/var/log/pods/*/otel-collector/*.log]
+    start_at: end
+    include_file_path: true
+    operators:
+      # The container runtime's line → the record as body; k8s.namespace.name,
+      # k8s.pod.name, k8s.pod.uid and k8s.container.name from the file path.
+      - type: container
+        id: container
+      # A slog JSON record → attributes; a line that is not JSON stays a body.
+      - type: json_parser
+        id: json
+        if: 'body matches "^\\{"'
+        parse_from: body
+        timestamp:
+          parse_from: attributes.time
+          layout_type: gotime
+          layout: "2006-01-02T15:04:05.999999999Z07:00"
+        severity:
+          parse_from: attributes.level
+      # time and level are now the record's timestamp and severity.
+      - type: remove
+        if: 'attributes.time != nil'
+        field: attributes.time
+      - type: remove
+        if: 'attributes.level != nil'
+        field: attributes.level
+      # trace_id, span_id and trace_flags are top-level fields of every record
+      # written in a span: the record joins its trace.
+      - type: trace_parser
+        if: 'attributes.trace_id != nil'
+        trace_id:
+          parse_from: attributes.trace_id
+        span_id:
+          parse_from: attributes.span_id
+        trace_flags:
+          parse_from: attributes.trace_flags
+      - type: remove
+        if: 'attributes.trace_id != nil'
+        field: attributes.trace_id
+      - type: remove
+        if: 'attributes.span_id != nil'
+        field: attributes.span_id
+      - type: remove
+        if: 'attributes.trace_flags != nil'
+        field: attributes.trace_flags
+      # service.name and service.version are named as the Resource attributes
+      # of the spans: they move there unrenamed.
+      - type: move
+        if: 'attributes["service.name"] != nil'
+        from: attributes["service.name"]
+        to: resource["service.name"]
+      - type: move
+        if: 'attributes["service.version"] != nil'
+        from: attributes["service.version"]
+        to: resource["service.version"]
+      - type: move
+        if: 'attributes.msg != nil'
+        from: attributes.msg
+        to: body
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # Pod, namespace and workload of a span (by the connection's address) and of
+  # a log record (by the pod uid from the file path).
+  k8s_attributes:
+    auth_type: serviceAccount
+    extract:
+      metadata:
+        - k8s.namespace.name
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.node.name
+        - k8s.deployment.name
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+      - sources:
+          - from: connection
+
+  batch: {}
+
+exporters:
+  # The tracing and logging backend: Tempo, Jaeger, an OTLP gateway.
+  otlp_grpc:
+    endpoint: ${env:OTLP_BACKEND_ENDPOINT:-otlp-backend:4317}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, k8s_attributes, batch]
+      exporters: [otlp_grpc]
+    logs:
+      receivers: [file_log]
+      processors: [memory_limiter, k8s_attributes, batch]
+      exporters: [otlp_grpc]
