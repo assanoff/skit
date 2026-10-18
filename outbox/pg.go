@@ -283,8 +283,8 @@ WHERE status IN (:sent, :failed) AND created_at < :cutoff`
 }
 
 // Stats returns a backlog snapshot (pending/in_flight/failed counts and the age
-// of the oldest pending row) in one aggregate query. Used by BacklogCollector
-// to expose backlog gauges.
+// of the oldest pending row) in one aggregate query. NewBacklog reads it to set
+// the backlog gauges.
 func (s *PG) Stats(ctx context.Context, now time.Time) (Stats, error) {
 	const q = `
 SELECT

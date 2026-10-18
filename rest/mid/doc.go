@@ -10,10 +10,13 @@
 //
 // # Middleware
 //
-//   - Chain(Config): the standard application chain in order ([Metrics],
-//     LocalizeErrors, MaskInternal, Errors, Panics) for our *errs.Error types.
-//     Wrap it with your own request-context (outside) and translation (inside)
-//     middleware.
+//   - Chain(Config): the standard application chain in order (the outcome
+//     counter, LocalizeErrors, MaskInternal, Errors, Panics) for our
+//     *errs.Error types. Wrap it with your own request-context (outside) and
+//     translation (inside) middleware. With Config.Metrics set, the outermost
+//     counter records skit_rest_outcomes_total by code: the code of an
+//     *errs.Error response ("not_found", "internal"), else "ok" — the domain
+//     code rather than the HTTP status.
 //   - Panics(log): recover a panic from a typed handler into an Internal
 //     *errs.Error so it flows through the pipeline (logged, masked, localized,
 //     JSON-encoded) instead of a bare 500. Innermost of the chain.
@@ -21,8 +24,6 @@
 //     failed with the domain code as error.type and log them server-side.
 //     Observability only (masking is MaskInternal, localization is
 //     LocalizeErrors).
-//   - Metrics(record): report each request's outcome code (errs code, or "ok")
-//     to a backend-agnostic callback — errs-aware metrics by domain code.
 //   - LocalizeErrors(tr, lang): translate an *errs.Error response into the
 //     request language (resolved by the lang accessor) before it is encoded.
 //     Place it outermost of the app middleware so it wraps and localizes errors

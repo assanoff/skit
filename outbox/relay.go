@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/worker"
 )
@@ -27,8 +29,10 @@ type RelayConfig struct {
 	BatchSize int
 	// PublishTimeout bounds each publish + its follow-up mark (default 5s).
 	PublishTimeout time.Duration
-	// Metrics, when set, records relay throughput (published/failed/latency).
-	Metrics *Metrics
+	// Metrics is the registry of the publish metrics
+	// (skit_outbox_relay_published_total, …_relay_publish_failures_total,
+	// …_relay_publish_duration_seconds); nil disables them.
+	Metrics prometheus.Registerer
 }
 
 // NewRelay builds the relay as a worker.Loop. It wires the outbox FSM onto a
@@ -59,7 +63,7 @@ func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConf
 	proc := worker.NewProcessor[Event](
 		log,
 		relaySource{store},
-		relayPublisher{pub: pub, m: cfg.Metrics},
+		relayPublisher{pub: pub, m: newRelayMetrics(cfg.Metrics)},
 		relaySink{store},
 		worker.ProcessorConfig{
 			Name:          cfg.Name,
@@ -85,10 +89,10 @@ func (s relaySource) Claim(ctx context.Context, now time.Time, limit int) ([]Eve
 }
 
 // relayPublisher adapts a broker.Publisher to worker.Handler[Event], recording
-// publish throughput/latency when Metrics is set.
+// the publish metrics.
 type relayPublisher struct {
 	pub broker.Publisher
-	m   *Metrics
+	m   *relayMetrics
 }
 
 func (p relayPublisher) Handle(ctx context.Context, ev Event) error {
@@ -103,7 +107,7 @@ func (p relayPublisher) Handle(ctx context.Context, ev Event) error {
 		Key:             ev.Key,
 		Headers:         decodeHeaders(ev.Headers),
 	})
-	p.m.observePublish(time.Since(start), err)
+	p.m.observe(ctx, time.Since(start), err)
 	return err
 }
 
@@ -130,8 +134,9 @@ type SweeperConfig struct {
 	LeaseTimeout time.Duration
 	// BatchSize bounds rows reclaimed per sweep (default 100).
 	BatchSize int
-	// Metrics, when set, counts reclaimed leases.
-	Metrics *Metrics
+	// Metrics is the registry of skit_outbox_sweeper_reclaimed_total; nil
+	// disables it.
+	Metrics prometheus.Registerer
 }
 
 // NewSweeper builds the lease-reclaim worker as a worker.Loop. It returns
@@ -149,10 +154,15 @@ func NewSweeper(log *slog.Logger, store Store, cfg SweeperConfig) *worker.Loop {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 100
 	}
+	reclaimed := newCounter(cfg.Metrics, "sweeper_reclaimed_total",
+		"Expired leases the sweeper returned to pending.")
 	tick := func(ctx context.Context) error {
 		n, err := store.SweepExpiredLeases(ctx, cfg.LeaseTimeout, time.Now().UTC(), cfg.BatchSize)
-		cfg.Metrics.addSwept(n)
-		return err
+		if err != nil {
+			return err
+		}
+		addRows(reclaimed, n)
+		return nil
 	}
 	return worker.NewLoop(log, worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
 }
@@ -164,8 +174,9 @@ type CleanerConfig struct {
 	Interval time.Duration
 	// Retention: sent/failed rows older than this are deleted (default 24h).
 	Retention time.Duration
-	// Metrics, when set, counts deleted rows.
-	Metrics *Metrics
+	// Metrics is the registry of skit_outbox_cleaner_deleted_total; nil
+	// disables it.
+	Metrics prometheus.Registerer
 }
 
 // NewCleaner builds the retention worker as a worker.Loop. It deletes terminal
@@ -180,10 +191,15 @@ func NewCleaner(log *slog.Logger, store Store, cfg CleanerConfig) *worker.Loop {
 	if cfg.Retention <= 0 {
 		cfg.Retention = 24 * time.Hour
 	}
+	deleted := newCounter(cfg.Metrics, "cleaner_deleted_total",
+		"Terminal rows the cleaner deleted past retention.")
 	tick := func(ctx context.Context) error {
 		n, err := store.Cleanup(ctx, cfg.Retention, time.Now().UTC())
-		cfg.Metrics.addCleaned(n)
-		return err
+		if err != nil {
+			return err
+		}
+		addRows(deleted, n)
+		return nil
 	}
 	return worker.NewLoop(log, worker.LoopConfig{Name: cfg.Name, Interval: cfg.Interval}, tick)
 }

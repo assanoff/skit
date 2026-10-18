@@ -2,85 +2,55 @@ package outbox
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/matryer/is"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-type fakeStats struct {
-	st  Stats
-	err error
+func TestRelayMetrics(t *testing.T) {
+	is := is.New(t)
+	m := newRelayMetrics(prometheus.NewRegistry())
+
+	m.observe(t.Context(), 5*time.Millisecond, nil)
+	m.observe(t.Context(), time.Second, context.DeadlineExceeded)
+
+	is.Equal(testutil.ToFloat64(m.published), 1.0)
+	is.Equal(testutil.ToFloat64(m.failed), 1.0)
+	is.Equal(testutil.CollectAndCount(m.duration), 1) // a failed publish has no duration
 }
 
-func (f fakeStats) Stats(context.Context, time.Time) (Stats, error) {
-	return f.st, f.err
-}
-
-func TestBacklogCollectorEmitsGauges(t *testing.T) {
-	sr := fakeStats{st: Stats{
-		Pending:          7,
-		InFlight:         2,
-		Failed:           1,
-		OldestPendingAge: 90 * time.Second,
-	}}
-	c := NewBacklogCollector(sr, nil)
-
-	want := `
-# HELP skit_outbox_failed Events in the terminal failed state.
-# TYPE skit_outbox_failed gauge
-skit_outbox_failed 1
-# HELP skit_outbox_in_flight Events leased by a relay, publish in progress.
-# TYPE skit_outbox_in_flight gauge
-skit_outbox_in_flight 2
-# HELP skit_outbox_oldest_pending_seconds Age in seconds of the oldest pending event (0 when none).
-# TYPE skit_outbox_oldest_pending_seconds gauge
-skit_outbox_oldest_pending_seconds 90
-# HELP skit_outbox_pending Events awaiting the relay (status=pending).
-# TYPE skit_outbox_pending gauge
-skit_outbox_pending 7
-`
-	if err := testutil.CollectAndCompare(c, strings.NewReader(want)); err != nil {
-		t.Errorf("unexpected metrics:\n%v", err)
-	}
-}
-
-func TestBacklogCollectorEmitsNothingOnError(t *testing.T) {
-	c := NewBacklogCollector(fakeStats{err: context.DeadlineExceeded}, nil)
-	if n := testutil.CollectAndCount(c); n != 0 {
-		t.Errorf("expected 0 metrics on stats error, got %d", n)
-	}
-}
-
-func TestOutboxMetricsRegisterAndRecord(t *testing.T) {
+// Two relays on one registry share the metrics instead of failing to register.
+func TestRelayMetricsSharedRegistry(t *testing.T) {
+	is := is.New(t)
 	reg := prometheus.NewRegistry()
-	m := NewMetrics(reg)
+	first := newRelayMetrics(reg)
+	second := newRelayMetrics(reg)
 
-	m.observePublish(5*time.Millisecond, nil)
-	m.observePublish(0, context.DeadlineExceeded)
-	m.addSwept(3)
-	m.addCleaned(4)
+	second.observe(t.Context(), time.Millisecond, nil)
 
-	if got := testutil.ToFloat64(m.published); got != 1 {
-		t.Errorf("published = %v, want 1", got)
-	}
-	if got := testutil.ToFloat64(m.publishFailed); got != 1 {
-		t.Errorf("publishFailed = %v, want 1", got)
-	}
-	if got := testutil.ToFloat64(m.swept); got != 3 {
-		t.Errorf("swept = %v, want 3", got)
-	}
-	if got := testutil.ToFloat64(m.cleaned); got != 4 {
-		t.Errorf("cleaned = %v, want 4", got)
-	}
+	is.Equal(testutil.ToFloat64(first.published), 1.0)
 }
 
-// A nil *Metrics must be a safe no-op so metrics stay optional.
-func TestNilMetricsNoop(t *testing.T) {
-	var m *Metrics
-	m.observePublish(time.Second, nil)
-	m.addSwept(1)
-	m.addCleaned(1)
+// With a nil registry the metrics are recorded but not registered.
+func TestRelayMetricsNilRegistry(t *testing.T) {
+	is := is.New(t)
+	m := newRelayMetrics(nil)
+
+	m.observe(t.Context(), time.Millisecond, nil)
+
+	is.Equal(testutil.ToFloat64(m.published), 1.0)
+}
+
+func TestAddRows(t *testing.T) {
+	is := is.New(t)
+	c := newCounter(nil, "test_total", "Test rows.")
+
+	addRows(c, 3)
+	addRows(c, 0)
+	addRows(c, -1) // a negative count must not panic the counter
+
+	is.Equal(testutil.ToFloat64(c), 3.0)
 }

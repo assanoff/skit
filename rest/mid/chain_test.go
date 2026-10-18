@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/matryer/is"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/rest"
@@ -14,15 +15,15 @@ import (
 )
 
 // TestChainOrder verifies Chain returns the standard app middleware, and one
-// more when a metric recorder is configured.
+// more when a metrics registry is configured.
 func TestChainOrder(t *testing.T) {
 	is := is.New(t)
 
 	mids := mid.Chain(mid.Config{})
 	is.Equal(len(mids), 4) // LocalizeErrors, MaskInternal, Errors, Panics
 
-	withMetric := mid.Chain(mid.Config{RecordMetric: func(string) {}})
-	is.Equal(len(withMetric), 5) // + Metrics
+	withMetric := mid.Chain(mid.Config{Metrics: prometheus.NewRegistry()})
+	is.Equal(len(withMetric), 5) // + the outcome counter
 }
 
 // TestChainMasksInternal verifies the assembled chain masks a 5xx error when

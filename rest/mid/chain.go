@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/assanoff/skit/i18n"
 	"github.com/assanoff/skit/rest"
 )
@@ -21,20 +23,19 @@ type Config struct {
 	// MaskInternal hides 5xx error detail from clients (typically true in
 	// production). See MaskInternal.
 	MaskInternal bool
-	// RecordMetric, when set, receives each request's outcome code (an
-	// *errs.Error code, or "ok") for errs-aware metrics. See Metrics.
-	RecordMetric func(code string)
+	// Metrics is the registry of skit_rest_outcomes_total, the requests by
+	// outcome: the code of an *errs.Error response, else "ok". nil disables it.
+	Metrics prometheus.Registerer
 }
 
 // Chain returns the standard skit application middleware in order,
-// outermost first: [Metrics] -> LocalizeErrors -> MaskInternal -> Errors ->
-// Panics — a single, ordered chain that works with our *errs.Error types and
-// the two-layer model. The order is deliberate: Panics (innermost) turns a
-// handler panic into
-// an Internal error; Errors logs/traces the original 5xx; MaskInternal then
-// hides its detail from the client (it gets a nil logger here because Errors
-// already logged); LocalizeErrors localizes the result; Metrics (outermost)
-// counts the outcome.
+// outermost first: outcome counter (with Config.Metrics) -> LocalizeErrors ->
+// MaskInternal -> Errors -> Panics — a single, ordered chain that works with
+// our *errs.Error types and the two-layer model. The order is deliberate:
+// Panics (innermost) turns a handler panic into an Internal error; Errors
+// logs/traces the original 5xx; MaskInternal then hides its detail from the
+// client (it gets a nil logger here because Errors already logged);
+// LocalizeErrors localizes the result; the outcome counter counts it.
 //
 // It is the SDK core only. Wrap it with your app's own middleware: put
 // request-context parsing OUTSIDE it (so the language is in the context before
@@ -48,8 +49,8 @@ type Config struct {
 // not here.
 func Chain(cfg Config) []rest.MidFunc {
 	mids := make([]rest.MidFunc, 0, 5)
-	if cfg.RecordMetric != nil {
-		mids = append(mids, Metrics(cfg.RecordMetric))
+	if cfg.Metrics != nil {
+		mids = append(mids, metrics(newOutcomes(cfg.Metrics)))
 	}
 	mids = append(
 		mids,

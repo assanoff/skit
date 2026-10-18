@@ -2,8 +2,7 @@
 
 > Пример к `research-mods.md` §6. Показано **целевое** состояние после ломающего релиза
 > (`research-mods.md` §3): транзакции открывает store, метрики — реестр `metrics.New()` в
-> `Deps` и поле `Metrics` в `Config` (§7). Сегодня у outbox — набор `outbox.NewMetrics` и
-> `outbox.NewBacklogCollector`. Транспорт — как в [rabbitmq.md](rabbitmq.md).
+> `Deps` и поле `Metrics` в `Config` (§7). Транспорт — как в [rabbitmq.md](rabbitmq.md).
 
 ## 1. Импорты
 

@@ -24,8 +24,9 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	// EnableReflection turns on server reflection (handy for grpcurl in dev).
 	EnableReflection bool
-	// MetricsNamespace prefixes the gRPC metric names (default "grpc").
-	MetricsNamespace string
+	// Metrics is the registry of the RPC metrics (skit_grpc_server_*); nil
+	// disables them.
+	Metrics prometheus.Registerer
 	// TracerProvider records a server span per RPC (otelgrpc); nil → the global
 	// provider.
 	TracerProvider trace.TracerProvider
@@ -63,18 +64,12 @@ type Server struct {
 }
 
 type options struct {
-	registry    prometheus.Registerer
 	unaryExtra  []grpc.UnaryServerInterceptor
 	streamExtra []grpc.StreamServerInterceptor
 }
 
 // Option customizes the server.
 type Option func(*options)
-
-// WithMetrics registers gRPC collectors on reg (e.g. metrics.Metrics.Registry).
-func WithMetrics(reg prometheus.Registerer) Option {
-	return func(o *options) { o.registry = reg }
-}
 
 // WithUnaryInterceptors appends application interceptors, applied after the
 // built-in ones (closest to the handler).
@@ -98,39 +93,29 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
 		cfg.ShutdownTimeout = 10 * time.Second
 	}
 
-	var m *rpcMetrics
-	if o.registry != nil {
-		m = newRPCMetrics(cfg.MetricsNamespace, o.registry)
-	}
+	methods := new(methodSet)
 
-	// Order: recovery (outermost) -> logging -> metrics -> errormap (the
-	// innermost built-in) -> app interceptors -> handler. logging/metrics observe
-	// the status code errormap already mapped; app interceptors see the
-	// handler's own error. The server span is opened before the chain, by the stats
-	// handler, so every interceptor runs inside it.
-	chain := []grpc.UnaryServerInterceptor{
-		recoveryUnary(log),
-		loggingUnary(log),
-	}
-	if m != nil {
+	// Order: metrics (outermost) -> recovery -> logging -> errormap (the
+	// innermost built-in) -> app interceptors -> handler. Metrics and logging
+	// observe the status code errormap already mapped, and metrics also the
+	// Internal status recovery makes of a panic; app interceptors see the
+	// handler's own error. The server span is opened before the chain, by the
+	// stats handler, so every interceptor runs inside it.
+	var (
+		chain  []grpc.UnaryServerInterceptor
+		schain []grpc.StreamServerInterceptor
+	)
+	if cfg.Metrics != nil {
+		m := newRPCMetrics(cfg.Metrics, methods)
 		chain = append(chain, metricsUnary(m))
-	}
-	chain = append(chain, errorMapUnary())
-	chain = append(chain, o.unaryExtra...)
-
-	// Same order for streams: recovery -> logging -> metrics -> errormap
-	// (innermost) -> app interceptors -> handler.
-	schain := []grpc.StreamServerInterceptor{
-		recoveryStream(log),
-		loggingStream(log),
-	}
-	if m != nil {
 		schain = append(schain, metricsStream(m))
 	}
-	schain = append(schain, errorMapStream())
+	chain = append(chain, recoveryUnary(log), loggingUnary(log), errorMapUnary())
+	chain = append(chain, o.unaryExtra...)
+	// Same order for streams.
+	schain = append(schain, recoveryStream(log), loggingStream(log), errorMapStream())
 	schain = append(schain, o.streamExtra...)
 
-	methods := new(methodSet)
 	serverOpts := append([]grpc.ServerOption{
 		grpc.StatsHandler(serverSpans(cfg.TracerProvider, methods)),
 		grpc.ChainUnaryInterceptor(chain...),

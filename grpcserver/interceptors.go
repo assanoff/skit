@@ -48,12 +48,19 @@ func loggingUnary(log *slog.Logger) grpc.UnaryServerInterceptor {
 	}
 }
 
-// metricsUnary records count and latency per method and status code.
+// metricsUnary records the RPCs of the served methods. It is the outermost
+// interceptor, so an RPC whose handler panicked is recorded with the Internal
+// status recovery returns.
 func metricsUnary(m *rpcMetrics) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if !m.methods.has(info.FullMethod) {
+			return handler(ctx, req)
+		}
 		start := time.Now()
+		m.inFlight.Inc()
 		resp, err := handler(ctx, req)
-		m.observe(info.FullMethod, status.Code(err).String(), float64(time.Since(start).Milliseconds()))
+		m.inFlight.Dec()
+		m.record(ctx, info.FullMethod, err, time.Since(start))
 		return resp, err
 	}
 }
@@ -118,12 +125,18 @@ func loggingStream(log *slog.Logger) grpc.StreamServerInterceptor {
 	}
 }
 
-// metricsStream records count and latency per method and status code.
+// metricsStream records the stream RPCs of the served methods, mirroring
+// metricsUnary.
 func metricsStream(m *rpcMetrics) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if !m.methods.has(info.FullMethod) {
+			return handler(srv, ss)
+		}
 		start := time.Now()
+		m.inFlight.Inc()
 		err := handler(srv, ss)
-		m.observe(info.FullMethod, status.Code(err).String(), float64(time.Since(start).Milliseconds()))
+		m.inFlight.Dec()
+		m.record(ss.Context(), info.FullMethod, err, time.Since(start))
 		return err
 	}
 }

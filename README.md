@@ -199,10 +199,11 @@ with a domain layer that knows nothing about SQL or the transport:
   crashed relays and `Cleaner` prunes terminal rows. The relay paces adaptively
   (`worker.NewPacedLoop`): a full batch drains again immediately, an empty one
   idles for `PollInterval` (optionally backing off to `MaxPollInterval`).
-- Metrics are opt-in and registered on the app's shared registry:
-  `outbox.NewMetrics` (relay/sweeper/cleaner throughput) + `NewBacklogCollector`
-  (pending/in-flight/failed depth and oldest-pending age). SDK and business
-  metrics never collide — distinct namespaces on one registry (see `metrics`).
+- Metrics are opt-in and registered on the process registry: the `Metrics`
+  field of `RelayConfig`/`SweeperConfig`/`CleanerConfig` (relay/sweeper/cleaner
+  throughput) and the `outbox.NewBacklog` worker (pending/in-flight/failed depth
+  and oldest-pending age). SDK and business metrics never collide — distinct
+  name prefixes on one registry (see `metrics`).
 - Each transport maps `Topic`/`Key` to its own concepts (RabbitMQ
   exchange+routing key via `WithTopicMapper`, Kafka topic+partition key, NATS
   subject), so the same event row can ship over any broker. `broker/rabbitmq`

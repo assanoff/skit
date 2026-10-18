@@ -47,7 +47,7 @@ func (m *methodSet) has(fullMethod string) bool {
 // continues the W3C trace context of the request metadata. Health checks,
 // reflection and methods the server does not serve get no span, so a scanner
 // cannot fill the trace UI with spans of made-up names. RPC metrics come from
-// WithMetrics, so otelgrpc records none.
+// Config.Metrics, so otelgrpc records none.
 func serverSpans(tp trace.TracerProvider, methods *methodSet) stats.Handler {
 	return otelgrpc.NewServerHandler(
 		otelgrpc.WithTracerProvider(tp), // nil → the global provider

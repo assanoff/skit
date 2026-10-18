@@ -39,7 +39,7 @@ type Deps struct {
 	Redis      dim.Provider[*redis.Client]
 	BrokerConn dim.Provider[*rabbitmq.Conn]
 	Publisher  dim.Provider[broker.Publisher]
-	Outbox     dim.Provider[outbox.Store]
+	Outbox     dim.Provider[*outbox.PG]
 
 	// Domain providers go here, e.g.:
 	//   WalletCore    dim.Provider[*wallet.Core]

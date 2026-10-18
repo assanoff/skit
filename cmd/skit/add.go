@@ -974,7 +974,7 @@ Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic)
 
    store, err := events.NewStore(ctx, a.d.Logger, a.d.DB(ctx))
    reg, err  := events.NewRegistry()
-   a.workers = append(a.workers, events.NewRelay(a.d.Logger, store, pub)) // pub = rabbitmq/kafka NewPublisher
+   a.workers = append(a.workers, events.NewRelay(a.d.Logger, store, pub, a.d.Metrics)) // pub = rabbitmq/kafka NewPublisher
    // import: "%[2]s/internal/app/events"
 
 4. Publish transactionally from your core (atomic with the domain write):
@@ -995,7 +995,7 @@ Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic)
 
    store := outbox.NewPG(a.d.Logger, a.d.DB(ctx), outbox.Options{}); _ = store.EnsureSchema(ctx)
    reg := outbox.NewRegistry(); _ = %[1]s.Register(reg)
-   a.workers = append(a.workers, outbox.NewRelay(a.d.Logger, store, pub, outbox.RelayConfig{})) // pub = broker publisher
+   a.workers = append(a.workers, outbox.NewRelay(a.d.Logger, store, pub, outbox.RelayConfig{Metrics: a.d.Metrics})) // pub = broker publisher
 
 3. Publish transactionally from your core (atomic with the domain write):
 

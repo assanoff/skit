@@ -83,13 +83,15 @@ func WithConsumers() Option { return initConsumers }
 // is up to its set.
 //
 // The application middleware wraps every typed route (HandleApp), in order:
-// LocalizeErrors -> MaskInternal (hides 5xx detail in production) -> Errors
-// (records 5xx on the span + logs) -> Panics (turns a panic into a clean
-// Internal error). Localization is off until you wire i18n (Translator/Lang).
+// the outcome counter (skit_rest_outcomes_total by errs code) -> LocalizeErrors
+// -> MaskInternal (hides 5xx detail in production) -> Errors (records 5xx on
+// the span + logs) -> Panics (turns a panic into a clean Internal error).
+// Localization is off until you wire i18n (Translator/Lang).
 func (a *App) handler(ctx context.Context, routes ...Routes) *router.Router {
 	r := router.New(mid.Chain(mid.Config{
 		Logger:       a.d.Logger,
 		MaskInternal: a.d.Opts.Env == config.EnvProduction,
+		Metrics:      a.d.Metrics,
 	})...)
 	r.Use(middleware.Panics(a.d.Logger))
 	for _, mount := range routes {

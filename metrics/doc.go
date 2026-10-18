@@ -12,7 +12,7 @@
 //	d := &deps.Deps{Opts: opts, Logger: log, Metrics: metrics.New()}
 //
 //	r.Handle("GET /metrics", d.Metrics.Handler())
-//	om := outbox.NewMetrics(d.Metrics)
+//	outbox.NewRelay(log, ob, pub, outbox.RelayConfig{Metrics: d.Metrics})
 //
 // New registers the base preset: go_*, process_* and go_build_info (the module
 // path, version and checksum of the main module from the go build stamp).

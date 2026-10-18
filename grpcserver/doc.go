@@ -2,15 +2,15 @@
 // concerns and exposes it as a worker.Runnable.
 //
 // It opens a server span per RPC (otelgrpc), then applies the same chain of
-// unary interceptors as the REST stack — panic recovery, structured access
-// logging, Prometheus metrics, and errs->status mapping — and registers a
+// unary interceptors as the REST stack — Prometheus metrics, panic recovery,
+// structured access logging, and errs->status mapping — and registers a
 // health service and, optionally, server reflection. Because Server implements
 // worker.Runnable (Name/Start/Stop), it is supervised alongside the HTTP server
 // and background workers.
 //
-// Interceptor order is recovery (outermost) -> logging -> metrics -> errormap
-// -> application interceptors -> handler, so logging and metrics observe the
-// already-mapped status code.
+// Interceptor order is metrics (outermost) -> recovery -> logging -> errormap
+// -> application interceptors -> handler, so metrics and logging observe the
+// already-mapped status code, and metrics count a panic as Internal.
 //
 // # Tracing
 //
@@ -20,15 +20,26 @@
 // reflection and methods the server does not serve get no span: a scanner
 // cannot fill the trace UI with spans of made-up names.
 //
+// # Metrics
+//
+// With Config.Metrics set, the server records on that registry:
+//   - skit_grpc_server_handled_total by method and code;
+//   - skit_grpc_server_handling_seconds by method;
+//   - skit_grpc_server_in_flight.
+//
+// The method is recorded without its leading "/" ("pkg.Service/Method"), the
+// code by its canonical name ("NOT_FOUND"), and the duration of a sampled RPC
+// carries its trace as the exemplar. Like spans, health checks and reflection
+// are not recorded.
+//
 // # Usage
 //
 //	srv := grpcserver.New(log, grpcserver.Config{
 //	    Addr:             ":9090",
 //	    EnableReflection: true,
+//	    Metrics:          d.Metrics,
 //	    TracerProvider:   tp,
-//	},
-//	    grpcserver.WithMetrics(m.Registry),
-//	)
+//	})
 //	srv.Install(handler) // each feature's Register owns its RegisterXxxServer call
 //	group.Add(srv)       // worker.Runnable: Start binds the listener, Stop drains
 //
@@ -40,7 +51,7 @@
 //   - Addr: listen address, e.g. ":9090".
 //   - ShutdownTimeout: bounds graceful drain before a hard stop (default 10s).
 //   - EnableReflection: turns on server reflection (handy for grpcurl in dev).
-//   - MetricsNamespace: prefixes the gRPC metric names (default "grpc").
+//   - Metrics: the registry of the RPC metrics; nil disables them.
 //   - TracerProvider: records the server spans; nil → the global provider.
 //   - MaxRecvMsgSize / MaxSendMsgSize: override the 4 MiB defaults.
 //   - NumStreamWorkers: stream-serving tuning (shared write buffers are
@@ -50,8 +61,6 @@
 //
 // # Options
 //
-//   - WithMetrics(reg): registers gRPC request count/latency collectors on reg
-//     (typically the shared metrics.Metrics.Registry).
 //   - WithUnaryInterceptors(in...): appends application interceptors, applied
 //     after the built-in ones (closest to the handler).
 package grpcserver

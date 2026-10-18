@@ -13,6 +13,7 @@ import (
 	"log/slog"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/outbox"
@@ -49,7 +50,8 @@ func NewRegistry() (*outbox.Registry, error) {
 // NewRelay builds the background relay loop that delivers stored events to pub.
 // Add the returned *worker.Loop to the service's runnable group. pub is the
 // transport publisher (rabbitmq.NewPublisher / kafka.NewPublisher) — passed in
-// from wiring so this file stays transport-agnostic.
-func NewRelay(log *slog.Logger, store outbox.Store, pub broker.Publisher) *worker.Loop {
-	return outbox.NewRelay(log, store, pub, outbox.RelayConfig{})
+// from wiring so this file stays transport-agnostic. reg is the registry of the
+// relay metrics (a.d.Metrics); nil disables them.
+func NewRelay(log *slog.Logger, store outbox.Store, pub broker.Publisher, reg prometheus.Registerer) *worker.Loop {
+	return outbox.NewRelay(log, store, pub, outbox.RelayConfig{Metrics: reg})
 }

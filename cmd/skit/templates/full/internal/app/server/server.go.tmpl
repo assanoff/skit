@@ -111,19 +111,15 @@ func initWorkers(ctx context.Context, a *App) error {
 
 // addOutboxWorkers adds the outbox workers (relay, sweeper, cleaner) that
 // deliver the domain events written into the outbox inside a business
-// transaction.
+// transaction, and the worker of the backlog gauges.
 func addOutboxWorkers(ctx context.Context, a *App) {
 	ob := a.d.Outbox(ctx)
-	om := outbox.NewMetrics(a.d.Metrics)
 	a.workers = append(a.workers,
-		outbox.NewRelay(a.d.Logger, ob, a.d.Publisher(ctx), outbox.RelayConfig{Metrics: om}),
-		outbox.NewSweeper(a.d.Logger, ob, outbox.SweeperConfig{Metrics: om}),
-		outbox.NewCleaner(a.d.Logger, ob, outbox.CleanerConfig{Metrics: om}),
+		outbox.NewRelay(a.d.Logger, ob, a.d.Publisher(ctx), outbox.RelayConfig{Metrics: a.d.Metrics}),
+		outbox.NewSweeper(a.d.Logger, ob, outbox.SweeperConfig{Metrics: a.d.Metrics}),
+		outbox.NewCleaner(a.d.Logger, ob, outbox.CleanerConfig{Metrics: a.d.Metrics}),
+		outbox.NewBacklog(a.d.Logger, ob, a.d.Metrics),
 	)
-	// Backlog gauges query the store on each scrape; register when supported.
-	if sr, ok := ob.(outbox.StatsReader); ok {
-		a.d.Metrics.MustRegister(outbox.NewBacklogCollector(sr, a.d.Logger))
-	}
 }
 
 // initConsumers registers the queue consumers — the receiving half of the

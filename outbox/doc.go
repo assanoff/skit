@@ -33,12 +33,23 @@
 // likely remains, so it drains again at once; an empty batch idles for
 // PollInterval (optionally backing off to MaxPollInterval).
 //
-// Metrics are optional and registered on the shared registry (see the metrics
-// package): NewMetrics builds relay/sweeper/cleaner throughput counters
-// (skit_outbox_*), wired via the *Metrics field on RelayConfig/
-// SweeperConfig/CleanerConfig; NewBacklogCollector exposes backlog gauges
-// (pending/in_flight/failed/oldest_pending_seconds) by querying a StatsReader on
-// each scrape.
+// # Metrics
+//
+// The Metrics field of RelayConfig, SweeperConfig and CleanerConfig is the
+// registry of the worker's metrics; nil disables them:
+//   - the relay: skit_outbox_relay_published_total,
+//     skit_outbox_relay_publish_failures_total and
+//     skit_outbox_relay_publish_duration_seconds (a sampled publish carries its
+//     trace as the exemplar);
+//   - the sweeper: skit_outbox_sweeper_reclaimed_total;
+//   - the cleaner: skit_outbox_cleaner_deleted_total.
+//
+// NewBacklog is the worker of the backlog gauges skit_outbox_pending,
+// skit_outbox_in_flight, skit_outbox_failed and
+// skit_outbox_oldest_pending_seconds: it reads them through a StatsReader
+// (*PG) every 30 seconds. Add it only with a registry: it exists for its
+// gauges. Every replica reports the same values, so a query takes max, not
+// sum.
 //
 // # Event lifecycle (FSM)
 //
@@ -72,9 +83,10 @@
 //	}
 //
 //	store := outbox.NewPG(log, db, outbox.Options{})       // Postgres-backed Store
-//	group.Add(outbox.NewRelay(log, store, publisher, outbox.RelayConfig{}))
-//	group.Add(outbox.NewSweeper(log, store, outbox.SweeperConfig{}))
-//	group.Add(outbox.NewCleaner(log, store, outbox.CleanerConfig{}))
+//	group.Add(outbox.NewRelay(log, store, publisher, outbox.RelayConfig{Metrics: d.Metrics}))
+//	group.Add(outbox.NewSweeper(log, store, outbox.SweeperConfig{Metrics: d.Metrics}))
+//	group.Add(outbox.NewCleaner(log, store, outbox.CleanerConfig{Metrics: d.Metrics}))
+//	group.Add(outbox.NewBacklog(log, store, d.Metrics))
 //
 // # Producing events
 //
@@ -115,8 +127,7 @@
 //   - Worker configs: RelayConfig (PollInterval/MaxPollInterval/BatchSize/
 //     PublishTimeout/Metrics), SweeperConfig (Interval/LeaseTimeout/BatchSize/
 //     Metrics), CleanerConfig (Interval/Retention/Metrics).
-//   - Metrics: NewMetrics(reg) (throughput counters), NewBacklogCollector(sr,
-//     log) (backlog gauges), WithScrapeTimeout.
+//   - Backlog: NewBacklog(log, sr, metrics) (backlog gauges).
 //
 // # Escape hatch
 //
