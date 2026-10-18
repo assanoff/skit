@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	rmq "github.com/wagslane/go-rabbitmq"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
@@ -20,7 +21,8 @@ import (
 // service so you own the topology and the consume loop. skit supplies only the
 // infrastructure: the managed connection (rabbitmq.Conn), the
 // decode+panic-guard+verdict primitive (broker.Process), and the verdict→AMQP
-// mapping (rabbitmq.ToAction), and the handler metrics (broker.Instrument). Edit
+// mapping (rabbitmq.ToAction), and the handler metrics and span
+// (broker.Instrument). Edit
 // the exchange kind, bindings, or concurrency freely — or replace the loop
 // wholesale; Handle in {{.Pkg}}.go stays untouched.
 type rmqRunnable struct {
@@ -33,8 +35,9 @@ type rmqRunnable struct {
 
 // Runnable declares the queue/exchange/bindings from config and returns the
 // worker.Runnable to register on the worker group. Every message is recorded in
-// skit_broker_* on reg; a nil reg turns the metrics off.
-func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts, reg prometheus.Registerer) (worker.Runnable, error) {
+// skit_broker_* on reg (a nil reg turns the metrics off) and as a span on tp,
+// in the trace the message was created in.
+func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts, reg prometheus.Registerer, tp trace.TracerProvider) (worker.Runnable, error) {
 	name := "{{.Pkg}}-consumer"
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
@@ -63,7 +66,12 @@ func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts, reg p
 	if err != nil {
 		return nil, fmt.Errorf("%s: new rabbitmq consumer: %w", name, err)
 	}
-	h := broker.Instrument(c.Handle, broker.InstrumentConfig{Consumer: name, Metrics: reg})
+	h := broker.Instrument(c.Handle, broker.InstrumentConfig{
+		Consumer:       name,
+		System:         "rabbitmq",
+		Metrics:        reg,
+		TracerProvider: tp,
+	})
 	return &rmqRunnable{log: c.log, rc: rc, h: h, name: name}, nil
 }
 
@@ -83,6 +91,7 @@ func (r *rmqRunnable) Start(ctx context.Context) error {
 		action := broker.Process(ctx, r.log, r.name, d.Body, func(m *broker.Message) {
 			m.Topic = d.Exchange
 			m.Key = d.RoutingKey
+			m.Headers = rabbitmq.Headers(d.Headers)
 		}, r.h)
 		return rabbitmq.ToAction(action)
 	})

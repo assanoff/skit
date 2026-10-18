@@ -185,7 +185,7 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	}
 	m.Topic = msg.Topic
 	m.Key = string(msg.Key)
-	m.Headers = headers(msg.Headers)
+	m.Headers = Headers(msg.Headers)
 
 	for attempt := 0; ; attempt++ {
 		switch c.dispatch(ctx, m) {
@@ -220,7 +220,10 @@ func (c *Consumer) commit(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	}
 }
 
-func headers(hs []kgo.Header) map[string]string {
+// Headers maps the headers of a Kafka record to broker.Message.Headers. A
+// consume loop of your own sets it on the message, so broker.Instrument
+// continues the trace the message was created in.
+func Headers(hs []kgo.Header) map[string]string {
 	if len(hs) == 0 {
 		return nil
 	}

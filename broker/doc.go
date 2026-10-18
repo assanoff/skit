@@ -83,5 +83,8 @@
 // documents here: a request, the event it created and the handling of that
 // event are one trace under one sampling decision. A handler that processes a
 // batch would link every message's context instead. Requeue, Discard and a
-// panic mark the span failed, with error.type set to the verdict.
+// panic mark the span failed, with error.type set to the verdict. The adapters'
+// consumers fill Message.Headers from the delivery; a consume loop of your own,
+// like the generated consumers, sets them with rabbitmq.Headers or
+// kafka.Headers, or the span starts a trace of its own.
 package broker

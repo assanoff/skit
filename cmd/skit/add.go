@@ -545,7 +545,7 @@ the transport lives in %[1]s_rmq.go. Next:
    (server.WithConsumers):
 
    if a.d.Opts.Broker.Enabled {
-       cons, err := %[1]s.New(a.d.Logger).Runnable(a.d.BrokerConn(ctx), a.d.Opts.%[2]sConsumer, a.d.Metrics)
+       cons, err := %[1]s.New(a.d.Logger).Runnable(a.d.BrokerConn(ctx), a.d.Opts.%[2]sConsumer, a.d.Metrics, a.d.TracerProvider)
        if err != nil {
            return err
        }
@@ -573,7 +573,7 @@ the transport lives in %[1]s_kafka.go. Next:
    Runnable builds the Kafka consumer from config — supply the brokers (from your
    own config/env):
 
-   cons, err := %[1]s.New(a.d.Logger).Runnable(kafka.Config{Brokers: a.d.Opts.Kafka.Brokers}, a.d.Opts.%[2]sConsumer, a.d.Metrics)
+   cons, err := %[1]s.New(a.d.Logger).Runnable(kafka.Config{Brokers: a.d.Opts.Kafka.Brokers}, a.d.Opts.%[2]sConsumer, a.d.Metrics, a.d.TracerProvider)
    if err != nil {
        return err
    }
@@ -832,7 +832,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
    Postgres advisory-lock Locker:
 
    locker := lock.NewPG(a.d.DB(ctx), a.d.Logger)
-   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler(a.d.Metrics)
+   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler(a.d.Metrics, a.d.TracerProvider)
    if err != nil { return err }
    a.workers = append(a.workers, sched)
    // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
@@ -845,7 +845,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
    (internal/app/server/server.go), building a Redis Locker:
 
    locker := lock.NewRedis(a.d.Redis(ctx), a.d.Logger)
-   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler(a.d.Metrics)
+   sched, err := %[1]s.New(a.d.Logger, locker).Scheduler(a.d.Metrics, a.d.TracerProvider)
    if err != nil { return err }
    a.workers = append(a.workers, sched)
    // imports: %[1]s "%[2]s/internal/app/crons/%[1]s", "github.com/assanoff/skit/lock"
@@ -856,7 +856,7 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 		fmt.Fprintf(out, `
 2. Wire it into initWorkers (internal/app/server/server.go):
 
-   sched, err := %[1]s.New(a.d.Logger).Scheduler(a.d.Metrics)
+   sched, err := %[1]s.New(a.d.Logger).Scheduler(a.d.Metrics, a.d.TracerProvider)
    if err != nil { return err }
    a.workers = append(a.workers, sched)
    // import: %[1]s "%[2]s/internal/app/crons/%[1]s"

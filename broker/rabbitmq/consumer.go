@@ -154,7 +154,7 @@ func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
 	action := broker.Process(ctx, c.log, c.cfg.Name, d.Body, func(m *broker.Message) {
 		m.Topic = d.Exchange
 		m.Key = d.RoutingKey
-		m.Headers = stringHeaders(d.Headers)
+		m.Headers = Headers(d.Headers)
 	}, c.handler)
 	return ToAction(action)
 }
@@ -173,9 +173,11 @@ func ToAction(a broker.Action) rmq.Action {
 	}
 }
 
-// stringHeaders projects an AMQP header table to string→string, dropping
-// non-string values (CloudEvents/trace headers are strings).
-func stringHeaders(t amqp.Table) map[string]string {
+// Headers projects the header table of an AMQP delivery to
+// broker.Message.Headers, dropping non-string values (CloudEvents and trace
+// headers are strings). A consume loop of your own sets it on the message, so
+// broker.Instrument continues the trace the message was created in.
+func Headers(t amqp.Table) map[string]string {
 	if len(t) == 0 {
 		return nil
 	}

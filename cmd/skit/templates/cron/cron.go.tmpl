@@ -11,6 +11,7 @@ import (
 	{{if .Locked}}"time"
 {{end}}
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/cron"
 	{{if .Locked}}"github.com/assanoff/skit/lock"
@@ -65,9 +66,10 @@ func (c *Cron) guarded(ctx context.Context) error {
 {{end}}
 // Scheduler builds the cron scheduler Runnable for this job. Add the returned
 // value to the service's worker group. reg is the registry of the run metrics
-// (skit_cron_*, pass Deps.Metrics); nil disables them.
-func (c *Cron) Scheduler(reg prometheus.Registerer) (*cron.Scheduler, error) {
-	sched := cron.New(c.log, cron.Config{Name: Name, Metrics: reg})
+// (skit_cron_*, pass Deps.Metrics); nil disables them. Every run is the root
+// span of its own trace on tp (pass Deps.TracerProvider).
+func (c *Cron) Scheduler(reg prometheus.Registerer, tp trace.TracerProvider) (*cron.Scheduler, error) {
+	sched := cron.New(c.log, cron.Config{Name: Name, Metrics: reg, TracerProvider: tp})
 	if err := sched.Add(Schedule, Name, c.{{if .Locked}}guarded{{else}}run{{end}}); err != nil {
 		return nil, err
 	}

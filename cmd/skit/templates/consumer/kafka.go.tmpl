@@ -10,6 +10,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	kgo "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/kafka"
@@ -29,7 +30,7 @@ const (
 // kafkaRunnable is the Kafka consumer for this handler, generated into the
 // service so you own the consume loop. skit supplies only the infrastructure:
 // the decode+panic-guard+verdict primitive (broker.Process) and the handler
-// metrics (broker.Instrument). Edit the reader config, retry policy, or commit
+// metrics and span (broker.Instrument). Edit the reader config, retry policy, or commit
 // strategy freely — or replace the loop wholesale; Handle in {{.Pkg}}.go stays
 // untouched.
 type kafkaRunnable struct {
@@ -47,21 +48,27 @@ type kafkaRunnable struct {
 }
 
 // Runnable returns the worker.Runnable to register on the worker group. Every
-// attempt at a message is recorded in skit_broker_* on reg; a nil reg turns the
-// metrics off.
-func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts, reg prometheus.Registerer) (worker.Runnable, error) {
+// attempt at a message is recorded in skit_broker_* on reg (a nil reg turns the
+// metrics off) and as a span on tp, in the trace the message was created in.
+func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts, reg prometheus.Registerer, tp trace.TracerProvider) (worker.Runnable, error) {
 	const name = "{{.Pkg}}-consumer"
 	conc := opts.Concurrency
 	if conc <= 0 {
 		conc = 1
 	}
+	h := broker.Instrument(c.Handle, broker.InstrumentConfig{
+		Consumer:       name,
+		System:         "kafka",
+		Metrics:        reg,
+		TracerProvider: tp,
+	})
 	return &kafkaRunnable{
 		log:     c.log,
 		brokers: cfg.Brokers,
 		topic:   opts.Topic,
 		group:   opts.Group,
 		conc:    conc,
-		h:       broker.Instrument(c.Handle, broker.InstrumentConfig{Consumer: name, Metrics: reg}),
+		h:       h,
 		name:    name,
 	}, nil
 }
@@ -119,6 +126,7 @@ func (r *kafkaRunnable) handle(ctx context.Context, rd *kgo.Reader, msg kgo.Mess
 	route := func(m *broker.Message) {
 		m.Topic = msg.Topic
 		m.Key = string(msg.Key)
+		m.Headers = kafka.Headers(msg.Headers)
 	}
 	for attempt := 0; ; attempt++ {
 		switch broker.Process(ctx, r.log, r.name, msg.Value, route, r.h) {
