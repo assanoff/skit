@@ -41,7 +41,7 @@ func run() error {
 
 	srv := &http.Server{Addr: ":8080", Handler: r, ReadHeaderTimeout: 5 * time.Second}
 
-	group := worker.NewGroup(log, 10*time.Second)
+	group := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 10 * time.Second})
 	group.Add(worker.RunnableFunc{
 		NameValue: "http",
 		StartFn: func(ctx context.Context) error {

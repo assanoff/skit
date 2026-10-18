@@ -123,21 +123,18 @@ Publisher'ы.
 package orderdb
 
 import (
-	"cmp"
 	"context"
 	"log/slog"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/dbx/dialect"
 	"github.com/assanoff/skit/outbox"
 	"github.com/jmoiron/sqlx"
 )
 
 // repo — CRUD поверх пула или tx.
 type repo struct {
-	log     *slog.Logger
-	ext     sqlx.ExtContext // куда идут запросы: db или tx
-	dialect dialect.Dialect
+	log *slog.Logger
+	ext sqlx.ExtContext // куда идут запросы: db или tx
 }
 
 // withTx — копия repo, привязанная к tx; остальные поля переносятся сами.
@@ -149,7 +146,6 @@ func (r *repo) withTx(tx *sqlx.Tx) *repo {
 
 // Config — настройки store.
 type Config struct {
-	Dialect  dialect.Dialect  // nil — dialect.Postgres{}
 	Outbox   outbox.Store     // nil — сервис без брокера: события отбрасываются
 	Registry *outbox.Registry // нужен вместе с Outbox
 }
@@ -163,11 +159,7 @@ type Store struct {
 
 func New(log *slog.Logger, db *sqlx.DB, cfg Config) *Store {
 	return &Store{
-		repo: &repo{
-			log:     log,
-			ext:     db,
-			dialect: cmp.Or[dialect.Dialect](cfg.Dialect, dialect.Postgres{}),
-		},
+		repo:   &repo{log: log, ext: db},
 		db:     db,
 		outbox: cfg.Outbox,
 		reg:    cfg.Registry,
@@ -279,7 +271,7 @@ func New(ctx context.Context, log *slog.Logger, cfg Config) (*Deps, error) {
 	if err != nil {
 		return nil, err
 	}
-	pub, err := rabbitmq.NewPublisher(conn, "orders", log)
+	pub, err := rabbitmq.NewPublisher(conn, log, rabbitmq.PublisherConfig{Source: "orders"})
 	if err != nil {
 		return nil, err
 	}

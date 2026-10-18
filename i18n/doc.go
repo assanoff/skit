@@ -15,7 +15,10 @@
 //	//go:embed locales/*.json
 //	var locales embed.FS
 //
-//	tr, err := i18n.New("en", locales, "locales/en.json", "locales/ru.json")
+//	tr, err := i18n.New(locales, i18n.Config{
+//	    DefaultLang: "en",
+//	    Files:       []string{"locales/en.json", "locales/ru.json"},
+//	})
 //	if err != nil {
 //	    return err
 //	}

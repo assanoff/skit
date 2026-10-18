@@ -46,7 +46,7 @@ func Run(ctx context.Context, cfg RunConfig, runnables ...worker.Runnable) error
 	// supervisor error during startup.
 	defer func() { _ = closer.CloseSync() }()
 
-	g := worker.NewGroup(cfg.Logger, cfg.ShutdownTimeout)
+	g := worker.NewGroup(cfg.Logger, worker.GroupConfig{ShutdownTimeout: cfg.ShutdownTimeout})
 	g.Add(runnables...)
 
 	if err := g.Run(sigCtx); err != nil && sigCtx.Err() == nil {

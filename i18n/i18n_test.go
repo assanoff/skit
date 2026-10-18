@@ -14,7 +14,10 @@ var catalogs embed.FS
 
 func newTestTranslator(t *testing.T) *Translator {
 	t.Helper()
-	tr, err := New("en", catalogs, "testdata/en.json", "testdata/ru.json")
+	tr, err := New(catalogs, Config{
+		DefaultLang: "en",
+		Files:       []string{"testdata/en.json", "testdata/ru.json"},
+	})
 	if err != nil {
 		t.Fatalf("new translator: %v", err)
 	}

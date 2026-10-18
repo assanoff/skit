@@ -11,7 +11,7 @@ import (
 
 func TestAddValidatesSpec(t *testing.T) {
 	is := is.New(t)
-	s := New(nil, "test")
+	s := New(nil, Config{Name: "test"})
 
 	is.NoErr(s.Add("@every 1s", "ok", func(context.Context) error { return nil }))         // @every descriptor
 	is.NoErr(s.Add("0 3 * * *", "daily", func(context.Context) error { return nil }))      // 5-field standard
@@ -21,7 +21,7 @@ func TestAddValidatesSpec(t *testing.T) {
 
 func TestSchedulerRunsAndStops(t *testing.T) {
 	is := is.New(t)
-	s := New(nil, "test")
+	s := New(nil, Config{Name: "test"})
 
 	var runs atomic.Int32
 	// @every rounds sub-second delays up to 1s (robfig ConstantDelaySchedule), so
@@ -48,9 +48,11 @@ func TestSchedulerRunsAndStops(t *testing.T) {
 
 func TestSchedulerRecoversPanic(t *testing.T) {
 	is := is.New(t)
-	s := New(nil, "test")
+	var after, panics atomic.Int32
+	s := New(nil, Config{Name: "test"}, WithOnPanic(func(string, string) {
+		panics.Add(1)
+	}))
 
-	var after atomic.Int32
 	is.NoErr(s.Add("@every 1s", "panicky", func(context.Context) error {
 		after.Add(1)
 		panic("boom") // must be recovered, not crash the process/scheduler
@@ -60,5 +62,6 @@ func TestSchedulerRecoversPanic(t *testing.T) {
 	defer cancel()
 	is.NoErr(s.Start(ctx))
 
-	is.True(after.Load() >= 2) // kept firing despite each run panicking
+	is.True(after.Load() >= 2)            // kept firing despite each run panicking
+	is.Equal(panics.Load(), after.Load()) // the handler sees every panic
 }

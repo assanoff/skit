@@ -75,7 +75,7 @@ func New(log *slog.Logger, cfg Config) (*Deps, error) {
 		return nil, err
 	}
 
-	pub, err := rabbitmq.NewPublisher(conn, "orders", log)
+	pub, err := rabbitmq.NewPublisher(conn, log, rabbitmq.PublisherConfig{Source: "orders"})
 	if err != nil {
 		return nil, err
 	}

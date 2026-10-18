@@ -14,6 +14,7 @@
 package cron
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -52,19 +53,28 @@ type Scheduler struct {
 	entries []entry
 }
 
-// New builds an empty Scheduler named name (used in logs and panic metrics).
-// log may be nil.
-func New(log *slog.Logger, name string) *Scheduler {
-	if name == "" {
-		name = "cron"
-	}
-	return &Scheduler{name: name, log: log}
+// Config configures a Scheduler.
+type Config struct {
+	// Name identifies the scheduler in logs and panic metrics (defaults to
+	// "cron").
+	Name string
 }
 
-// OnPanic sets a handler invoked when a job panics (e.g. to bump a metric). The
-// panic is always recovered and logged regardless.
-func (s *Scheduler) OnPanic(h safetick.PanicHandler) *Scheduler {
-	s.onPanic = h
+// Option customizes a Scheduler.
+type Option func(*Scheduler)
+
+// WithOnPanic sets a handler invoked when a job panics (e.g. to bump a
+// metric). The panic is always recovered and logged regardless.
+func WithOnPanic(h safetick.PanicHandler) Option {
+	return func(s *Scheduler) { s.onPanic = h }
+}
+
+// New builds an empty Scheduler. log may be nil.
+func New(log *slog.Logger, cfg Config, opts ...Option) *Scheduler {
+	s := &Scheduler{name: cmp.Or(cfg.Name, "cron"), log: log}
+	for _, opt := range opts {
+		opt(s)
+	}
 	return s
 }
 

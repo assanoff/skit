@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,10 +24,18 @@ type Translator struct {
 	defaultLang string
 }
 
-// New builds a Translator. defaultLang is the BCP-47 tag used as the bundle's
-// fallback and when a requested language is unknown. files are paths within
-// fsys to JSON catalogs (e.g. "locales/en.json").
-func New(defaultLang string, fsys fs.FS, files ...string) (*Translator, error) {
+// Config configures a Translator.
+type Config struct {
+	// DefaultLang is the BCP-47 tag used as the bundle's fallback and when a
+	// requested language is unknown (defaults to "en").
+	DefaultLang string
+	// Files are paths within fsys to JSON catalogs (e.g. "locales/en.json").
+	Files []string
+}
+
+// New builds a Translator from the catalogs cfg.Files in fsys.
+func New(fsys fs.FS, cfg Config) (*Translator, error) {
+	defaultLang := cmp.Or(cfg.DefaultLang, "en")
 	defTag, err := language.Parse(defaultLang)
 	if err != nil {
 		return nil, fmt.Errorf("i18n: invalid default language %q: %w", defaultLang, err)
@@ -37,7 +46,7 @@ func New(defaultLang string, fsys fs.FS, files ...string) (*Translator, error) {
 
 	localizers := map[string]*goi18n.Localizer{}
 	tags := []language.Tag{defTag}
-	for _, f := range files {
+	for _, f := range cfg.Files {
 		mf, err := bundle.LoadMessageFileFS(fsys, f)
 		if err != nil {
 			return nil, fmt.Errorf("i18n: load %q: %w", f, err)

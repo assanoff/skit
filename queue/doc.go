@@ -45,7 +45,7 @@
 //	    },
 //	})
 //
-//	group := worker.NewGroup(log, 10*time.Second)
+//	group := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 10 * time.Second})
 //	group.Add(worker.NewPacedLoop(log, worker.LoopConfig{}, proc.PacedTick()))
 //	if err := group.Run(ctx); err != nil {
 //	    return err

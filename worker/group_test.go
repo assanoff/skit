@@ -45,7 +45,7 @@ func TestGroupAddSkipsNil(t *testing.T) {
 		started, stopped []string
 	)
 
-	g := worker.NewGroup(nil, time.Second)
+	g := worker.NewGroup(nil, worker.GroupConfig{ShutdownTimeout: time.Second})
 	// nil entries (a disabled, addr-gated brick) are dropped, not supervised.
 	g.Add(rec(&mu, &started, &stopped, "a", nil), nil, rec(&mu, &started, &stopped, "b", nil), nil)
 
@@ -64,7 +64,7 @@ func TestGroupStopsInReverseOrder(t *testing.T) {
 		started, stopped []string
 	)
 
-	g := worker.NewGroup(nil, time.Second)
+	g := worker.NewGroup(nil, worker.GroupConfig{ShutdownTimeout: time.Second})
 	g.Add(
 		rec(&mu, &started, &stopped, "a", nil),
 		rec(&mu, &started, &stopped, "b", nil),
@@ -87,7 +87,7 @@ func TestGroupReturnsFirstErrorAndStopsAll(t *testing.T) {
 	)
 	boom := errors.New("boom")
 
-	g := worker.NewGroup(nil, time.Second)
+	g := worker.NewGroup(nil, worker.GroupConfig{ShutdownTimeout: time.Second})
 	g.Add(
 		rec(&mu, &started, &stopped, "ok", nil), // blocks until the group tears down
 		rec(&mu, &started, &stopped, "bad", func(ctx context.Context) error {

@@ -28,14 +28,17 @@ type Pool struct {
 	isShutdown chan struct{}
 }
 
-// NewPool constructs a Pool that runs at most maxConcurrent jobs at once.
-// maxConcurrent is clamped to a minimum of 1.
-func NewPool(maxConcurrent int) *Pool {
-	if maxConcurrent < 1 {
-		maxConcurrent = 1
-	}
+// PoolConfig configures a Pool.
+type PoolConfig struct {
+	// MaxConcurrent is the most jobs the Pool runs at once (defaults to 1 if
+	// non-positive).
+	MaxConcurrent int
+}
+
+// NewPool constructs a Pool.
+func NewPool(cfg PoolConfig) *Pool {
 	return &Pool{
-		sem:        make(chan struct{}, maxConcurrent),
+		sem:        make(chan struct{}, max(cfg.MaxConcurrent, 1)),
 		running:    make(map[string]context.CancelFunc),
 		isShutdown: make(chan struct{}),
 	}

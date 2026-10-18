@@ -43,6 +43,13 @@ type Publisher struct {
 // Compile-time check.
 var _ broker.Publisher = (*Publisher)(nil)
 
+// PublisherConfig configures a Publisher.
+type PublisherConfig struct {
+	// Source is the CloudEvents source stamped on messages that don't carry
+	// their own (required).
+	Source string
+}
+
 // PublisherOption customizes a Publisher.
 type PublisherOption func(*Publisher)
 
@@ -56,10 +63,9 @@ func WithTopicMapper(m TopicMapper) PublisherOption {
 	}
 }
 
-// NewPublisher builds a confirm-mode publisher. source is the CloudEvents
-// source stamped on messages that don't carry their own.
-func NewPublisher(conn *Conn, source string, log *slog.Logger, opts ...PublisherOption) (*Publisher, error) {
-	if source == "" {
+// NewPublisher builds a confirm-mode publisher.
+func NewPublisher(conn *Conn, log *slog.Logger, cfg PublisherConfig, opts ...PublisherOption) (*Publisher, error) {
+	if cfg.Source == "" {
 		return nil, errors.New("rabbitmq: new publisher: source is required")
 	}
 	p, err := rmq.NewPublisher(
@@ -70,7 +76,7 @@ func NewPublisher(conn *Conn, source string, log *slog.Logger, opts ...Publisher
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: new publisher: %w", err)
 	}
-	pub := &Publisher{log: log, pub: p, source: source, mapper: defaultTopicMapper}
+	pub := &Publisher{log: log, pub: p, source: cfg.Source, mapper: defaultTopicMapper}
 	for _, opt := range opts {
 		opt(pub)
 	}

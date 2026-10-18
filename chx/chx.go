@@ -101,7 +101,7 @@ func Migrate(ctx context.Context, cfg Config, fsys fs.FS) error {
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping clickhouse (migrations): %w", err)
 	}
-	m, err := migrate.New(clickHouseDialect, db, fsys)
+	m, err := migrate.New(db, fsys, migrate.WithDialect(clickHouseDialect))
 	if err != nil {
 		return fmt.Errorf("new migrator: %w", err)
 	}

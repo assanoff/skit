@@ -18,7 +18,7 @@
 //		Logger:          log,
 //	}, router)
 //
-//	grp := worker.NewGroup(log, 10*time.Second)
+//	grp := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 10 * time.Second})
 //	grp.Add(srv)          // alongside grpcserver.Server, debugsrv.Server, ...
 //	_ = grp.Run(ctx)
 //

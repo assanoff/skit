@@ -22,12 +22,18 @@ type Group struct {
 	shutdownTimeout time.Duration
 }
 
-// NewGroup builds a Group. shutdownTimeout bounds the graceful-shutdown phase:
-// it caps both each Runnable's Stop call and the subsequent wait for every Start
-// goroutine to return, so a Runnable whose Start ignores ctx cannot hang Run
-// forever (0 means no bound — wait indefinitely). log may be nil.
-func NewGroup(log *slog.Logger, shutdownTimeout time.Duration) *Group {
-	return &Group{log: log, shutdownTimeout: shutdownTimeout}
+// GroupConfig configures a Group.
+type GroupConfig struct {
+	// ShutdownTimeout bounds the graceful-shutdown phase: it caps both each
+	// Runnable's Stop call and the subsequent wait for every Start goroutine to
+	// return, so a Runnable whose Start ignores ctx cannot hang Run forever
+	// (0 means no bound — wait indefinitely).
+	ShutdownTimeout time.Duration
+}
+
+// NewGroup builds a Group. log may be nil.
+func NewGroup(log *slog.Logger, cfg GroupConfig) *Group {
+	return &Group{log: log, shutdownTimeout: cfg.ShutdownTimeout}
 }
 
 // Add registers one or more Runnables, skipping any nil entries — so addr-gated

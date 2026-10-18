@@ -64,7 +64,7 @@ func (c *Cron) guarded(ctx context.Context) error {
 // Scheduler builds the cron scheduler Runnable for this job. Add the returned
 // value to the service's worker group.
 func (c *Cron) Scheduler() (*cron.Scheduler, error) {
-	sched := cron.New(c.log, Name)
+	sched := cron.New(c.log, cron.Config{Name: Name})
 	if err := sched.Add(Schedule, Name, c.{{if .Locked}}guarded{{else}}run{{end}}); err != nil {
 		return nil, err
 	}

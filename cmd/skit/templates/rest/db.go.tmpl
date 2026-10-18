@@ -19,36 +19,19 @@ import (
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/dbx/dialect"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 )
 
 // Store implements {{.Pkg}}core.Store against Postgres.
 type Store struct {
-	log     *slog.Logger
-	db      sqlx.ExtContext
-	dialect dialect.Dialect
-}
-
-// Option customizes a Store.
-type Option func(*Store)
-
-// WithDialect overrides the SQL dialect used to compose engine-specific SQL
-// (pagination). Defaults to dialect.Postgres.
-func WithDialect(d dialect.Dialect) Option {
-	return func(s *Store) {
-		s.dialect = d
-	}
+	log *slog.Logger
+	db  sqlx.ExtContext
 }
 
 // NewStore builds a Store. Pass a *sqlx.DB for pool-backed use.
-func NewStore(log *slog.Logger, db *sqlx.DB, opts ...Option) *Store {
-	s := &Store{log: log, db: db, dialect: dialect.Postgres{}}
-	for _, o := range opts {
-		o(s)
-	}
-	return s
+func NewStore(log *slog.Logger, db *sqlx.DB) *Store {
+	return &Store{log: log, db: db}
 }
 
 // Compile-time check that Store satisfies the domain contract.
@@ -121,7 +104,7 @@ func (s *Store) Count(ctx context.Context, filter {{.Pkg}}core.QueryFilter) (int
 
 // Query implements {{.Pkg}}core.Store: one filtered, ordered page. The WHERE is built
 // by applyFilter, the ORDER BY by orderByClause (allowlisted), and the pagination
-// clause via the store's dialect, binding :offset and :rows_per_page below.
+// clause binds :offset and :rows_per_page below.
 func (s *Store) Query(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by order.By, pg page.Page) ([]{{.Pkg}}core.{{.Type}}, error) {
 	clause, err := orderByClause(by)
 	if err != nil {
@@ -136,7 +119,7 @@ func (s *Store) Query(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by o
 	buf := bytes.NewBufferString(`SELECT id, name, description, created_at, updated_at FROM {{.Plural}}`)
 	s.applyFilter(filter, data, buf)
 	buf.WriteString(clause)
-	s.dialect.Paginate(buf)
+	buf.WriteString(" OFFSET :offset ROWS FETCH NEXT :rows_per_page ROWS ONLY")
 
 	var rows []db{{.Type}}
 	if err := dbx.NamedQuerySlice(ctx, s.log, s.db, buf.String(), data, &rows); err != nil {

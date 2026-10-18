@@ -114,7 +114,7 @@ func NewPostgres(ctx context.Context, t *testing.T, cfg Config) *Postgres {
 	}
 
 	if cfg.Migrations != nil {
-		m, err := migrate.New(migrate.Postgres, db.DB, cfg.Migrations)
+		m, err := migrate.New(db.DB, cfg.Migrations)
 		if err != nil {
 			t.Fatalf("dbtest: build migrator: %v", err)
 		}

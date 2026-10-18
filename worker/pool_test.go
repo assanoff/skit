@@ -19,7 +19,7 @@ func TestPoolBoundsConcurrency(t *testing.T) {
 
 func testPoolBoundsConcurrency(t *testing.T) {
 	const limit = 3
-	p := NewPool(limit)
+	p := NewPool(PoolConfig{MaxConcurrent: limit})
 
 	var (
 		mu      sync.Mutex
@@ -67,7 +67,7 @@ func TestPoolShutdownDrainsAndRejects(t *testing.T) {
 }
 
 func testPoolShutdownDrainsAndRejects(t *testing.T) {
-	p := NewPool(2)
+	p := NewPool(PoolConfig{MaxConcurrent: 2})
 
 	var done atomic.Int64
 	for i := range 4 {
@@ -101,7 +101,7 @@ func testPoolShutdownDrainsAndRejects(t *testing.T) {
 }
 
 func TestPoolShutdownCancelsJobContext(t *testing.T) {
-	p := NewPool(1)
+	p := NewPool(PoolConfig{MaxConcurrent: 1})
 
 	started := make(chan struct{})
 	canceled := make(chan struct{})
@@ -129,7 +129,7 @@ func TestPoolCancelStopsSingleJob(t *testing.T) {
 }
 
 func testPoolCancelStopsSingleJob(t *testing.T) {
-	p := NewPool(2)
+	p := NewPool(PoolConfig{MaxConcurrent: 2})
 
 	canceled := make(chan struct{})
 	key, err := p.Submit(context.Background(), func(ctx context.Context) {

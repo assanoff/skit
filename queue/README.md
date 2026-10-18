@@ -126,7 +126,7 @@ func run(ctx context.Context, log *slog.Logger, q *queue.PG) error {
         },
     })
 
-    group := worker.NewGroup(log, 10*time.Second)
+    group := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 10 * time.Second})
     group.Add(worker.NewLoop(log, worker.LoopConfig{
         Name:               "jobs",
         Interval:           time.Second,

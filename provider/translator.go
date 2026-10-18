@@ -19,12 +19,15 @@ import (
 //	var localesFS embed.FS
 //
 //	c.Translator, cleanup = dim.NewResource("Translator",
-//		provider.Translator("ru", localesFS, "locales/ru.json", "locales/kk.json"))
+//		provider.Translator(localesFS, i18n.Config{
+//			DefaultLang: "ru",
+//			Files:       []string{"locales/ru.json", "locales/kk.json"},
+//		}))
 //
 // It holds no external resource, so the cleanup is nil.
-func Translator(defaultLang string, fsys fs.FS, files ...string) func(ctx context.Context) (*i18n.Translator, dim.CleanupFunc, error) {
+func Translator(fsys fs.FS, cfg i18n.Config) func(ctx context.Context) (*i18n.Translator, dim.CleanupFunc, error) {
 	return func(_ context.Context) (*i18n.Translator, dim.CleanupFunc, error) {
-		tr, err := i18n.New(defaultLang, fsys, files...)
+		tr, err := i18n.New(fsys, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("provider: init translator: %w", err)
 		}

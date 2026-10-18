@@ -25,15 +25,33 @@ type Migrator struct {
 	provider *goose.Provider
 }
 
-// New builds a Migrator for the given dialect, database handle and migration
-// filesystem. fsys is usually an embed.FS rooted at the `*.sql` files; pass the
-// embedded FS directly (use fs.Sub if the migrations live in a subdirectory).
+// Option customizes a Migrator.
+type Option func(*options)
+
+// options holds the settings Options change.
+type options struct {
+	dialect Dialect
+}
+
+// WithDialect sets the database dialect (default Postgres).
+func WithDialect(d Dialect) Option {
+	return func(o *options) { o.dialect = d }
+}
+
+// New builds a Migrator for the database handle db and the migration
+// filesystem fsys. fsys is usually an embed.FS rooted at the `*.sql` files;
+// pass the embedded FS directly (use fs.Sub if the migrations live in a
+// subdirectory).
 //
-// The handle must be opened with a driver matching dialect — e.g. a pgx/lib-pq
-// connection for migrate.Postgres. New does not take ownership of db; Close
-// releases only the provider.
-func New(dialect Dialect, db *sql.DB, fsys fs.FS) (*Migrator, error) {
-	p, err := goose.NewProvider(dialect, db, fsys)
+// The handle must be opened with a driver matching the dialect — e.g. a
+// pgx/lib-pq connection for Postgres, the default. New does not take ownership
+// of db; Close releases only the provider.
+func New(db *sql.DB, fsys fs.FS, opts ...Option) (*Migrator, error) {
+	o := options{dialect: Postgres}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	p, err := goose.NewProvider(o.dialect, db, fsys)
 	if err != nil {
 		return nil, fmt.Errorf("new migration provider: %w", err)
 	}

@@ -11,7 +11,7 @@
 //	//go:embed *.sql
 //	var migrationsFS embed.FS
 //
-//	m, err := migrate.New(migrate.Postgres, db.DB, migrationsFS)
+//	m, err := migrate.New(db.DB, migrationsFS)
 //	if err != nil {
 //	    return err
 //	}
@@ -20,10 +20,10 @@
 //	    return err
 //	}
 //
-// New takes a *sql.DB opened with a driver matching the dialect (e.g. a pgx
-// connection for migrate.Postgres). It does not take ownership of db; Close
-// releases only the provider, never the handle. Use fs.Sub if the migrations
-// live in a subdirectory of the embedded FS.
+// New takes a *sql.DB opened with a driver matching the dialect (Postgres by
+// default, e.g. a pgx connection; another one via WithDialect). It does not
+// take ownership of db; Close releases only the provider, never the handle.
+// Use fs.Sub if the migrations live in a subdirectory of the embedded FS.
 //
 // # Operations
 //
@@ -38,5 +38,6 @@
 // # Dialects
 //
 // The supported dialects are re-exported so callers need not import goose:
-// Postgres, MySQL, SQLite3. Dialect is an alias for goose.Dialect.
+// Postgres (the default), MySQL, SQLite3; New takes another one via
+// WithDialect. Dialect is an alias for goose.Dialect.
 package migrate

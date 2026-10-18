@@ -54,7 +54,7 @@
 //	    MaxIdleInterval: 30 * time.Second,
 //	}, proc.PacedTick())
 //
-//	g := worker.NewGroup(log, 10*time.Second)
+//	g := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 10 * time.Second})
 //	g.Add(loop)
 //	g.Add(worker.RunnableFunc{
 //	    NameValue: "http",
@@ -71,7 +71,7 @@
 //
 // For discrete fan-out work, submit jobs to a Pool:
 //
-//	pool := worker.NewPool(8)
+//	pool := worker.NewPool(worker.PoolConfig{MaxConcurrent: 8})
 //	key, err := pool.Submit(ctx, func(ctx context.Context) { do(ctx) })
 //	_ = key // pool.Cancel(key) stops that one job
 //	defer pool.Shutdown(context.Background())
@@ -89,6 +89,8 @@
 // Retry wraps a Handler using retry.Config (Backoff + IsTerminal); the backoff
 // policy itself now lives in the retry package.
 //
-// Group: NewGroup(log, shutdownTimeout) — shutdownTimeout of 0 means no bound
-// on how long Run waits for Runnables to Stop.
+// GroupConfig: ShutdownTimeout (0 = no bound on how long Run waits for
+// Runnables to Stop).
+//
+// PoolConfig: MaxConcurrent (default 1).
 package worker
