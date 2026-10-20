@@ -1,7 +1,10 @@
 package dbtest
 
 import (
+	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"io/fs"
 	"testing"
 	"time"
@@ -34,21 +37,11 @@ type Config struct {
 }
 
 func (c Config) withDefaults() Config {
-	if c.Image == "" {
-		c.Image = "postgres:17-alpine"
-	}
-	if c.Database == "" {
-		c.Database = "skit"
-	}
-	if c.User == "" {
-		c.User = "postgres"
-	}
-	if c.Password == "" {
-		c.Password = "postgres"
-	}
-	if c.StartupTimeout == 0 {
-		c.StartupTimeout = 60 * time.Second
-	}
+	c.Image = cmp.Or(c.Image, "postgres:17-alpine")
+	c.Database = cmp.Or(c.Database, "skit")
+	c.User = cmp.Or(c.User, "postgres")
+	c.Password = cmp.Or(c.Password, "postgres")
+	c.StartupTimeout = cmp.Or(c.StartupTimeout, 60*time.Second)
 	return c
 }
 
@@ -59,13 +52,30 @@ type Postgres struct {
 	// Config is an dbx.Config pointing at the container, suitable for handing
 	// to application code that opens its own pool.
 	Config dbx.Config
+
+	container *tcpostgres.PostgresContainer
 }
 
-// NewPostgres starts a Postgres container, opens a connection, applies
-// cfg.Migrations (when set), and registers cleanup. It fails the test on any
-// error. Skip the calling test under `go test -short`, as it needs Docker.
-func NewPostgres(ctx context.Context, t *testing.T, cfg Config) *Postgres {
-	t.Helper()
+// NewPostgres starts a Postgres container with StartPostgres and registers
+// Close with tb.Cleanup. It fails the test on any error. Skip the calling test
+// under `go test -short`, as it needs Docker.
+func NewPostgres(ctx context.Context, tb testing.TB, cfg Config) *Postgres {
+	tb.Helper()
+
+	p, err := StartPostgres(ctx, cfg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	// ctx may be tb.Context(), which is canceled before the cleanups run.
+	tb.Cleanup(func() { _ = p.Close(context.WithoutCancel(ctx)) })
+	return p
+}
+
+// StartPostgres starts a Postgres container, opens a connection and applies
+// cfg.Migrations (when set). The caller calls Close, so it suits TestMain,
+// where one container serves every test of the package. On error nothing is
+// left running.
+func StartPostgres(ctx context.Context, cfg Config) (*Postgres, error) {
 	cfg = cfg.withDefaults()
 
 	container, err := tcpostgres.Run(
@@ -79,20 +89,44 @@ func NewPostgres(ctx context.Context, t *testing.T, cfg Config) *Postgres {
 		),
 	)
 	if err != nil {
-		t.Fatalf("dbtest: start postgres: %v", err)
-	}
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-
-	host, err := container.Host(ctx)
-	if err != nil {
-		t.Fatalf("dbtest: container host: %v", err)
-	}
-	port, err := container.MappedPort(ctx, "5432/tcp")
-	if err != nil {
-		t.Fatalf("dbtest: mapped port: %v", err)
+		// Run may return a created container along with the error.
+		if container != nil {
+			_ = container.Terminate(ctx)
+		}
+		return nil, fmt.Errorf("dbtest: start postgres: %w", err)
 	}
 
-	dbCfg := dbx.Config{
+	p := &Postgres{container: container}
+	if err := p.connect(ctx, cfg); err != nil {
+		return nil, errors.Join(err, p.Close(ctx))
+	}
+	return p, nil
+}
+
+// Close closes the pool and terminates the container.
+func (p *Postgres) Close(ctx context.Context) error {
+	var dbErr error
+	if p.DB != nil {
+		dbErr = p.DB.Close()
+	}
+	if err := errors.Join(dbErr, p.container.Terminate(ctx)); err != nil {
+		return fmt.Errorf("dbtest: close postgres: %w", err)
+	}
+	return nil
+}
+
+// connect opens the pool to the running container and applies the migrations.
+func (p *Postgres) connect(ctx context.Context, cfg Config) error {
+	host, err := p.container.Host(ctx)
+	if err != nil {
+		return fmt.Errorf("dbtest: container host: %w", err)
+	}
+	port, err := p.container.MappedPort(ctx, "5432/tcp")
+	if err != nil {
+		return fmt.Errorf("dbtest: mapped port: %w", err)
+	}
+
+	p.Config = dbx.Config{
 		User:         cfg.User,
 		Password:     cfg.Password,
 		Host:         host + ":" + port.Port(),
@@ -102,27 +136,31 @@ func NewPostgres(ctx context.Context, t *testing.T, cfg Config) *Postgres {
 		MaxOpenConns: 5,
 		DisableTLS:   true,
 	}
-
-	db, err := dbx.Open(dbCfg)
+	db, err := dbx.Open(p.Config)
 	if err != nil {
-		t.Fatalf("dbtest: open db: %v", err)
+		return fmt.Errorf("dbtest: open db: %w", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	p.DB = db
 
 	if err := dbx.StatusCheck(ctx, db); err != nil {
-		t.Fatalf("dbtest: status check: %v", err)
+		return fmt.Errorf("dbtest: status check: %w", err)
 	}
-
-	if cfg.Migrations != nil {
-		m, err := migrate.New(db.DB, cfg.Migrations)
-		if err != nil {
-			t.Fatalf("dbtest: build migrator: %v", err)
-		}
-		defer func() { _ = m.Close() }()
-		if err := m.Up(ctx); err != nil {
-			t.Fatalf("dbtest: apply migrations: %v", err)
-		}
+	if cfg.Migrations == nil {
+		return nil
 	}
+	return migrateUp(ctx, db, cfg.Migrations)
+}
 
-	return &Postgres{DB: db, Config: dbCfg}
+// migrateUp applies every migration in migrations to db.
+func migrateUp(ctx context.Context, db *sqlx.DB, migrations fs.FS) error {
+	m, err := migrate.New(db.DB, migrations)
+	if err != nil {
+		return fmt.Errorf("dbtest: build migrator: %w", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	if err := m.Up(ctx); err != nil {
+		return fmt.Errorf("dbtest: apply migrations: %w", err)
+	}
+	return nil
 }

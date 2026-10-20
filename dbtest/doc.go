@@ -1,12 +1,15 @@
-// Package dbtest spins up disposable databases for integration tests using
-// testcontainers.
+// Package dbtest is a lightweight way to run Postgres in Docker for tests: one
+// call starts a disposable container (via testcontainers), hands back an open,
+// migrated pool, and removes the container when the test is done.
 //
 // NewPostgres starts a Postgres container, opens a connection, optionally
-// applies migrations, and registers teardown with t.Cleanup, so a test gets a
-// clean, isolated database with one call. Importing this package pulls in
-// testcontainers and the Docker client, so it is intended for test binaries
-// only, and tests using it should be guarded with `if testing.Short() {
-// t.Skip(...) }` since they require a running Docker daemon.
+// applies migrations, and registers teardown with tb.Cleanup, so a test gets a
+// clean, isolated database with one call. StartPostgres does the same without
+// a testing.TB, for TestMain: one container serves every test of the package,
+// and the caller closes it. Importing this package pulls in testcontainers and
+// the Docker client, so it is intended for test binaries only, and tests using
+// it should be guarded with `if testing.Short() { t.Skip(...) }` since they
+// require a running Docker daemon.
 //
 // # Usage
 //
@@ -24,8 +27,38 @@
 //	    // ... exercise repo against a real Postgres ...
 //	}
 //
+// One container for the whole package, in TestMain. testing.Short needs the
+// flags parsed, hence flag.Parse; under -short the tests run without it and
+// skip themselves:
+//
+//	var pg *dbtest.Postgres
+//
+//	func TestMain(m *testing.M) {
+//	    flag.Parse()
+//	    if testing.Short() {
+//	        os.Exit(m.Run())
+//	    }
+//	    ctx := context.Background()
+//	    cfg := dbtest.Config{Migrations: migrationsFS}
+//	    var err error
+//	    pg, err = dbtest.StartPostgres(ctx, cfg)
+//	    if err != nil {
+//	        log.Fatal(err)
+//	    }
+//	    code := m.Run()
+//	    _ = pg.Close(ctx)
+//	    os.Exit(code)
+//	}
+//
 // The returned Postgres also exposes Config, an dbx.Config pointing at the
 // container, for handing to application code that opens its own pool.
+//
+// # API
+//
+//   - NewPostgres: a container per test, closed by tb.Cleanup; fails the test
+//     on error.
+//   - StartPostgres / Close: a container the caller owns, for TestMain; on a
+//     start error nothing is left running.
 //
 // # Config
 //
