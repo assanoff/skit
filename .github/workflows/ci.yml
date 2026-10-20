@@ -42,9 +42,9 @@ jobs:
       - name: Project rules, go fix and go.mod checks
         run: make lint-rules fix-check tidy-check
 
-  # The full suite: dbx, lock, outbox and translation/postgres start Postgres
-  # via testcontainers (Docker ships with the ubuntu runner; locally these tests
-  # are skipped under -short). The same run gates total coverage.
+  # The full suite: dbx, lock, outbox and translation/translationpg start
+  # Postgres via testcontainers (Docker ships with the ubuntu runner; locally
+  # these tests are skipped under -short). The same run gates total coverage.
   integration:
     runs-on: ubuntu-latest
     steps:

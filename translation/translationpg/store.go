@@ -1,8 +1,8 @@
-// Package postgres is the Postgres implementation of translation.Store. It uses
-// the skit dbx helpers for query logging and error translation, and
+// Package translationpg is the Postgres implementation of translation.Store.
+// It uses the skit dbx helpers for query logging and error translation, and
 // stores every translatable column as a row in the translations table keyed by
 // (model_name, column_name, key_id, language_id).
-package postgres
+package translationpg
 
 import (
 	"context"
@@ -59,17 +59,6 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	return dbx.EnsureSchema(ctx, s.log, s.db, schemaLockKey, Schema())
 }
 
-// translationRow is the row representation for upserts.
-type translationRow struct {
-	ModelName        string    `db:"model_name"`
-	ColumnName       string    `db:"column_name"`
-	KeyID            string    `db:"key_id"`
-	LanguageID       string    `db:"language_id"`
-	TranslationValue string    `db:"translation_value"`
-	CreatedAt        time.Time `db:"created_at"`
-	UpdatedAt        time.Time `db:"updated_at"`
-}
-
 // SaveTranslation upserts every column of data in a single transaction. An empty
 // value is not a translation: it clears any existing row for that column instead
 // of storing an empty one, keeping "empty" and "absent" the same so
@@ -118,12 +107,6 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 		}
 		return nil
 	})
-}
-
-// translationResult is the select projection for a single-model lookup.
-type translationResult struct {
-	ColumnName       string `db:"column_name"`
-	TranslationValue string `db:"translation_value"`
 }
 
 // GetTranslations returns column_name -> translation_value for one model instance.
@@ -176,13 +159,6 @@ func (s *Store) DeleteTranslations(ctx context.Context, modelName, keyID string,
 	return nil
 }
 
-// existingRow is the select projection used to find which (column, language)
-// pairs already have a translation.
-type existingRow struct {
-	ColumnName string `db:"column_name"`
-	LanguageID string `db:"language_id"`
-}
-
 // CheckTranslationsExist reports the (column, language) pairs that have no
 // non-empty value. When some are missing it returns a
 // *translation.MissingTranslationsError listing them, so the caller can tell the
@@ -197,23 +173,24 @@ func (s *Store) CheckTranslationsExist(ctx context.Context, modelName, keyID str
 		langCodes[i] = l.Code
 	}
 
-	const base = `
+	data := struct {
+		ModelName   string   `db:"model_name"`
+		KeyID       string   `db:"key_id"`
+		Columns     []string `db:"columns"`
+		LanguageIDs []string `db:"language_ids"`
+	}{ModelName: modelName, KeyID: keyID, Columns: columns, LanguageIDs: langCodes}
+
+	const q = `
 		SELECT column_name, language_id
 		FROM translations
-		WHERE model_name = ?
-		  AND key_id = ?
-		  AND column_name IN (?)
-		  AND language_id IN (?)
+		WHERE model_name = :model_name
+		  AND key_id = :key_id
+		  AND column_name IN (:columns)
+		  AND language_id IN (:language_ids)
 		  AND translation_value <> ''`
 
-	q, args, err := sqlx.In(base, modelName, keyID, columns, langCodes)
-	if err != nil {
-		return fmt.Errorf("build IN query: %w", err)
-	}
-	q = s.db.Rebind(q)
-
 	var rows []existingRow
-	if err := sqlx.SelectContext(ctx, s.db, &rows, q, args...); err != nil {
+	if err := dbx.NamedQuerySliceUsingIn(ctx, s.log, s.db, q, data, &rows); err != nil {
 		return fmt.Errorf("query translations: %w", err)
 	}
 
@@ -237,13 +214,6 @@ func (s *Store) CheckTranslationsExist(ctx context.Context, modelName, keyID str
 	return nil
 }
 
-// batchRow is the select projection for batch lookups.
-type batchRow struct {
-	KeyID            string `db:"key_id"`
-	ColumnName       string `db:"column_name"`
-	TranslationValue string `db:"translation_value"`
-}
-
 // GetTranslationsBatch returns keyID -> (column_name -> translation_value) for
 // many instances of the same model in one query.
 func (s *Store) GetTranslationsBatch(ctx context.Context, modelName string, keyIDs []string, lang translation.Language) (map[string]map[string]string, error) {
@@ -251,19 +221,20 @@ func (s *Store) GetTranslationsBatch(ctx context.Context, modelName string, keyI
 		return map[string]map[string]string{}, nil
 	}
 
-	const base = `
+	data := struct {
+		ModelName  string   `db:"model_name"`
+		LanguageID string   `db:"language_id"`
+		KeyIDs     []string `db:"key_ids"`
+	}{ModelName: modelName, LanguageID: lang.Code, KeyIDs: keyIDs}
+
+	const q = `
 		SELECT key_id, column_name, translation_value
 		FROM translations
-		WHERE model_name = ? AND language_id = ? AND key_id IN (?)`
-
-	q, args, err := sqlx.In(base, modelName, lang.Code, keyIDs)
-	if err != nil {
-		return nil, fmt.Errorf("build batch IN query: %w", err)
-	}
-	q = s.db.Rebind(q)
+		WHERE model_name = :model_name AND language_id = :language_id
+		  AND key_id IN (:key_ids)`
 
 	var rows []batchRow
-	if err := sqlx.SelectContext(ctx, s.db, &rows, q, args...); err != nil {
+	if err := dbx.NamedQuerySliceUsingIn(ctx, s.log, s.db, q, data, &rows); err != nil {
 		return nil, fmt.Errorf("query batch translations: %w", err)
 	}
 

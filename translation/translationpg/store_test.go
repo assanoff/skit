@@ -1,4 +1,4 @@
-package postgres_test
+package translationpg_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 	"github.com/assanoff/skit/dbtest"
 	"github.com/assanoff/skit/translation"
-	"github.com/assanoff/skit/translation/postgres"
+	"github.com/assanoff/skit/translation/translationpg"
 )
 
 // TestCheckTranslationsExist covers what an admin panel needs to tell the
@@ -26,7 +26,7 @@ func TestCheckTranslationsExist(t *testing.T) {
 
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
 	log := slog.New(slog.DiscardHandler)
-	store := postgres.NewStore(log, pg.DB)
+	store := translationpg.NewStore(log, pg.DB)
 	is.NoErr(store.EnsureSchema(ctx)) // the translations table must exist
 
 	const (

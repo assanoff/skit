@@ -6,7 +6,7 @@
 // Version. Create is idempotent against no-op writes: if the new snapshot is
 // identical to the latest one (ignoring updated_at/updated_by) no new version is
 // stored. The Core depends only on the Store interface declared here; the
-// Postgres implementation lives in the db subpackage.
+// Postgres implementation lives in the auditpg subpackage.
 //
 // # Recording changes
 //

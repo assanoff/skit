@@ -1,8 +1,8 @@
-// Package db is the Postgres implementation of auditlog.Store. It maps between
-// the domain AuditLog and its row representation and uses the skit dbx
+// Package auditpg is the Postgres implementation of auditlog.Store. It maps
+// between the domain AuditLog and its row representation and uses the skit dbx
 // helpers for query logging and error translation. Inline const queries run
 // against the fixed audit_log table.
-package db
+package auditpg
 
 import (
 	"context"

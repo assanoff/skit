@@ -5,8 +5,8 @@
 // Translatable fields are marked with struct tags, similar to json/db/validate.
 // Each model implements the Translatable interface to expose its model name and
 // instance key. The Translator reads and writes translations through a Store; the
-// Postgres implementation lives in the postgres subpackage, and an in-memory
-// MockStore is provided for tests.
+// Postgres implementation lives in the translationpg subpackage, and an
+// in-memory MockStore is provided for tests.
 //
 // # Declaring a model
 //
@@ -38,7 +38,7 @@
 //
 // # Setup
 //
-//	store := postgres.NewStore(log, db)
+//	store := translationpg.NewStore(log, db)
 //	tr, err := translation.New(translation.Config{
 //	    Store:           store,
 //	    DefaultLanguage: translation.LanguageRu,
