@@ -841,8 +841,10 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 `, d.Pkg, d.Module)
 	case "redis":
 		fmt.Fprintf(out, `
-2. Enable Redis (REDIS_ENABLED=true) and wire it into initWorkers
-   (internal/app/server/server.go), building a Redis Locker:
+2. Add Redis to deps — the options, the Deps field and the initializer to
+   copy are in the package doc: go doc github.com/assanoff/skit/provider/redis.
+   Then wire the job into initWorkers (internal/app/server/server.go),
+   building a Redis Locker:
 
    locker := lock.NewRedis(a.d.Redis(ctx), a.d.Logger)
    sched, err := %[1]s.New(a.d.Logger, locker).Scheduler(a.d.Metrics, a.d.TracerProvider)

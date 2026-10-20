@@ -113,7 +113,9 @@ linters:
             - pkg: go.opentelemetry.io/contrib/bridges
               desc: bridges belong to otel/setup
     dupword:
-      ignore: [nil] # "(nil, nil)" in doc comments
+      # "(nil, nil)" in doc comments; "Redis Redis", "Sentry Sentry" — the
+      # options group to copy in the provider docs.
+      ignore: [nil, Redis, Sentry]
     errcheck:
       # Writes to stdout/stderr (CLI progress, log lines) don't warrant error
       # handling; everything else must still be checked.

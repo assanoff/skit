@@ -8,7 +8,6 @@ import (
 	"log/slog"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/app"
@@ -36,7 +35,6 @@ type Deps struct {
 	TracerProvider trace.TracerProvider
 
 	DB         dim.Provider[*sqlx.DB]
-	Redis      dim.Provider[*redis.Client]
 	BrokerConn dim.Provider[*rabbitmq.Conn]
 	Publisher  dim.Provider[broker.Publisher]
 	Outbox     dim.Provider[*outbox.PG]
@@ -54,7 +52,6 @@ var Initializers = []app.Initializer[Deps]{
 	// Core infrastructure
 	initTelemetry,
 	initStore,
-	initRedis,
 	initBroker,
 
 	// Domain initializers go here.

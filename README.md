@@ -68,7 +68,10 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `chx` | Optional ClickHouse helper (connect + goose migrations); pulls the ClickHouse driver only when imported |
 | `grpcgateway` | grpc-gateway REST↔gRPC transcoding as a `worker.Runnable`, sharing the app's server core |
 | `grpctest` | In-process gRPC test harness over `bufconn` running the real `grpcserver` interceptor chain |
-| `provider` | Ready-made `dim` factories for common dependencies (Postgres, Redis, RabbitMQ, Sentry, translator) |
+| `provider/postgres` | Ready `dim` factory of a Postgres pool: `dbx.Open`, a reachability check, close on shutdown |
+| `provider/redis` | Ready `dim` factory of a go-redis client: PING on open, close on shutdown |
+| `provider/sentry` | Ready `dim` factory of the Sentry SDK: init, flush on shutdown |
+| `provider/translator` | Ready `dim` factory of an `i18n.Translator` from the service's message files |
 | `app` | Opinionated application entrypoint: wires config → deps → `worker.Group` and drives graceful shutdown via `closer` |
 | `to` | Small response-encoding helpers (`to.JSON`, JSON:API) — a convenience seam over `rest` |
 | `cmd/skit` | Scaffolding CLI: `skit new <module>` (embedded starter, `--full` service layout, or gonew passthrough with `--template`), plus per-model generators via `skit add …` |

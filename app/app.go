@@ -11,8 +11,9 @@ import (
 // initializer assigns a provider and returns the resource's cleanup:
 //
 //	func initStore(d *Deps) (dim.CleanupFunc, error) {
-//		d.DB = dim.NewResource("DB", provider.Postgres(&d.Opts, d.Logger))
-//		return nil, nil // resource cleanup is returned by NewResource via the provider
+//		var cleanup dim.CleanupFunc
+//		d.DB, cleanup = dim.NewResource("DB", postgres.Resource(dbx.Config{...}))
+//		return cleanup, nil // closes the pool if it was opened
 //	}
 //
 // D is the application's own dependency container — the SDK stays agnostic of
