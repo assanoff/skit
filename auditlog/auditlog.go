@@ -59,7 +59,7 @@ func WithAutoCompact(every int, opts CompactOptions) Option {
 	}
 }
 
-//go:generate go run github.com/matryer/moq@latest -out mocks/auditlogdb.go -pkg mocks . Store
+//go:generate go run github.com/matryer/moq@latest -out internal/mocks/auditlogdb.go -pkg mocks . Store
 
 // Store is the persistence contract for audit log entries. WithTx returns a
 // sibling bound to a transaction, so callers that need the audit write to commit

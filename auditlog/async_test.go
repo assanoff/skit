@@ -10,7 +10,7 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/auditlog"
-	"github.com/assanoff/skit/auditlog/mocks"
+	"github.com/assanoff/skit/auditlog/internal/mocks"
 )
 
 // newCountingCore returns a Core whose store records every Save into saved

@@ -10,6 +10,7 @@ import (
 	"github.com/assanoff/skit/rest"
 	"github.com/assanoff/skit/translation"
 	"github.com/assanoff/skit/translation/translationrest"
+	"github.com/assanoff/skit/translation/translationtest"
 )
 
 // product is a translatable DTO that is itself a rest.ResponseEncoder.
@@ -48,7 +49,7 @@ func (l productList) Encode() ([]byte, string, error) {
 func newTranslator(t *testing.T) *translation.Translator {
 	t.Helper()
 	tr, err := translation.New(translation.Config{
-		Store:           translation.NewMockStore(),
+		Store:           translationtest.NewStore(),
 		DefaultLanguage: translation.LanguageRu,
 		SupportedLangs:  []translation.Language{translation.LanguageRu, translation.LanguageKk},
 	})

@@ -8,7 +8,7 @@ import (
 )
 
 func TestHTTPMiddleware(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 
 	tests := []struct {
 		name         string
@@ -132,7 +132,7 @@ func TestSetLanguageInContext(t *testing.T) {
 }
 
 func TestFindLanguage(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 
 	tests := []struct {
 		name     string
@@ -176,7 +176,7 @@ func TestFindLanguage(t *testing.T) {
 }
 
 func TestHTTPMiddleware_XLanguagePriority(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 
 	// Create a test handler
 	var contextLang Language

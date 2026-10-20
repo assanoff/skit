@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/assanoff/skit/httpw"
+	"github.com/assanoff/skit/internal/httpw"
 	"github.com/assanoff/skit/logger"
 )
 

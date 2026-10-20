@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/assanoff/skit/httpw"
+	"github.com/assanoff/skit/internal/httpw"
 	"github.com/assanoff/skit/middleware"
 )
 

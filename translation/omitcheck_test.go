@@ -21,8 +21,8 @@ func (o *optionalFieldModel) GetTranslationKey() (modelName, keyID string) {
 
 // newTestTranslator returns a translator together with the store behind it, so a
 // test can seed raw rows that Save itself would never produce.
-func newTestTranslator() (*Translator, *MockStore) {
-	store := NewMockStore()
+func newTestTranslator() (*Translator, *mockStore) {
+	store := newMockStore()
 
 	return &Translator{
 		store:          store,
@@ -116,7 +116,7 @@ func TestCheckTranslationsExistSkipsOptional(t *testing.T) {
 
 	t.Run("optional translation missing", func(t *testing.T) {
 		is := is.New(t)
-		tr := NewMockTranslator()
+		tr := newMockTranslator()
 		model := &optionalFieldModel{ID: "1", Title: "Title", Poster: "poster.jpg"}
 
 		// Only the required field is translated.
@@ -128,7 +128,7 @@ func TestCheckTranslationsExistSkipsOptional(t *testing.T) {
 
 	t.Run("required translation missing", func(t *testing.T) {
 		is := is.New(t)
-		tr := NewMockTranslator()
+		tr := newMockTranslator()
 		model := &optionalFieldModel{ID: "1", Title: "Title", Poster: "poster.jpg"}
 
 		err := tr.Save(ctx, LanguageKk, &optionalFieldModel{ID: "1", Poster: "poster_kk.jpg"})
@@ -243,7 +243,7 @@ func TestSaveWritesRequiredFieldEvenWhenEmpty(t *testing.T) {
 func TestRequiredFieldEmptyTranslationApplies(t *testing.T) {
 	is := is.New(t)
 	ctx := context.Background()
-	tr := NewMockTranslator()
+	tr := newMockTranslator()
 
 	err := tr.Save(ctx, LanguageKk, &optionalFieldModel{ID: "1", Title: ""})
 	is.NoErr(err) // the save must succeed

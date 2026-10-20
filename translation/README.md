@@ -6,9 +6,10 @@ strings — `translation` translates data stored per row (a product title, a wid
 description) into the request language.
 
 ```
-translation/                core: Translator, Store, Config, Translatable, parser, MockStore
-├── postgres/               Postgres implementation of Store (+ Schema/EnsureSchema)
-└── translationrest/        rest.MidFunc that auto-translates responses
+translation/                core: Translator, Store, Config, Translatable, parser
+├── translationpg/          Postgres implementation of Store (+ Schema/EnsureSchema)
+├── translationrest/        rest.MidFunc that auto-translates responses
+└── translationtest/        in-memory Store for tests
 ```
 
 ## How it works
@@ -81,7 +82,7 @@ back into a required one.
 ## 2. Build the translator
 
 ```go
-store := postgres.NewStore(log, db) // db is *sqlx.DB
+store := translationpg.NewStore(log, db) // db is *sqlx.DB
 tr, err := translation.New(translation.Config{
     Store:           store,
     DefaultLanguage: translation.LanguageRu,
@@ -182,7 +183,7 @@ as no translation.
 
 ```go
 tr, _ := translation.New(translation.Config{
-    Store:           translation.NewMockStore(),
+    Store:           translationtest.NewStore(),
     DefaultLanguage: translation.LanguageRu,
     SupportedLangs:  []translation.Language{translation.LanguageRu, translation.LanguageKk},
 })

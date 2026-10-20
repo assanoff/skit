@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/assanoff/skit/auditlog"
-	"github.com/assanoff/skit/auditlog/mocks"
+	"github.com/assanoff/skit/auditlog/internal/mocks"
 )
 
 func TestCompactCallsStore(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/assanoff/skit/httpw"
+	"github.com/assanoff/skit/internal/httpw"
 	"github.com/assanoff/skit/internal/prom"
 	"github.com/assanoff/skit/middleware"
 )

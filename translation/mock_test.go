@@ -7,21 +7,22 @@ import (
 	"sync"
 )
 
-// MockStore is a mock implementation of Store for testing.
-type MockStore struct {
+// mockStore is an in-memory Store for the tests of this package. They cannot
+// import translationtest, which imports translation, so they keep this copy.
+type mockStore struct {
 	mu           sync.RWMutex
 	translations map[string]map[string]string // key: "modelName:keyID:langCode:columnName" -> value
 }
 
-// NewMockStore creates a new mock store.
-func NewMockStore() *MockStore {
-	return &MockStore{
+// newMockStore creates a new mock store.
+func newMockStore() *mockStore {
+	return &mockStore{
 		translations: make(map[string]map[string]string),
 	}
 }
 
 // SaveTranslation saves translation data in memory.
-func (m *MockStore) SaveTranslation(_ context.Context, data Data) error {
+func (m *mockStore) SaveTranslation(_ context.Context, data Data) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -37,7 +38,7 @@ func (m *MockStore) SaveTranslation(_ context.Context, data Data) error {
 }
 
 // GetTranslations retrieves translations from memory.
-func (m *MockStore) GetTranslations(_ context.Context, modelName, keyID string, lang Language) (map[string]string, error) {
+func (m *mockStore) GetTranslations(_ context.Context, modelName, keyID string, lang Language) (map[string]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -55,7 +56,7 @@ func (m *MockStore) GetTranslations(_ context.Context, modelName, keyID string, 
 }
 
 // DeleteTranslations deletes translations from memory.
-func (m *MockStore) DeleteTranslations(_ context.Context, modelName, keyID string, lang Language) error {
+func (m *mockStore) DeleteTranslations(_ context.Context, modelName, keyID string, lang Language) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -72,7 +73,7 @@ func (m *MockStore) DeleteTranslations(_ context.Context, modelName, keyID strin
 // languages. When some are missing it returns a *MissingTranslationsError
 // listing them. An empty value counts as no translation, matching the Postgres
 // store.
-func (m *MockStore) CheckTranslationsExist(_ context.Context, modelName, keyID string, columns []string, langs []Language) error {
+func (m *mockStore) CheckTranslationsExist(_ context.Context, modelName, keyID string, columns []string, langs []Language) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -94,7 +95,7 @@ func (m *MockStore) CheckTranslationsExist(_ context.Context, modelName, keyID s
 }
 
 // GetTranslationsBatch retrieves translations for multiple model instances.
-func (m *MockStore) GetTranslationsBatch(_ context.Context, modelName string, keyIDs []string, lang Language) (map[string]map[string]string, error) {
+func (m *mockStore) GetTranslationsBatch(_ context.Context, modelName string, keyIDs []string, lang Language) (map[string]map[string]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -112,14 +113,14 @@ func (m *MockStore) GetTranslationsBatch(_ context.Context, modelName string, ke
 }
 
 // buildKey builds a storage key.
-func (m *MockStore) buildKey(modelName, keyID, langCode string) string {
+func (m *mockStore) buildKey(modelName, keyID, langCode string) string {
 	return fmt.Sprintf("%s:%s:%s", modelName, keyID, langCode)
 }
 
-// NewMockTranslator creates a translator with mock store for testing.
-func NewMockTranslator() *Translator {
+// newMockTranslator creates a translator with mock store for testing.
+func newMockTranslator() *Translator {
 	return &Translator{
-		store:          NewMockStore(),
+		store:          newMockStore(),
 		defaultLang:    LanguageRu,
 		supportedLangs: []Language{LanguageRu, LanguageKk},
 	}

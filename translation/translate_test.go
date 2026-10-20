@@ -27,7 +27,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "valid config with mock store",
 			config: Config{
-				Store:           NewMockStore(),
+				Store:           newMockStore(),
 				DefaultLanguage: LanguageRu,
 				SupportedLangs:  []Language{LanguageRu, LanguageKk},
 			},
@@ -44,7 +44,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "missing default language",
 			config: Config{
-				Store:          NewMockStore(),
+				Store:          newMockStore(),
 				SupportedLangs: []Language{LanguageRu, LanguageKk},
 			},
 			wantErr: true,
@@ -52,7 +52,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "empty supported languages",
 			config: Config{
-				Store:           NewMockStore(),
+				Store:           newMockStore(),
 				DefaultLanguage: LanguageRu,
 				SupportedLangs:  []Language{},
 			},
@@ -61,7 +61,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "default language not in supported",
 			config: Config{
-				Store:           NewMockStore(),
+				Store:           newMockStore(),
 				DefaultLanguage: LanguageRu,
 				SupportedLangs:  []Language{LanguageKk},
 			},
@@ -80,7 +80,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestTranslator_Translate(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 	ctx := context.Background()
 
 	// Setup test data
@@ -116,7 +116,7 @@ func TestTranslator_Translate(t *testing.T) {
 }
 
 func TestTranslator_TranslateSingleWithNestedPointer(t *testing.T) {
-	store := NewMockStore()
+	store := newMockStore()
 	translator := &Translator{
 		store:          store,
 		defaultLang:    LanguageRu,
@@ -209,7 +209,7 @@ func TestTranslator_TranslateSingleWithNestedPointer(t *testing.T) {
 }
 
 func TestTranslator_TranslateSingleWithNestedSlice(t *testing.T) {
-	store := NewMockStore()
+	store := newMockStore()
 	translator := &Translator{
 		store:          store,
 		defaultLang:    LanguageRu,
@@ -291,7 +291,7 @@ func TestTranslator_TranslateSingleWithNestedSlice(t *testing.T) {
 }
 
 func TestTranslator_TranslateDefaultLanguage(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 	ctx := context.Background()
 
 	model := &TestModel{
@@ -312,7 +312,7 @@ func TestTranslator_TranslateDefaultLanguage(t *testing.T) {
 }
 
 func TestTranslator_TranslateSlice(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 	ctx := context.Background()
 
 	// Setup translations
@@ -347,7 +347,7 @@ func TestTranslator_TranslateSlice(t *testing.T) {
 }
 
 func TestTranslator_Save(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 	ctx := context.Background()
 
 	model := &TestModel{
@@ -374,7 +374,7 @@ func TestTranslator_Save(t *testing.T) {
 }
 
 func TestTranslator_Delete(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 	ctx := context.Background()
 
 	// Save translation
@@ -399,7 +399,7 @@ func TestTranslator_Delete(t *testing.T) {
 }
 
 func TestTranslator_CheckTranslationsExist(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 	ctx := context.Background()
 
 	model := &TestModel{
@@ -446,7 +446,7 @@ func TestTranslator_CheckTranslationsExist(t *testing.T) {
 }
 
 func TestTranslator_ValidateLanguage(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 
 	tests := []struct {
 		name    string
@@ -481,7 +481,7 @@ func TestTranslator_ValidateLanguage(t *testing.T) {
 }
 
 func TestTranslator_ValidateTranslateTags(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 
 	model := &TestModel{
 		ID:    "123",
@@ -495,7 +495,7 @@ func TestTranslator_ValidateTranslateTags(t *testing.T) {
 }
 
 func TestTranslator_HelperMethods(t *testing.T) {
-	translator := NewMockTranslator()
+	translator := newMockTranslator()
 
 	// Test DefaultLanguage
 	if translator.DefaultLanguage().Code != "ru" {
@@ -570,7 +570,7 @@ func (s *Product) GetTranslationKey() (modelName, keyID string) {
 }
 
 func TestTranslator_TranslateNestedSlice(t *testing.T) {
-	store := NewMockStore()
+	store := newMockStore()
 	translator := &Translator{
 		store:          store,
 		defaultLang:    LanguageRu,
@@ -664,9 +664,9 @@ func TestTranslator_TranslateNestedSlice(t *testing.T) {
 	}
 }
 
-// countingStore wraps MockStore to count batch calls.
+// countingStore wraps mockStore to count batch calls.
 type countingStore struct {
-	*MockStore
+	*mockStore
 
 	batchCalls map[string]int
 	mu         sync.Mutex
@@ -674,7 +674,7 @@ type countingStore struct {
 
 func newCountingStore() *countingStore {
 	return &countingStore{
-		MockStore:  NewMockStore(),
+		mockStore:  newMockStore(),
 		batchCalls: make(map[string]int),
 	}
 }
@@ -684,7 +684,7 @@ func (s *countingStore) GetTranslationsBatch(ctx context.Context, modelName stri
 	s.batchCalls[modelName]++
 	s.mu.Unlock()
 
-	return s.MockStore.GetTranslationsBatch(ctx, modelName, keyIDs, lang)
+	return s.mockStore.GetTranslationsBatch(ctx, modelName, keyIDs, lang)
 }
 
 func TestTranslator_TranslateNestedSlice_Efficiency(t *testing.T) {

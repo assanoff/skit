@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/assanoff/skit/httpw"
+	"github.com/assanoff/skit/internal/httpw"
 )
 
 // AccessLog logs one structured line per request with the request's context.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/assanoff/skit/auditlog"
 	"github.com/assanoff/skit/auditlog/auditrest"
-	"github.com/assanoff/skit/auditlog/mocks"
+	"github.com/assanoff/skit/auditlog/internal/mocks"
 	"github.com/assanoff/skit/rest/router"
 )
 
