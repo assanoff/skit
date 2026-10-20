@@ -28,6 +28,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/segmentio/kafka-go v0.4.51
 	github.com/testcontainers/testcontainers-go v0.43.0
+	github.com/testcontainers/testcontainers-go/modules/clickhouse v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.43.0
 	github.com/wagslane/go-rabbitmq v0.15.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0

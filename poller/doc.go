@@ -11,6 +11,11 @@
 // otel.Suppress, so they export no traces; a direct Poll keeps the trace of its
 // caller.
 //
+// The Getter gets the run context (bounded by PollTimeout, when set) and must
+// return once it is canceled: Start does not return before the running Getter
+// does, so a Getter that ignores its context holds the shutdown of the group up
+// to its ShutdownTimeout.
+//
 // # Usage
 //
 // Seed an initial value, supervise the poller, and read the cached value
@@ -22,8 +27,7 @@
 //	    Name:        "rates",
 //	    Interval:    30 * time.Second,
 //	    PollTimeout: 5 * time.Second,
-//	    OnError:     func(err error) { metrics.PollFail.Inc() },
-//	})
+//	}, poller.WithOnError(func(error) { pollFailures.Inc() }))
 //
 //	g.Add(p) // worker.Group supervises Start/Stop
 //
@@ -32,11 +36,11 @@
 // # Config
 //
 //   - Name: identifies the poller in logs (default "poller").
-//   - Interval: time between polls (required, > 0).
+//   - Interval: time between polls (default 1s).
 //   - PollTimeout: bounds each Getter call (0 = inherit the run context).
-//   - OnError: invoked with each failed poll's error; may be nil.
 //
 // # Options
 //
+//   - WithOnError(h): invoked with the error of each failed poll.
 //   - WithOnPanic(h): a safetick.PanicHandler invoked when a poll panics.
 package poller

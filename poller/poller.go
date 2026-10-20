@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"sync"
@@ -22,16 +23,20 @@ type Config struct {
 	Interval time.Duration
 	// PollTimeout bounds each Getter call (0 = inherit the run context).
 	PollTimeout time.Duration
-	// OnError is invoked with each failed poll's error; may be nil (the error is
-	// then only logged).
-	OnError func(error)
 }
 
 // Option customizes a Poller.
 type Option func(*options)
 
 type options struct {
+	onError func(error)
 	onPanic safetick.PanicHandler
+}
+
+// WithOnError sets a handler invoked with the error of each failed poll, e.g.
+// to count failures. The error is logged regardless.
+func WithOnError(h func(error)) Option {
+	return func(o *options) { o.onError = h }
 }
 
 // WithOnPanic sets a handler invoked when a poll panics. The panic is always
@@ -46,6 +51,7 @@ type Poller[T any] struct {
 	cfg     Config
 	getter  Getter[T]
 	log     *slog.Logger
+	onError func(error)
 	onPanic safetick.PanicHandler
 
 	mu      sync.RWMutex
@@ -55,9 +61,8 @@ type Poller[T any] struct {
 // New builds a Poller seeded with initial, which Current returns until the first
 // successful poll. log may be nil.
 func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config, opts ...Option) *Poller[T] {
-	if cfg.Name == "" {
-		cfg.Name = "poller"
-	}
+	cfg.Name = cmp.Or(cfg.Name, "poller")
+	// Not cmp.Or: a negative Interval would panic in time.NewTicker.
 	if cfg.Interval <= 0 {
 		cfg.Interval = time.Second
 	}
@@ -65,7 +70,14 @@ func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config, opts 
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return &Poller[T]{cfg: cfg, getter: getter, log: log, onPanic: o.onPanic, current: initial}
+	return &Poller[T]{
+		cfg:     cfg,
+		getter:  getter,
+		log:     log,
+		onError: o.onError,
+		onPanic: o.onPanic,
+		current: initial,
+	}
 }
 
 // Name identifies the poller in the supervisor and logs.
@@ -74,7 +86,8 @@ func (p *Poller[T]) Name() string { return p.cfg.Name }
 // Start polls immediately, then on every Interval, until ctx is canceled. It
 // implements worker.Runnable: Start blocks until shutdown. The polls run under
 // otel.Suppress, so they export no traces; a direct Poll keeps the trace of its
-// caller.
+// caller. A poll in flight at shutdown gets the canceled ctx, and Start returns
+// once its Getter does.
 func (p *Poller[T]) Start(ctx context.Context) error {
 	// A poll has no request behind it; each would export a trace of its own.
 	ctx = otel.Suppress(ctx)
@@ -97,8 +110,9 @@ func (p *Poller[T]) Start(ctx context.Context) error {
 func (p *Poller[T]) Stop(context.Context) error { return nil }
 
 // Poll fetches once, synchronously, and updates the current value on success.
-// On error the value is left unchanged and OnError (if set) is invoked. A panic
-// in the Getter is recovered so a single bad poll cannot crash the supervisor.
+// On error the value is left unchanged and the WithOnError handler (if set) is
+// invoked. A panic in the Getter is recovered so a single bad poll cannot crash
+// the supervisor.
 func (p *Poller[T]) Poll(ctx context.Context) {
 	defer safetick.RecoverTick(ctx, p.log, p.cfg.Name, p.onPanic)
 
@@ -111,8 +125,8 @@ func (p *Poller[T]) Poll(ctx context.Context) {
 
 	next, err := p.getter(pollCtx)
 	if err != nil {
-		if p.cfg.OnError != nil {
-			p.cfg.OnError(err)
+		if p.onError != nil {
+			p.onError(err)
 		}
 		if p.log != nil {
 			p.log.ErrorContext(ctx, "poller poll failed", "poller", p.cfg.Name, "err", err)

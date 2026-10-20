@@ -1,18 +1,7 @@
-// Package chx is a thin ClickHouse client for analytics / long-term stores.
-//
-// The write path uses the native clickhouse-go/v2 connection (driver.Conn),
-// which speaks the columnar native protocol and supports PrepareBatch for large
-// bulk inserts. Schema is applied via skit/migrate (goose, ClickHouse dialect)
-// from a caller-supplied migrations fs.FS over a separate database/sql handle,
-// because goose needs database/sql rather than the native conn.
-//
-// ClickHouse suits analytics / long-term storage: finished, structured data in
-// large batches, never on a hot ingest path. This client is an optional building
-// block — importing it is what pulls in the clickhouse-go/v2 dependency; wire it
-// in only when a ClickHouse endpoint is configured.
 package chx
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
@@ -30,24 +19,25 @@ import (
 // the constant is assignable directly.
 const clickHouseDialect = goose.DialectClickHouse
 
-// Config describes how to reach ClickHouse. Addrs is a list of host:port native
-// endpoints (default native port 9000). Compression enables LZ4 wire compression,
-// worthwhile for the large batches CH ingests.
+// Config describes how to reach ClickHouse.
 type Config struct {
-	Addrs        []string
-	Database     string
-	Username     string
-	Password     string
-	DialTimeout  time.Duration
+	// Addrs lists the native-protocol endpoints, host:port (ClickHouse
+	// listens on 9000).
+	Addrs []string
+	// Database, Username, Password select the database and the credentials.
+	Database string
+	Username string
+	Password string
+	// DialTimeout bounds dialing a connection (default 10s).
+	DialTimeout time.Duration
+	// MaxOpenConns caps the pool (0 = the driver default, 10).
 	MaxOpenConns int
-	Compression  bool
+	// Compression turns on LZ4 wire compression, worthwhile for the large
+	// batches ClickHouse ingests.
+	Compression bool
 }
 
 func (c Config) options() *clickhouse.Options {
-	dial := c.DialTimeout
-	if dial <= 0 {
-		dial = 10 * time.Second
-	}
 	opts := &clickhouse.Options{
 		Addr: c.Addrs,
 		Auth: clickhouse.Auth{
@@ -55,7 +45,7 @@ func (c Config) options() *clickhouse.Options {
 			Username: c.Username,
 			Password: c.Password,
 		},
-		DialTimeout:  dial,
+		DialTimeout:  cmp.Or(c.DialTimeout, 10*time.Second),
 		MaxOpenConns: c.MaxOpenConns,
 	}
 	if c.Compression {
