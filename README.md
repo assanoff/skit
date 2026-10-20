@@ -39,10 +39,10 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `dim` | Slim dependency-injection: lazy `Provider[T]`, `Once`/`OnceWithName`, `NewResource` with init/cleanup logging |
 | `closer` | Graceful-shutdown registry: process-global default (`Add`/`CloseSync`) + instances (`New`/`NewWithWait`), LIFO |
 | `config` | 12-factor config via go-flags: one struct → CLI flags + env vars + `--help`, dotenv for local, subcommand dispatch |
-| `rest` (+ `router`/`mid`) | Typed HTTP handlers over stdlib `ServeMux` + `routegroup`; routing (`router`) and typed application middleware (`rest/mid`: error localize/mask, panics, observability, cache, ETag) |
+| `rest` (+ `router`/`mid`/`jsonapi`) | Typed HTTP handlers over stdlib `ServeMux` + `routegroup`; `{error_code, data}` response envelopes (`Result`, `ResultItem`, `CursorResult`); routing (`router`), typed application middleware (`rest/mid`: error localize/mask, panics, observability, cache, ETag) and JSON:API documents (`rest/jsonapi`) |
 | `middleware` | net/http **server** middleware (`func(http.Handler) http.Handler`): panic recovery, server span (`Trace`, otelhttp), access log, timeout, body-size limit (cf. `httpmw` for the **client** side) |
 | `httpserver` | `http.Handler`-on-a-listener as a `worker.Runnable`; the shared server core for REST, the gRPC-gateway and `debugsrv`; idle/header timeouts, `net/http` errors to your logger, stuck connections closed on shutdown |
-| `order`, `page`, `query` | Listing primitives shared by the domain and both transports: allowlisted sort (`order`), validated offset/cursor paging input (`page`), paginated result envelope (`query`) |
+| `order`, `page` | Listing primitives shared by the domain and both transports: allowlisted sort (`order`), validated offset/cursor paging input (`page`) |
 | `grpcserver` | gRPC server as a `worker.Runnable`: server span per RPC (otelgrpc), recovery/logging/metrics interceptors, `errs`→status mapping, health, reflection, transport tuning knobs |
 | `worker` | Unified worker abstraction: `Runnable`, `Group`, `Loop` (fixed) / `NewPacedLoop` (adaptive: drain-when-busy, idle-backoff), `Pool`, `Processor[T]`, `Backoff` |
 | `queue` | Durable work queue (`Schedule`/`Claim`/`MarkDone`/`MarkFailed`): Postgres (`FOR UPDATE SKIP LOCKED`) + in-memory, plugs into `worker.Processor` as a `Source`/`Sink` |
@@ -73,7 +73,6 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `provider/sentry` | Ready `dim` factory of the Sentry SDK: init, flush on shutdown |
 | `provider/translator` | Ready `dim` factory of an `i18n.Translator` from the service's message files |
 | `app` | Opinionated application entrypoint: wires config → deps → `worker.Group` and drives graceful shutdown via `closer` |
-| `to` | Small response-encoding helpers (`to.JSON`, JSON:API) — a convenience seam over `rest` |
 | `cmd/skit` | Scaffolding CLI: `skit new <module>` (embedded starter, `--full` service layout, or gonew passthrough with `--template`), plus per-model generators via `skit add …` |
 
 The `skit add` generators scaffold per-model code: `rest`, `rest-test`, `grpc`, `grpc-test`,

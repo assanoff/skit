@@ -15,14 +15,14 @@
 //
 // New clamps the number to >= 1 and rows-per-page into [1, MaxRowsPerPage],
 // defaulting non-positive rows to DefaultRowsPerPage. Pair the result with
-// query.Result to return a paginated list envelope.
+// rest.Result to return a paginated list envelope.
 //
 // # Cursor paging
 //
 // Cursor (keyset) paging is also supported via Cursor: an opaque token plus a
 // limit. The SDK owns the token (EncodeCursor / Cursor.Key); the store builds
 // the engine-specific keyset predicate and encodes the boundary row's key into
-// the next cursor. Pair it with query.CursorResult.
+// the next cursor. Pair it with rest.CursorResult.
 //
 //	c := page.NewCursor(r.URL.Query().Get("cursor"), 50)
 //	key, _ := c.Key()                 // "" on the first page

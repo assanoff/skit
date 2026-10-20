@@ -157,7 +157,12 @@ type jsonResponse struct {
 }
 
 func (j jsonResponse) Encode() (body []byte, contentType string, err error) {
-	body, err = json.Marshal(j.value)
+	return encodeJSON(j.value)
+}
+
+// encodeJSON marshals v as an application/json body.
+func encodeJSON(v any) (body []byte, contentType string, err error) {
+	body, err = json.Marshal(v)
 	if err != nil {
 		return nil, "", fmt.Errorf("rest: encode json: %w", err)
 	}

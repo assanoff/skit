@@ -22,6 +22,29 @@
 // *errs.Error is itself a ResponseEncoder, so a handler returns one uniform type for
 // both success and failure.
 //
+// # Response envelopes
+//
+// Result, ResultItem and CursorResult share one shape — an "error_code" and a
+// "data" object — so clients parse one structure across all endpoints:
+//
+//	list:   {"error_code":"ok","data":{"items":[...],"pagination":{"total_pages":..,"current_page":..,"limit":..,"total_items":..}}}
+//	cursor: {"error_code":"ok","data":{"items":[...],"next":"..","prev":".."}}
+//	single: {"error_code":"ok","data":{...}}
+//
+//	pg, err := page.Parse(q.Get("page"), q.Get("rows"))
+//	if err != nil {
+//		return errs.NewFieldError("page", err)
+//	}
+//	items, total, err := core.Query(ctx, pg)
+//	return rest.NewResult(toDTOs(items), total, pg)
+//
+//	return rest.NewResultItem(toDTO(one))
+//	return rest.NewCursorResult(toDTOs(items), next, "") // next from page.EncodeCursor
+//
+// To localize the items with the translation middleware, embed Result in a
+// type that implements translation.TranslatableList over its Items. A JSON:API
+// document comes from the rest/jsonapi package.
+//
 // # Usage
 //
 //	func getWidget(ctx context.Context, r *http.Request) rest.ResponseEncoder {
@@ -56,6 +79,10 @@
 //     failure -> 500 with a generic body; canceled ctx -> returns ctx.Err).
 //   - JSON / JSONStatus: wrap a value as a JSON ResponseEncoder (status 200, or
 //     explicit).
+//   - Result / NewResult, ResultItem / NewResultItem, CursorResult /
+//     NewCursorResult: the {error_code, data} envelopes of a page of a list
+//     (offset), one object and a cursor page; NewPagination derives the offset
+//     paging metadata, zero current_page and limit on an empty result.
 //   - Decode: read a request body into a Decoder and run its Validate, if it
 //     has one (validate.Check for struct tags), returning an *errs.Error
 //     (InvalidArgument) on bad input.

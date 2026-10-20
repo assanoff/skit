@@ -1,4 +1,4 @@
-package query
+package rest_test
 
 import (
 	"encoding/json"
@@ -7,13 +7,14 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/page"
+	"github.com/assanoff/skit/rest"
 )
 
 func TestNewResultAndEncode(t *testing.T) {
 	is := is.New(t)
 
 	pg := page.New(2, 25)
-	r := NewResult([]string{"a", "b"}, 57, pg)
+	r := rest.NewResult([]string{"a", "b"}, 57, pg)
 
 	is.Equal(r.ErrorCode, "ok")                // ok code
 	is.Equal(len(r.Data.Items), 2)             // items carried
@@ -43,9 +44,9 @@ func TestNewResultAndEncode(t *testing.T) {
 	}
 }
 
-// TestResultPaginationMath covers the derived total_pages across the edges, and
-// the empty case where current_page/limit collapse to zero.
-func TestResultPaginationMath(t *testing.T) {
+// TestNewPagination covers the derived total_pages across the edges, and the
+// empty case where current_page/limit collapse to zero.
+func TestNewPagination(t *testing.T) {
 	tests := []struct {
 		name              string
 		page, rows, total int
@@ -65,10 +66,11 @@ func TestResultPaginationMath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			is := is.New(t)
 
-			r := NewResult([]int(nil), tc.total, page.New(tc.page, tc.rows))
-			is.Equal(r.Data.Pagination.TotalPages, tc.wantPages)    // total pages
-			is.Equal(r.Data.Pagination.CurrentPage, tc.wantCurrent) // current page
-			is.Equal(r.Data.Pagination.Limit, tc.wantLimit)         // limit
+			p := rest.NewPagination(tc.total, page.New(tc.page, tc.rows))
+			is.Equal(p.TotalPages, tc.wantPages)    // total pages
+			is.Equal(p.CurrentPage, tc.wantCurrent) // current page
+			is.Equal(p.Limit, tc.wantLimit)         // limit
+			is.Equal(p.TotalItems, tc.total)        // total echoed
 		})
 	}
 }
@@ -79,7 +81,7 @@ func TestNewResultItemAndEncode(t *testing.T) {
 	type dto struct {
 		ID string `json:"id"`
 	}
-	r := NewResultItem(dto{ID: "abc"})
+	r := rest.NewResultItem(dto{ID: "abc"})
 	is.Equal(r.ErrorCode, "ok") // ok code
 	is.Equal(r.Data.ID, "abc")  // object carried
 
@@ -98,7 +100,7 @@ func TestNewResultItemAndEncode(t *testing.T) {
 func TestNewCursorResultAndEncode(t *testing.T) {
 	is := is.New(t)
 
-	r := NewCursorResult([]string{"a"}, "next-token", "")
+	r := rest.NewCursorResult([]string{"a"}, "next-token", "")
 	is.Equal(r.ErrorCode, "ok")
 	is.Equal(len(r.Data.Items), 1)
 	is.Equal(r.Data.Next, "next-token")

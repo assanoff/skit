@@ -12,7 +12,6 @@ import (
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
-	"github.com/assanoff/skit/query"
 	"github.com/assanoff/skit/rest"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
@@ -58,7 +57,7 @@ func (h *Handler) create(ctx context.Context, r *http.Request) rest.ResponseEnco
 		return errs.From(err)
 	}
 	// {error_code, data:{...}} at 201, sharing the house envelope with reads.
-	return rest.JSONStatus(query.NewResultItem(toResponse(item)), http.StatusCreated)
+	return rest.JSONStatus(rest.NewResultItem(toResponse(item)), http.StatusCreated)
 }
 
 // query lists one page of {{.Plural}} (?page, ?rows), optionally narrowed by the
@@ -90,12 +89,12 @@ func (h *Handler) query(ctx context.Context, r *http.Request) rest.ResponseEncod
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewResult(toResponseList(items), total, pg)
+	return rest.NewResult(toResponseList(items), total, pg)
 }
 
 // queryCursor lists {{.Plural}} with keyset (cursor) pagination: ?cursor=<token>
 // (the opaque token from a prior page's next, empty for the first page), ?limit=N,
-// and the same ?name/?description filter. It returns a query.CursorResult with the
+// and the same ?name/?description filter. It returns a rest.CursorResult with the
 // items and the next-page token. Forward-only — prev is not emitted.
 func (h *Handler) queryCursor(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 	qp := parseQueryParams(r)
@@ -114,7 +113,7 @@ func (h *Handler) queryCursor(ctx context.Context, r *http.Request) rest.Respons
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewCursorResult(toResponseList(items), next, "")
+	return rest.NewCursorResult(toResponseList(items), next, "")
 }
 
 // queryByID returns one {{.Pkg}} by id.
@@ -128,7 +127,7 @@ func (h *Handler) queryByID(ctx context.Context, r *http.Request) rest.ResponseE
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewResultItem(toResponse(item)) // {error_code, data:{...}}
+	return rest.NewResultItem(toResponse(item)) // {error_code, data:{...}}
 }
 
 // update applies a partial update to a {{.Pkg}}.
@@ -147,7 +146,7 @@ func (h *Handler) update(ctx context.Context, r *http.Request) rest.ResponseEnco
 	if err != nil {
 		return errs.From(err)
 	}
-	return query.NewResultItem(toResponse(item)) // {error_code, data:{...}}
+	return rest.NewResultItem(toResponse(item)) // {error_code, data:{...}}
 }
 
 // delete removes a {{.Pkg}}.
