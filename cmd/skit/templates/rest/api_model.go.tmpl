@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/assanoff/skit/errs"
+	"github.com/assanoff/skit/validate"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 )
@@ -26,10 +26,10 @@ func (req *Create{{.Type}}Req) Decode(data []byte) error {
 }
 
 // Validate validates the request. By default it checks the `validate:` struct
-// tags via errs.Check (returns an *errs.Error → HTTP 400). Replace the body with
-// custom checks, or combine both, as the rules grow.
+// tags via validate.Check (returns an *errs.Error → HTTP 400). Replace the body
+// with custom checks, or combine both, as the rules grow.
 func (req *Create{{.Type}}Req) Validate() error {
-	return errs.Check(req)
+	return validate.Check(req)
 }
 
 // Update{{.Type}}Req is the request body for a partial {{.Pkg}} update; nil fields
@@ -49,7 +49,7 @@ func (req *Update{{.Type}}Req) Decode(data []byte) error {
 
 // Validate checks the struct tags; extend with custom rules as needed.
 func (req *Update{{.Type}}Req) Validate() error {
-	return errs.Check(req)
+	return validate.Check(req)
 }
 
 // Response is the REST representation of a {{.Pkg}}. It implements

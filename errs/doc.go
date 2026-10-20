@@ -1,6 +1,7 @@
 // Package errs provides a single, transport-agnostic error type with stable
-// codes, an HTTP (and later gRPC) status mapping, request validation helpers,
-// and automatic redaction of secrets in user-facing messages.
+// codes, an HTTP (and later gRPC) status mapping, errors of invalid input
+// fields, and automatic redaction of secrets in user-facing messages. It
+// depends on the standard library only.
 //
 // An *Error carries a machine-readable Code, an optional Title, a human
 // Message (the "detail"), and optional Args used for i18n. It implements the
@@ -61,19 +62,25 @@
 //	w.WriteHeader(e.HTTPStatus())
 //	w.Write(body)
 //
-// # Validation
+// # Field errors
 //
-// Check validates a struct via github.com/go-playground/validator tags and, on
-// failure, returns an InvalidArgument *Error whose Fields list the offending
-// inputs. NewFieldErrors builds the same shape from an explicit list:
+// FieldErrors collects the invalid fields of an input, so a client sees them
+// all at once. Add skips a nil error; Err returns nil when nothing was added,
+// else an InvalidArgument *Error whose Fields list the fields. NewFieldError
+// builds the same error for one field. Every field error has the title "data
+// validation error" and the detail "validation failed":
 //
-//	type CreateReq struct {
-//	    Name  string `validate:"required"`
-//	    Email string `validate:"required,email"`
+//	var fe errs.FieldErrors
+//	id, err := uuid.Parse(q.Get("id"))
+//	fe.Add("id", err)
+//	from, err := time.Parse(time.DateOnly, q.Get("from"))
+//	fe.Add("from", err)
+//	if err := fe.Err(); err != nil {
+//	    return err // 400: {"fields":[{"field":"id","error":"..."}, ...]}
 //	}
-//	if err := errs.Check(req); err != nil {
-//	    return err // 400 with per-field FieldError entries
-//	}
+//
+// The package validate checks struct tags and reports through the same
+// FieldErrors.
 //
 // # Sanitization
 //

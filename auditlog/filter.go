@@ -1,6 +1,6 @@
 package auditlog
 
-import "github.com/assanoff/skit/errs"
+import "github.com/assanoff/skit/validate"
 
 // QueryFilter selects which versions a diff query compares. Both versions are
 // required for QueryDiffByModelID.
@@ -12,7 +12,7 @@ type QueryFilter struct {
 // Validate reports whether the filter is well-formed, returning an
 // errs.InvalidArgument error with per-field detail when not.
 func (qf *QueryFilter) Validate() error {
-	return errs.Check(qf)
+	return validate.Check(qf)
 }
 
 // WithCurrentVersion sets the current-version field.

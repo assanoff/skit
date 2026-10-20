@@ -201,7 +201,8 @@ type Decoder interface {
 // validator is an optional interface a model may implement to validate itself.
 // When present, Decode calls Validate after decoding; its error should be an
 // *errs.Error (InvalidArgument) so it maps to HTTP 400. A model's Validate can
-// delegate to struct-tag validation (return errs.Check(m)) or run custom checks.
+// delegate to struct-tag validation (return validate.Check(m)) or run custom
+// checks.
 type validator interface {
 	Validate() error
 }

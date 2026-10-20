@@ -71,7 +71,7 @@ func (h *Handler) query(ctx context.Context, r *http.Request) rest.ResponseEncod
 
 	pg, err := page.Parse(qp.Page, qp.Rows)
 	if err != nil {
-		return errs.NewFieldErrors("page", errs.FieldError{Field: "page", Error: err.Error()})
+		return errs.NewFieldError("page", err)
 	}
 	filter, err := parseFilter(qp)
 	if err != nil {
@@ -79,7 +79,7 @@ func (h *Handler) query(ctx context.Context, r *http.Request) rest.ResponseEncod
 	}
 	by, err := order.Parse(orderByFields, qp.OrderBy, {{.Pkg}}core.DefaultOrder)
 	if err != nil {
-		return errs.NewFieldErrors("order", errs.FieldError{Field: "order_by", Error: err.Error()})
+		return errs.NewFieldError("order_by", err)
 	}
 
 	items, err := h.core.Query(ctx, filter, by, pg)
@@ -103,7 +103,7 @@ func (h *Handler) queryCursor(ctx context.Context, r *http.Request) rest.Respons
 	limit, _ := strconv.Atoi(qp.Limit) // 0/invalid -> NewCursor applies the default
 	cur := page.NewCursor(qp.Cursor, limit)
 	if _, err := cur.Key(); err != nil {
-		return errs.NewFieldErrors("cursor", errs.FieldError{Field: "cursor", Error: err.Error()}) // malformed token -> 400
+		return errs.NewFieldError("cursor", err) // malformed token -> 400
 	}
 	filter, err := parseFilter(qp)
 	if err != nil {

@@ -19,7 +19,7 @@ type Error struct {
 	CodeStr string         `json:"code"`
 	Title   string         `json:"title,omitempty"`
 	Message string         `json:"detail"`
-	Fields  []FieldError   `json:"fields,omitempty"`
+	Fields  FieldErrors    `json:"fields,omitempty"`
 	Args    map[string]any `json:"-"`
 
 	// MessageID is an optional i18n message key. When set it overrides CodeStr as

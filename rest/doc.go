@@ -56,8 +56,9 @@
 //     failure -> 500 with a generic body; canceled ctx -> returns ctx.Err).
 //   - JSON / JSONStatus: wrap a value as a JSON ResponseEncoder (status 200, or
 //     explicit).
-//   - Decode: read and validate a JSON request body (DisallowUnknownFields +
-//     errs.Check), returning an *errs.Error (InvalidArgument) on bad input.
+//   - Decode: read a request body into a Decoder and run its Validate, if it
+//     has one (validate.Check for struct tags), returning an *errs.Error
+//     (InvalidArgument) on bad input.
 //   - NoResponse: a ResponseEncoder telling Respond to write nothing (the handler
 //     already wrote the response — redirect, stream, hijack).
 //   - Param: read a path parameter (thin wrapper over http.Request.PathValue).

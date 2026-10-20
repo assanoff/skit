@@ -43,7 +43,7 @@ func parseQueryParams(r *http.Request) queryParams {
 // code InvalidArgument). Text fields are case-insensitive substrings; an absent
 // param leaves that field nil (not applied).
 func parseFilter(qp queryParams) ({{.Pkg}}core.QueryFilter, error) {
-	var fieldErrs []errs.FieldError
+	var fe errs.FieldErrors
 	var f {{.Pkg}}core.QueryFilter
 
 	if name := strings.TrimSpace(qp.Name); name != "" {
@@ -57,14 +57,12 @@ func parseFilter(qp queryParams) ({{.Pkg}}core.QueryFilter, error) {
 	// error instead of a nil check (uncomment and add the field to QueryFilter):
 	// if qp.ID != "" {
 	// 	id, err := uuid.Parse(qp.ID)
-	// 	if err != nil {
-	// 		fieldErrs = append(fieldErrs, errs.FieldError{Field: "id", Error: err.Error()})
-	// 	}
-	// 	f.ID = &id // unused on error: any field error returns below
+	// 	fe.Add("id", err) // a nil err adds nothing
+	// 	f.ID = &id        // unused on error: any field error returns below
 	// }
 
-	if len(fieldErrs) > 0 {
-		return {{.Pkg}}core.QueryFilter{}, errs.NewFieldErrors("invalid filter", fieldErrs...)
+	if err := fe.Err(); err != nil {
+		return {{.Pkg}}core.QueryFilter{}, err
 	}
 
 	// Tag/constraint validation (lengths, ranges, ...) once the raw values parsed.

@@ -1,7 +1,7 @@
 package {{.Pkg}}
 
 import (
-	"github.com/assanoff/skit/errs"
+	"github.com/assanoff/skit/validate"
 )
 
 // QueryFilter narrows a {{.Pkg}} listing. Nil fields are not applied, so the zero
@@ -14,8 +14,9 @@ type QueryFilter struct {
 }
 
 // Validate checks the filter's constraints. It defaults to tag validation via
-// errs.Check (omitempty so absent fields pass); replace the body with bespoke
-// checks (e.g. a date range where From must not be after To) when tags fall short.
+// validate.Check (omitempty so absent fields pass); replace the body with
+// bespoke checks (e.g. a date range where From must not be after To) when tags
+// fall short.
 func (f QueryFilter) Validate() error {
-	return errs.Check(f)
+	return validate.Check(f)
 }

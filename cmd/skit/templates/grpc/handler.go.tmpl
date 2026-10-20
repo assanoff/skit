@@ -13,6 +13,7 @@ import (
 
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/page"
+	"github.com/assanoff/skit/validate"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 	{{.Pkg}}v1 "{{.Module}}/gen/{{.Pkg}}/v1"
@@ -40,7 +41,7 @@ func (h *Handler) Register(reg grpc.ServiceRegistrar) {
 // Create{{.Type}} implements the gRPC {{.Type}}Service.
 func (h *Handler) Create{{.Type}}(ctx context.Context, req *{{.Pkg}}v1.Create{{.Type}}Request) (*{{.Pkg}}v1.Create{{.Type}}Response, error) {
 	n := {{.Pkg}}core.New{{.Type}}{Name: req.GetName(), Description: req.GetDescription()}
-	if err := errs.Check(struct {
+	if err := validate.Check(struct {
 		Name string `validate:"required,max=100"`
 	}{Name: n.Name}); err != nil {
 		return nil, err
