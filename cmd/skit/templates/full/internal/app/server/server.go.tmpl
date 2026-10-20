@@ -95,7 +95,7 @@ func (a *App) Components() Components {
 // only add database load, and a wall-clock cron would fire once per replica
 // (gate it with lock.Locker — see `skit add cron --lock`).
 //
-// Worker.Disabled and Broker.Enabled are configuration, not composition: the
+// Worker.Disabled and Broker.Enabled() are configuration, not composition: the
 // command decides whether WithWorkers is in its list at all, the switches decide
 // which of its workers start.
 func initWorkers(ctx context.Context, a *App) error {
@@ -103,7 +103,7 @@ func initWorkers(ctx context.Context, a *App) error {
 	//   if !a.d.Opts.Worker.Disabled {
 	//   	a.workers = append(a.workers, a.d.SomeLoop(ctx))
 	//   }
-	if a.d.Opts.Broker.Enabled {
+	if a.d.Opts.Broker.Enabled() {
 		addOutboxWorkers(ctx, a)
 	}
 	return nil
@@ -126,8 +126,8 @@ func addOutboxWorkers(ctx context.Context, a *App) {
 // pipeline whose sending half (the outbox workers) belongs to initWorkers.
 // Competing consumers, so more than one replica is safe.
 func initConsumers(ctx context.Context, a *App) error { //nolint:revive // ctx is for the consumers wired here
-	// Wire queue consumers here; a RabbitMQ one goes behind Broker.Enabled, e.g.:
-	//   if a.d.Opts.Broker.Enabled {
+	// Wire queue consumers here; a RabbitMQ one goes behind Broker.Enabled(), e.g.:
+	//   if a.d.Opts.Broker.Enabled() {
 	//   	h := broker.Instrument(handler, broker.InstrumentConfig{
 	//   		Consumer:       cfg.Name,
 	//   		System:         "rabbitmq",

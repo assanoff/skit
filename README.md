@@ -250,8 +250,8 @@ you two orthogonal gates, and the third question is answered by the command.
 
 | Question | Answered by |
 |---|---|
-| Is this transport configured at all? | addr-gating — `HTTP_ADDR`, `GRPC_ADDR`, `DEBUG_ADDR` |
-| Is this subsystem switched on? | its own flag — `Worker.Disabled`, `Broker.Enabled` |
+| Is this transport or dependency configured at all? | an empty key turns it off — `HTTP_ADDR`, `GRPC_ADDR`, `DEBUG_ADDR`, `BROKER_HOST` |
+| Is this subsystem switched on? | its own flag — `Worker.Disabled` |
 | Does *this process* run that part, and where? | the command, which lists its options |
 
 The scaffold (`skit new --full`) generates exactly that. A process is assembled

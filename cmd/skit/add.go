@@ -540,11 +540,11 @@ the transport lives in %[1]s_rmq.go. Next:
    %[2]sConsumer ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
 
 3. Wire it into initConsumers (internal/app/server/server.go), behind the
-   Broker.Enabled switch (it gates RabbitMQ) — the generated Runnable builds the
-   RabbitMQ consumer from config. The consumer command and serve run it
-   (server.WithConsumers):
+   Broker.Enabled() switch (an empty BROKER_HOST turns RabbitMQ off) — the
+   generated Runnable builds the RabbitMQ consumer from config. The consumer
+   command and serve run it (server.WithConsumers):
 
-   if a.d.Opts.Broker.Enabled {
+   if a.d.Opts.Broker.Enabled() {
        cons, err := %[1]s.New(a.d.Logger).Runnable(a.d.BrokerConn(ctx), a.d.Opts.%[2]sConsumer, a.d.Metrics, a.d.TracerProvider)
        if err != nil {
            return err

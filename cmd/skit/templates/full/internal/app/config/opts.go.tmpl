@@ -13,7 +13,7 @@ import (
 const EnvProduction = "production"
 
 // ServerOpts is the full service configuration. Groups are namespaced so their
-// env vars read as HTTP_ADDR, DB_USER, BROKER_ENABLED, etc. Tracing is configured
+// env vars read as HTTP_ADDR, DB_USER, BROKER_HOST, etc. Tracing is configured
 // by the OTEL_* variables of the OpenTelemetry specification (see deps).
 type ServerOpts struct {
 	Service  string `long:"service-name" env:"SERVICE_NAME" default:"{{.Name}}" description:"service name"`
@@ -92,15 +92,17 @@ type Worker struct {
 	Interval time.Duration `long:"interval" env:"INTERVAL" default:"1s" description:"worker poll interval"`
 }
 
-// Broker holds RabbitMQ + transactional-outbox settings. OFF by default
-// (brokers need external infra). When disabled no relay/consumer runs and the
-// outbox providers stay nil.
+// Broker holds RabbitMQ + transactional-outbox settings. The broker is on iff
+// Host is non-empty, so an empty BROKER_HOST turns it off without a separate
+// flag. When off no relay/consumer runs and the outbox providers stay nil.
 type Broker struct {
-	Enabled  bool   `long:"enabled"  env:"ENABLED"  description:"enable RabbitMQ + transactional outbox"`
 	User     string `long:"user"     env:"USER"     default:"guest"             description:"rabbitmq user"     json:"-"`
 	Password string `long:"password" env:"PASSWORD" default:"guest"             description:"rabbitmq password" json:"-"`
-	Host     string `long:"host"     env:"HOST"     default:"localhost"         description:"rabbitmq host"`
+	Host     string `long:"host"     env:"HOST"                                 description:"rabbitmq host (empty disables the broker)"`
 	Port     string `long:"port"     env:"PORT"     default:"5672"              description:"rabbitmq port"`
 	Source   string `long:"source"   env:"SOURCE"   default:"{{.Name}}"         description:"CloudEvents source"`
 	Exchange string `long:"exchange" env:"EXCHANGE" default:"{{.Snake}}.events" description:"events exchange"`
 }
+
+// Enabled reports whether the broker is on: its Host is set.
+func (b Broker) Enabled() bool { return b.Host != "" }
