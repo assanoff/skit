@@ -31,14 +31,14 @@ func AdvisoryKey(name string) int64 {
 // This is how a service auto-provisions the tables an SDK storage package owns
 // (outbox, queue, auditlog, translation, ...) at startup, without hand-writing a
 // migration for them. lockKey must be unique per schema across the database;
-// derive it with AdvisoryKey.
+// derive it with AdvisoryKey. ddl runs as written, without :name parsing.
 func EnsureSchema(ctx context.Context, log *slog.Logger, db *sqlx.DB, lockKey int64, ddl string) error {
 	pc := caller()
 	return WithinTran(ctx, log, db, func(tx *sqlx.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
 			return fmt.Errorf("dbx: acquire schema advisory lock %d: %w", lockKey, err)
 		}
-		_, err := namedExec(ctx, tx, ddl, struct{}{})
-		return logQuery(ctx, log, pc, "dbx.exec", ddl, nil, err)
+		_, err := tx.ExecContext(ctx, ddl)
+		return logQuery(ctx, log, pc, "dbx.exec", ddl, nil, translateError(err))
 	})
 }

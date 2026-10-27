@@ -1,11 +1,15 @@
 package dbx
 
 import (
+	"cmp"
 	"database/sql"
 	"database/sql/driver"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/matryer/is"
 )
 
 func TestSQLiteDSN(t *testing.T) {
@@ -51,6 +55,51 @@ func TestOpenSQLiteUsesDriver(t *testing.T) {
 	if db.DriverName() != "dbxfakesqlite" {
 		t.Fatalf("driver = %q, want dbxfakesqlite", db.DriverName())
 	}
+}
+
+// TestOpenSQLitePool checks the pool sizes: zero fields take the defaults, an
+// in-memory database keeps one connection, the caller's sizes win.
+func TestOpenSQLitePool(t *testing.T) {
+	tests := []struct {
+		name          string
+		cfg           SQLiteConfig
+		maxOpen, idle int
+	}{
+		{"file", SQLiteConfig{Path: "app.db"}, 0, 2},
+		{"memory", SQLiteConfig{Path: ":memory:"}, 1, 1},
+		{"memory dsn", SQLiteConfig{DSN: "file:x?mode=memory&cache=shared"}, 1, 1},
+		{"caller sizes", SQLiteConfig{Path: "app.db", MaxOpenConns: 4, MaxIdleConns: 3}, 4, 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			is := is.New(t)
+			tc.cfg.Driver = tranDriverName()
+			db, err := OpenSQLite(tc.cfg)
+			is.NoErr(err)
+			defer db.Close()
+
+			is.Equal(db.Stats().MaxOpenConnections, tc.maxOpen)
+			is.Equal(idleAfter(t, db, cmp.Or(tc.maxOpen, 3)), tc.idle)
+		})
+	}
+}
+
+// idleAfter takes n connections from db at once, returns them all and reports
+// how many the pool keeps idle.
+func idleAfter(t *testing.T, db *sqlx.DB, n int) int {
+	t.Helper()
+	conns := make([]*sql.Conn, n)
+	for i := range conns {
+		c, err := db.Conn(t.Context())
+		if err != nil {
+			t.Fatalf("conn: %v", err)
+		}
+		conns[i] = c
+	}
+	for _, c := range conns {
+		_ = c.Close()
+	}
+	return db.Stats().Idle
 }
 
 // An empty Driver falls back to the modernc "sqlite" name; without that driver

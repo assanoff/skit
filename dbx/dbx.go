@@ -1,6 +1,7 @@
 package dbx
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -19,11 +20,19 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Postgres error codes we translate into sentinel errors.
+// Postgres error codes we translate into sentinel errors or retry.
 const (
-	uniqueViolation  = "23505"
-	undefinedTable   = "42P01"
-	deadlockDetected = "40P01"
+	uniqueViolation      = "23505"
+	undefinedTable       = "42P01"
+	deadlockDetected     = "40P01"
+	serializationFailure = "40001"
+)
+
+// Pool sizes for a zero field of Config and SQLiteConfig.
+const (
+	defaultMaxIdleConns       = 5
+	defaultMaxOpenConns       = 20
+	defaultSQLiteMaxIdleConns = 2
 )
 
 // Sentinel errors returned by this package; match them with errors.Is.
@@ -35,11 +44,13 @@ var (
 
 // Config holds connection settings.
 type Config struct {
-	User         string
-	Password     string
-	Host         string
-	Name         string
-	Schema       string
+	User     string
+	Password string
+	Host     string
+	Name     string
+	Schema   string
+	// MaxIdleConns and MaxOpenConns bound the pool; zero keeps 5 idle and 20
+	// open connections.
 	MaxIdleConns int
 	MaxOpenConns int
 	DisableTLS   bool
@@ -84,8 +95,8 @@ func Open(cfg Config) (*sqlx.DB, error) {
 	pgCfg.Tracer = newQueryTracer(cfg.TracerProvider, pgCfg)
 	db := sqlx.NewDb(stdlib.OpenDB(*pgCfg), "pgx")
 
-	db.SetMaxIdleConns(cfg.MaxIdleConns)
-	db.SetMaxOpenConns(cfg.MaxOpenConns)
+	db.SetMaxIdleConns(cmp.Or(cfg.MaxIdleConns, defaultMaxIdleConns))
+	db.SetMaxOpenConns(cmp.Or(cfg.MaxOpenConns, defaultMaxOpenConns))
 	if err := registerPool(db, cfg); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
@@ -120,7 +131,11 @@ type SQLiteConfig struct {
 	ForeignKeys bool          // foreign_keys(1)
 	// DSN, when set, is used verbatim as the driver DSN — for drivers whose DSN
 	// syntax differs from modernc (e.g. mattn/go-sqlite3).
-	DSN          string
+	DSN string
+	// MaxOpenConns and MaxIdleConns bound the pool; zero leaves the open
+	// connections unbounded and keeps 2 idle. An in-memory database
+	// (":memory:" or mode=memory) keeps one connection by default: each
+	// connection to it opens its own empty database.
 	MaxOpenConns int
 	MaxIdleConns int
 }
@@ -139,15 +154,28 @@ func OpenSQLite(cfg SQLiteConfig) (*sqlx.DB, error) {
 	if driver == "" {
 		driver = DefaultSQLiteDriver
 	}
-	db, err := sqlx.Open(driver, cfg.dsn())
+	dsn := cfg.dsn()
+	db, err := sqlx.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("dbx: open sqlite: %w", err)
+	}
+	if inMemory(dsn) {
+		// One connection that never closes: the database lives as long as it
+		// does, and every query sees the same one.
+		db.SetMaxIdleConns(cmp.Or(cfg.MaxIdleConns, 1))
+		db.SetMaxOpenConns(cmp.Or(cfg.MaxOpenConns, 1))
+		return db, nil
 	}
 	if cfg.MaxOpenConns > 0 {
 		db.SetMaxOpenConns(cfg.MaxOpenConns)
 	}
-	db.SetMaxIdleConns(cfg.MaxIdleConns)
+	db.SetMaxIdleConns(cmp.Or(cfg.MaxIdleConns, defaultSQLiteMaxIdleConns))
 	return db, nil
+}
+
+// inMemory reports whether dsn opens an in-memory SQLite database.
+func inMemory(dsn string) bool {
+	return strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
 }
 
 // dsn returns cfg.DSN verbatim when set, else builds a modernc.org/sqlite DSN
@@ -221,10 +249,11 @@ func StatusCheck(ctx context.Context, db *sqlx.DB) error {
 	return nil
 }
 
-// ExecContext runs a parameterless statement.
+// ExecContext runs a parameterless statement as written: the query is not
+// parsed for :name, so casts (::) and colons in literals pass through.
 func ExecContext(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string) error {
-	_, err := namedExec(ctx, db, query, struct{}{})
-	return logQuery(ctx, log, caller(), "dbx.exec", query, nil, err)
+	_, err := db.ExecContext(ctx, query)
+	return logQuery(ctx, log, caller(), "dbx.exec", query, nil, translateError(err))
 }
 
 // NamedExecContext runs an INSERT/UPDATE/DELETE with named parameters bound from
@@ -257,17 +286,25 @@ func namedExec(ctx context.Context, db sqlx.ExtContext, query string, data any) 
 	return res, nil
 }
 
-// QueryStruct runs a parameterless query expected to return exactly one row and
-// scans it into dest (a pointer to a struct).
+// QueryStruct runs a parameterless query as written (no :name parsing) and
+// scans its first row into dest (a pointer to a struct).
 func QueryStruct(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, dest any) error {
-	err := namedQueryStruct(ctx, db, query, struct{}{}, dest)
+	err := queryStruct(ctx, db, query, dest)
 	return logQuery(ctx, log, caller(), "dbx.query", query, nil, err)
 }
 
-// NamedQueryStruct runs a named query expected to return exactly one row.
+// NamedQueryStruct runs a named query and scans its first row into dest.
 func NamedQueryStruct(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data, dest any) error {
 	err := namedQueryStruct(ctx, db, query, data, dest)
 	return logQuery(ctx, log, caller(), "dbx.query", query, data, err)
+}
+
+func queryStruct(ctx context.Context, db sqlx.ExtContext, query string, dest any) error {
+	rows, err := db.QueryxContext(ctx, query)
+	if err != nil {
+		return translateError(err)
+	}
+	return scanFirst(rows, dest)
 }
 
 func namedQueryStruct(ctx context.Context, db sqlx.ExtContext, query string, data, dest any) error {
@@ -275,6 +312,13 @@ func namedQueryStruct(ctx context.Context, db sqlx.ExtContext, query string, dat
 	if err != nil {
 		return translateError(err)
 	}
+	return scanFirst(rows, dest)
+}
+
+// scanFirst scans the first row of rows into dest and closes rows. Close reads
+// the rest of the result, so an error that comes after the first row — a
+// division by zero in the third — is returned, not lost.
+func scanFirst(rows *sqlx.Rows, dest any) error {
 	defer func() { _ = rows.Close() }()
 
 	if !rows.Next() {
@@ -288,12 +332,13 @@ func namedQueryStruct(ctx context.Context, db sqlx.ExtContext, query string, dat
 	if err := rows.StructScan(dest); err != nil {
 		return fmt.Errorf("dbx: scan: %w", err)
 	}
-	return nil
+	return translateError(rows.Close())
 }
 
-// QuerySlice runs a parameterless query and scans all rows into *[]T.
+// QuerySlice runs a parameterless query as written (no :name parsing) and
+// scans all rows into *[]T.
 func QuerySlice[T any](ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, dest *[]T) error {
-	err := namedQuerySlice(ctx, db, query, struct{}{}, dest)
+	err := querySlice(ctx, db, query, dest)
 	return logQuery(ctx, log, caller(), "dbx.query", query, nil, err)
 }
 
@@ -303,11 +348,24 @@ func NamedQuerySlice[T any](ctx context.Context, log *slog.Logger, db sqlx.ExtCo
 	return logQuery(ctx, log, caller(), "dbx.query", query, data, err)
 }
 
+func querySlice[T any](ctx context.Context, db sqlx.ExtContext, query string, dest *[]T) error {
+	rows, err := db.QueryxContext(ctx, query)
+	if err != nil {
+		return translateError(err)
+	}
+	return scanAll(rows, dest)
+}
+
 func namedQuerySlice[T any](ctx context.Context, db sqlx.ExtContext, query string, data any, dest *[]T) error {
 	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
 	if err != nil {
 		return translateError(err)
 	}
+	return scanAll(rows, dest)
+}
+
+// scanAll scans every row of rows into *dest and closes rows.
+func scanAll[T any](rows *sqlx.Rows, dest *[]T) error {
 	defer func() { _ = rows.Close() }()
 
 	var out []T
@@ -319,9 +377,12 @@ func namedQuerySlice[T any](ctx context.Context, db sqlx.ExtContext, query strin
 		out = append(out, v)
 	}
 	*dest = out
-	return rows.Err()
+	return translateError(rows.Err())
 }
 
+// translateError maps well-known Postgres errors onto the package sentinels.
+// It wraps the driver error rather than replacing it, so the *pgconn.PgError
+// with its constraint and detail stays reachable through errors.As.
 func translateError(err error) error {
 	if err == nil {
 		return nil
@@ -329,9 +390,9 @@ func translateError(err error) error {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case uniqueViolation:
-			return ErrDBDuplicatedEntry
+			return fmt.Errorf("%w: %w", ErrDBDuplicatedEntry, err)
 		case undefinedTable:
-			return ErrUndefinedTable
+			return fmt.Errorf("%w: %w", ErrUndefinedTable, err)
 		}
 	}
 	if errors.Is(err, sql.ErrNoRows) {

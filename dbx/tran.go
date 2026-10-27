@@ -13,12 +13,12 @@ import (
 	"github.com/assanoff/skit/retry"
 )
 
-// deadlockBackoff paces the re-runs of a transaction that Postgres aborted as a
-// deadlock victim (SQLSTATE 40P01). Postgres resolves a deadlock after
-// deadlock_timeout (1s by default), so by the first retry the winning
-// transaction has almost always committed; the budget stays small because the
-// caller blocks for the whole duration.
-var deadlockBackoff = retry.Backoff{
+// retryBackoff paces the re-runs of a transaction that Postgres aborted as a
+// deadlock victim (SQLSTATE 40P01) or on a serialization failure (40001).
+// Postgres resolves a deadlock after deadlock_timeout (1s by default), so by
+// the first retry the winning transaction has almost always committed; the
+// budget stays small because the caller blocks for the whole duration.
+var retryBackoff = retry.Backoff{
 	Base:        100 * time.Millisecond,
 	Max:         time.Second,
 	Factor:      2,
@@ -69,25 +69,34 @@ func ExtContext(tx CommitRollbacker) (sqlx.ExtContext, error) {
 // WithinTran runs fn inside a transaction, committing on success and rolling
 // back on error or panic.
 //
-// A transaction that Postgres aborts as a deadlock victim (SQLSTATE 40P01) is
-// rolled back server-side in full, so WithinTran re-runs fn from scratch in a
-// fresh transaction a few times (see deadlockBackoff) before returning the
-// error. fn must therefore be safe to run more than once: keep every side
-// effect inside the transaction and do not mutate captured state that the next
-// run depends on. Any other error returns at once.
+// A transaction that Postgres aborts as a deadlock victim (SQLSTATE 40P01) or
+// on a serialization failure (40001) is rolled back server-side in full, so
+// WithinTran re-runs fn from scratch in a fresh transaction a few times (see
+// retryBackoff) before returning the error. fn must therefore be safe to run
+// more than once: keep every side effect inside the transaction and do not
+// mutate captured state that the next run depends on. Any other error returns
+// at once.
 func WithinTran(ctx context.Context, log *slog.Logger, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
 	cfg := retry.Config{
-		Backoff:    deadlockBackoff,
-		IsTerminal: func(err error) bool { return !IsDeadlock(err) },
+		Backoff:    retryBackoff,
+		IsTerminal: func(err error) bool { return !retryable(err) },
 	}
 	if log != nil {
 		cfg.OnRetry = func(attempt int, err error) {
-			log.WarnContext(ctx, "dbx.tran.deadlock, retrying", "attempt", attempt, "err", err)
+			log.WarnContext(ctx, "dbx.tran.retry", "attempt", attempt, "err", err)
 		}
 	}
 	return retry.Do(ctx, cfg, func(ctx context.Context) error {
 		return withinTran(ctx, log, db, fn)
 	})
+}
+
+// retryable reports whether err wraps a Postgres error after which the whole
+// transaction may run again: a deadlock (40P01) or a serialization failure
+// (40001).
+func retryable(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && (pgErr.Code == deadlockDetected || pgErr.Code == serializationFailure)
 }
 
 // IsDeadlock reports whether err wraps a Postgres deadlock (SQLSTATE 40P01).

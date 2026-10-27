@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -31,19 +32,18 @@ type tranTx struct{}
 func (tranTx) Commit() error   { return nil }
 func (tranTx) Rollback() error { return nil }
 
-func openTranDB(t *testing.T) *sqlx.DB {
-	t.Helper()
+// tranDriverName registers tranDriver once and returns its name.
+func tranDriverName() string {
 	const name = "dbxtrandriver"
-	registered := false
-	for _, d := range sql.Drivers() {
-		if d == name {
-			registered = true
-		}
-	}
-	if !registered {
+	if !slices.Contains(sql.Drivers(), name) {
 		sql.Register(name, tranDriver{})
 	}
-	db, err := sqlx.Open(name, "")
+	return name
+}
+
+func openTranDB(t *testing.T) *sqlx.DB {
+	t.Helper()
+	db, err := sqlx.Open(tranDriverName(), "")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -58,9 +58,9 @@ func deadlockErr() error {
 // noDelay makes the retries instant for the duration of the test.
 func noDelay(t *testing.T) {
 	t.Helper()
-	saved := deadlockBackoff
-	deadlockBackoff.Base, deadlockBackoff.Max = 0, 0
-	t.Cleanup(func() { deadlockBackoff = saved })
+	saved := retryBackoff
+	retryBackoff.Base, retryBackoff.Max = 0, 0
+	t.Cleanup(func() { retryBackoff = saved })
 }
 
 func TestWithinTranRetriesDeadlockVictim(t *testing.T) {
@@ -83,6 +83,26 @@ func TestWithinTranRetriesDeadlockVictim(t *testing.T) {
 	}
 }
 
+func TestWithinTranRetriesSerializationFailure(t *testing.T) {
+	noDelay(t)
+	db := openTranDB(t)
+
+	calls := 0
+	err := WithinTran(context.Background(), nil, db, func(*sqlx.Tx) error {
+		calls++
+		if calls < 2 {
+			return fmt.Errorf("namedexec: %w", &pgconn.PgError{Code: serializationFailure})
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("want nil after a retry, got %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("fn ran %d times, want 2", calls)
+	}
+}
+
 func TestWithinTranGivesUpAfterBudget(t *testing.T) {
 	noDelay(t)
 	db := openTranDB(t)
@@ -95,8 +115,8 @@ func TestWithinTranGivesUpAfterBudget(t *testing.T) {
 	if !IsDeadlock(err) {
 		t.Fatalf("want the deadlock error back, got %v", err)
 	}
-	if calls != deadlockBackoff.MaxAttempts {
-		t.Fatalf("fn ran %d times, want %d", calls, deadlockBackoff.MaxAttempts)
+	if calls != retryBackoff.MaxAttempts {
+		t.Fatalf("fn ran %d times, want %d", calls, retryBackoff.MaxAttempts)
 	}
 }
 

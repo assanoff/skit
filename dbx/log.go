@@ -28,10 +28,11 @@ func logQuery(ctx context.Context, log *slog.Logger, pc uintptr, msg, query stri
 }
 
 // loggable reports whether err is a failure worth logging: successful
-// statements and ErrDBNotFound — an ordinary "no rows" outcome — are not.
+// statements and the expected outcomes the caller handles — ErrDBNotFound
+// ("no rows") and ErrDBDuplicatedEntry (a unique key taken) — are not.
 func loggable(ctx context.Context, log *slog.Logger, err error) bool {
 	return err != nil && log != nil && !errors.Is(err, ErrDBNotFound) &&
-		log.Enabled(ctx, slog.LevelInfo)
+		!errors.Is(err, ErrDBDuplicatedEntry) && log.Enabled(ctx, slog.LevelInfo)
 }
 
 // logFailure writes a failed statement at info level with source pc, the

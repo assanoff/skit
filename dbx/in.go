@@ -22,23 +22,11 @@ func namedQuerySliceUsingIn[T any](ctx context.Context, db sqlx.ExtContext, quer
 	if err != nil {
 		return translateError(err)
 	}
-	defer func() { _ = rows.Close() }()
-
-	var out []T
-	for rows.Next() {
-		var v T
-		if err := rows.StructScan(&v); err != nil {
-			return fmt.Errorf("dbx: scan: %w", err)
-		}
-		out = append(out, v)
-	}
-	*dest = out
-	return rows.Err()
+	return scanAll(rows, dest)
 }
 
-// NamedQueryStructUsingIn runs a named query with an IN clause expected to return
-// exactly one row, scanning it into dest. Returns ErrDBNotFound when no row
-// matches.
+// NamedQueryStructUsingIn runs a named query with an IN clause and scans its
+// first row into dest. Returns ErrDBNotFound when no row matches.
 func NamedQueryStructUsingIn(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data, dest any) error {
 	err := namedQueryStructUsingIn(ctx, db, query, data, dest)
 	return logQuery(ctx, log, caller(), "dbx.query", query, data, err)
@@ -49,20 +37,7 @@ func namedQueryStructUsingIn(ctx context.Context, db sqlx.ExtContext, query stri
 	if err != nil {
 		return translateError(err)
 	}
-	defer func() { _ = rows.Close() }()
-
-	if !rows.Next() {
-		// rows.Next returning false also covers a mid-stream failure (conn
-		// reset, ctx cancel); surface it instead of reporting "not found".
-		if err := rows.Err(); err != nil {
-			return translateError(err)
-		}
-		return ErrDBNotFound
-	}
-	if err := rows.StructScan(dest); err != nil {
-		return fmt.Errorf("dbx: scan: %w", err)
-	}
-	return nil
+	return scanFirst(rows, dest)
 }
 
 // namedInQuery turns a named query plus data into a positional query with its

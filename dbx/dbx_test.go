@@ -39,3 +39,16 @@ func TestStatusCheckSurfacesRealError(t *testing.T) {
 		t.Fatalf("error should surface the connection cause, got: %v", err)
 	}
 }
+
+// TestOpenPoolDefaults checks that a zero Config bounds the pool: before the
+// cmp.Or defaults it was unbounded and kept no idle connection.
+func TestOpenPoolDefaults(t *testing.T) {
+	db, err := Open(Config{User: "u", Password: "p", Host: "127.0.0.1:1", Name: "x", DisableTLS: true})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if got := db.Stats().MaxOpenConnections; got != defaultMaxOpenConns {
+		t.Fatalf("MaxOpenConnections = %d, want %d", got, defaultMaxOpenConns)
+	}
+}

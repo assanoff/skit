@@ -1,18 +1,22 @@
-// Package dbx provides Postgres helpers on top of jmoiron/sqlx and the pgx
-// driver: connection setup, named query/exec wrappers that log failed
-// statements, transactions, and bulk insert/upsert.
+// Package dbx provides SQL helpers on top of jmoiron/sqlx and database/sql:
+// connection setup (Postgres through the pgx driver, SQLite through a driver
+// the caller registers), named query/exec wrappers that log failed statements,
+// transactions, and bulk insert/upsert. The helpers run on any driver; the
+// error translation and the transaction retry know Postgres codes only.
 //
 // Open builds a *sqlx.DB from a Config; StatusCheck waits for it to become
 // reachable. The Named* helpers run named queries/execs, log a failed
 // statement with its expanded SQL at info level (the record's source is the
-// store method that called the helper; ErrDBNotFound is not logged), and
-// translate well-known Postgres errors into the package sentinels
-// (ErrDBNotFound, ErrDBDuplicatedEntry, ErrUndefinedTable) so callers match
-// them with errors.Is instead of inspecting driver codes. WithinTran runs
-// a function inside a transaction, committing on success and rolling back on
-// error or panic, and transparently re-runs it when Postgres aborts it as a
-// deadlock victim. Bulk* batch large multi-row writes within Postgres's
-// parameter limit.
+// store method that called the helper; ErrDBNotFound and ErrDBDuplicatedEntry,
+// the outcomes the caller handles, are not logged), and translate well-known
+// Postgres errors into the package sentinels (ErrDBNotFound,
+// ErrDBDuplicatedEntry, ErrUndefinedTable) so callers match them with
+// errors.Is instead of inspecting driver codes. The sentinel wraps the driver
+// error: errors.As still reaches the *pgconn.PgError with its constraint and
+// detail. WithinTran runs a function inside a transaction, committing on
+// success and rolling back on error or panic, and transparently re-runs it
+// when Postgres aborts it as a deadlock victim or on a serialization failure.
+// Bulk* batch large multi-row writes within Postgres's parameter limit.
 //
 // # Usage
 //
@@ -40,8 +44,9 @@
 //	    return err
 //	}
 //
-//	// Pass a slice as a single array parameter: pgx binds it as a Postgres
-//	// array, so ANY(:ids) filters without expanding placeholders.
+//	// Postgres only: pass a slice as a single array parameter; pgx binds it
+//	// as a Postgres array, so ANY(:ids) filters without expanding
+//	// placeholders. On other databases use NamedQuerySliceUsingIn.
 //	var out []Widget
 //	err := dbx.NamedQuerySlice(ctx, log, db,
 //	    `SELECT * FROM widgets WHERE id = ANY(:ids)`,
@@ -82,26 +87,29 @@
 //
 //   - ExecContext / NamedExecContext run statements; the RowsAffected
 //     variant returns the affected-row count.
-//   - QueryStruct / NamedQueryStruct scan exactly one row (ErrDBNotFound when
-//     none).
+//   - QueryStruct / NamedQueryStruct scan the first row (ErrDBNotFound when
+//     there is none); an error later in the result is still returned.
 //   - QuerySlice / NamedQuerySlice scan every row into a *[]T.
 //   - NamedQuerySliceUsingIn / NamedQueryStructUsingIn handle a query with an IN
 //     clause: they expand a slice parameter (sqlx.In) and rebind before running.
 //
-// For an IN-style filter, prefer binding the slice as a single array parameter
-// and matching with ANY(:ids) (see Usage): pgx encodes []int64/[]string as a
-// Postgres array, so the query text stays constant regardless of list length.
-// Reach for the …UsingIn helpers only when you need driver-agnostic placeholder
-// expansion instead.
+// For an IN-style filter on Postgres, bind the slice as a single array
+// parameter and match with ANY(:ids) (see Usage): pgx encodes []int64/[]string
+// as a Postgres array, so the query text stays constant regardless of list
+// length. ANY works on Postgres only; the …UsingIn helpers expand IN (:ids) on
+// any database.
 //
-// The plain (non-Named) variants take no parameters; the Named variants bind
-// from a struct via its `db` tags.
+// The plain (non-Named) variants take no parameters and run the query as
+// written: it is not parsed for :name, so casts (::) and colons in literals
+// pass through. The Named variants bind from a struct via its `db` tags.
 //
 // # UUID columns
 //
-// The standard library uuid.UUID is a bare [16]byte with no sql.Scanner or
-// driver.Valuer, so a db model holds UUID instead (sql.Null[UUID] for a
-// nullable column) and converts at the core/db boundary:
+// database/sql scans and binds the standard uuid.UUID, and pgx and
+// modernc.org/sqlite take it as is. A driver that converts arguments on its
+// own, such as go-sql-driver/mysql, rejects it: a store that must run there
+// holds UUID instead (sql.Null[UUID] for a nullable column) and converts at
+// the core/db boundary:
 //
 //	type dbWidget struct {
 //	    ID dbx.UUID `db:"id"`
@@ -109,7 +117,9 @@
 //	row := dbWidget{ID: dbx.UUID(w.ID)} // core -> db
 //	w.ID = uuid.UUID(row.ID)            // db -> core
 //
-// Bind a lone UUID argument the same way: dbx.UUID(id).
+// Bind a lone UUID argument the same way: dbx.UUID(id). UUID binds through its
+// string form, so on Postgres-only paths prefer uuid.UUID: a []UUID in ANY
+// encodes about ten times slower.
 //
 // # Dialects
 //
@@ -127,19 +137,19 @@
 //
 // # Transactions
 //
-// WithinTran is the common path. For stores that must run against either a pool
-// or an outer transaction, depend on the Beginner / CommitRollbacker seam:
-// NewBeginner adapts a *sqlx.DB, and ExtContext extracts the query surface from
-// a started transaction.
+// WithinTran runs a function in a transaction on a pool: it commits when the
+// function returns nil and rolls back on an error or a panic.
 //
 // When two transactions lock the same rows in different orders Postgres aborts
-// one of them with SQLSTATE 40P01 ("deadlock detected"); the victim is rolled
-// back in full. WithinTran treats that as transient: it re-runs the function in
-// a fresh transaction with a short exponential backoff (3 attempts) and only
-// then returns the error. The function must therefore be safe to run more than
-// once — keep side effects inside the transaction and do not mutate captured
-// state between runs. IsDeadlock exposes the same check for statements that
-// run outside WithinTran.
+// one of them with SQLSTATE 40P01 ("deadlock detected"); a serializable or
+// repeatable read transaction that conflicts with another fails with 40001
+// ("could not serialize access"). Either is rolled back in full. WithinTran
+// treats both as transient: it re-runs the function in a fresh transaction
+// with a short exponential backoff (3 attempts) and only then returns the
+// error. The function must therefore be safe to run more than once — keep side
+// effects inside the transaction and do not mutate captured state between
+// runs. IsDeadlock exposes the deadlock check for statements that run outside
+// WithinTran.
 //
 // # Schema provisioning
 //
@@ -153,7 +163,12 @@
 // # Config
 //
 // Config fields: User, Password, Host, Name, Schema (sets search_path),
-// MaxIdleConns, MaxOpenConns, DisableTLS (DisableTLS=true selects
-// sslmode=disable, otherwise sslmode=require), Metrics (the registry of the
-// pool metrics; nil disables them). Open always sets timezone=utc.
+// MaxIdleConns and MaxOpenConns (zero keeps 5 idle and 20 open connections),
+// DisableTLS (DisableTLS=true selects sslmode=disable, otherwise
+// sslmode=require), Metrics (the registry of the pool metrics; nil disables
+// them). Open always sets timezone=utc.
+//
+// OpenSQLite keeps 2 idle connections by default and leaves the open ones
+// unbounded. An in-memory database keeps one connection that never closes:
+// each connection to it opens its own empty database.
 package dbx

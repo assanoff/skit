@@ -17,8 +17,7 @@ const maxParameters = 1000
 // BulkInsert inserts len(values)/len(columns) rows into table in batches, each
 // batch a single multi-row INSERT. conflictAction, if non-empty, is appended
 // verbatim (e.g. "ON CONFLICT DO NOTHING"). values are laid out row-major:
-// [r0c0, r0c1, r1c0, r1c1, ...]. d selects the engine (placeholder style);
-// dialect.Postgres{} and dialect.SQLite{} are both supported.
+// [r0c0, r0c1, r1c0, r1c1, ...].
 //
 // For upserts prefer BulkUpsert, which builds the conflict clause for you.
 //

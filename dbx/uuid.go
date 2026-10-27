@@ -7,11 +7,13 @@ import (
 	"uuid"
 )
 
-// UUID adapts the standard library uuid.UUID to a Postgres UUID column. The
-// stdlib type is a bare [16]byte without sql.Scanner / driver.Valuer, and
-// database/sql cannot scan into an array, so a uuid.UUID db-model field fails
-// StructScan. A UUID field scans the driver's text or 16-byte form and binds as
-// the canonical string, so the store keeps one row struct:
+// UUID is a uuid.UUID that binds on any driver. database/sql scans and binds
+// the standard uuid.UUID itself, and pgx and modernc.org/sqlite take it as
+// is; a driver that converts arguments on its own, such as
+// go-sql-driver/mysql, rejects it. UUID binds as the canonical string through
+// driver.Valuer (a CHAR(36) column on MySQL) and scans the driver's text or
+// 16-byte form, so a store that must run on such a driver keeps one row
+// struct:
 //
 //	type dbAdvert struct {
 //	    ID      dbx.UUID              `db:"id"`
