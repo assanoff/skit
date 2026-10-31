@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/assanoff/skit/dbx"
 )
 
@@ -17,12 +15,12 @@ import (
 // holder crashes, Postgres drops the connection and releases the lock
 // automatically, so a lock can never leak — this is why PG ignores ttl.
 type PG struct {
-	db  *sqlx.DB
+	db  *dbx.DB
 	log *slog.Logger
 }
 
 // NewPG builds a Postgres advisory-lock Locker over db. log may be nil.
-func NewPG(db *sqlx.DB, log *slog.Logger) *PG {
+func NewPG(db *dbx.DB, log *slog.Logger) *PG {
 	if log == nil {
 		log = slog.Default()
 	}

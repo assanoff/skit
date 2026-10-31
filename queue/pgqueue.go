@@ -7,8 +7,6 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/worker"
 )
@@ -24,7 +22,7 @@ import (
 // to exactly one consumer at a time.
 type PG struct {
 	log          *slog.Logger
-	db           *sqlx.DB
+	db           *dbx.DB
 	leaseTimeout time.Duration
 	retryDelay   time.Duration
 }
@@ -53,7 +51,7 @@ type Options struct {
 
 // NewPG builds a Postgres queue. It does not create the table; run a migration
 // with Schema() or call EnsureSchema (handy in tests).
-func NewPG(log *slog.Logger, db *sqlx.DB, opts Options) *PG {
+func NewPG(log *slog.Logger, db *dbx.DB, opts Options) *PG {
 	lease := opts.LeaseTimeout
 	if lease <= 0 {
 		lease = 5 * time.Minute

@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/assanoff/skit/dbx"
 )
 
@@ -18,7 +16,7 @@ import (
 // pub.Publish(ctx, SomeEvent{...}) with a plain typed value. The tx handle is
 // here so an application can bind its own store to the transaction (e.g.
 // store.WithTx(tx)); domain methods themselves take the bound store, not tx.
-type PublishFunc func(tx *sqlx.Tx, pub Publisher) error
+type PublishFunc func(tx *dbx.Tx, pub Publisher) error
 
 // WithinTran runs fn inside one SQL transaction with a tx-bound Publisher.
 // Events published through pub are inserted in the SAME transaction, so domain
@@ -30,8 +28,8 @@ type PublishFunc func(tx *sqlx.Tx, pub Publisher) error
 // reg resolves each published value's route (topic/key/content type). This is a
 // thin wrapper over dbx.WithinTran; the domain never threads tx through its
 // event code.
-func WithinTran(ctx context.Context, log *slog.Logger, db *sqlx.DB, store Store, reg *Registry, fn PublishFunc) error {
-	return dbx.WithinTran(ctx, log, db, func(tx *sqlx.Tx) error {
+func WithinTran(ctx context.Context, log *slog.Logger, db *dbx.DB, store Store, reg *Registry, fn PublishFunc) error {
+	return dbx.WithinTran(ctx, log, db, func(tx *dbx.Tx) error {
 		pub := Bind(tx, store, reg)
 		return fn(tx, pub)
 	})

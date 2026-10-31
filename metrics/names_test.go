@@ -17,7 +17,7 @@ import (
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/cron"
-	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/dbx/pg"
 	"github.com/assanoff/skit/grpcserver"
 	"github.com/assanoff/skit/httpclient"
 	"github.com/assanoff/skit/metrics"
@@ -39,9 +39,9 @@ func presets(t *testing.T) *metrics.Metrics {
 	if _, err := httpclient.New(httpclient.Config{Name: "billing", Metrics: m}); err != nil {
 		t.Fatalf("httpclient: %v", err)
 	}
-	db, err := dbx.Open(dbx.Config{Host: "db", Name: "orders", Metrics: m}) // no connection yet
+	db, err := pg.Open(pg.Config{Host: "db", Name: "orders", Metrics: m}) // no connection yet
 	if err != nil {
-		t.Fatalf("dbx: %v", err)
+		t.Fatalf("pg: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	outbox.NewRelay(log, nil, nil, outbox.RelayConfig{Metrics: m})

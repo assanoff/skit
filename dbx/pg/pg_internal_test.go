@@ -1,4 +1,4 @@
-package dbx
+package pg
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/assanoff/skit/dbx"
 )
 
 // TestStatusCheckSurfacesRealError verifies StatusCheck does not mask the real
@@ -25,7 +27,7 @@ func TestStatusCheckSurfacesRealError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	err = StatusCheck(ctx, db)
+	err = dbx.StatusCheck(ctx, db)
 	if err == nil {
 		t.Fatal("expected an error against a refused port")
 	}

@@ -33,7 +33,7 @@ diff (see [RELEASING.md](RELEASING.md)).
   `exported`).
 - **Tests use [`matryer/is`](https://github.com/matryer/is)** (not testify).
   Integration tests use the `dbtest` helper / testcontainers.
-- **Pass dependencies explicitly** — thread `*sqlx.DB`, transactions, loggers,
+- **Pass dependencies explicitly** — thread `*dbx.DB`, transactions, loggers,
   and other dependencies as function arguments; never smuggle them through
   `context.Context`.
 - **Keep the SDK self-contained** — no references to private or upstream source

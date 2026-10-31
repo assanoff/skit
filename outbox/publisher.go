@@ -5,8 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jmoiron/sqlx"
-
+	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/otel"
 )
 
@@ -40,7 +39,7 @@ type txPublisher struct {
 // Usually you don't call Bind directly — WithinTran builds a bound Publisher
 // and passes it to your closure. Bind is exposed for callers that manage the
 // transaction themselves.
-func Bind(tx sqlx.ExtContext, store Store, reg *Registry) Publisher {
+func Bind(tx dbx.Querier, store Store, reg *Registry) Publisher {
 	return &txPublisher{store: store.WithTx(tx), reg: reg}
 }
 

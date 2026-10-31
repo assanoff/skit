@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // AdvisoryKey derives a stable Postgres advisory-lock key from name using
@@ -32,12 +30,12 @@ func AdvisoryKey(name string) int64 {
 // (outbox, queue, auditlog, translation, ...) at startup, without hand-writing a
 // migration for them. lockKey must be unique per schema across the database;
 // derive it with AdvisoryKey. ddl runs as written, without :name parsing.
-func EnsureSchema(ctx context.Context, log *slog.Logger, db *sqlx.DB, lockKey int64, ddl string) error {
-	return WithinTran(ctx, log, db, func(tx *sqlx.Tx) error {
+func EnsureSchema(ctx context.Context, log *slog.Logger, db *DB, lockKey int64, ddl string) error {
+	return WithinTran(ctx, log, db, func(tx *Tx) error {
 		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
 			return fmt.Errorf("dbx: acquire schema advisory lock %d: %w", lockKey, err)
 		}
 		_, err := tx.ExecContext(ctx, ddl)
-		return translateError(err)
+		return tx.classify(err)
 	})
 }

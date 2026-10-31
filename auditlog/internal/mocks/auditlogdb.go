@@ -5,9 +5,10 @@ package mocks
 
 import (
 	"context"
-	"github.com/assanoff/skit/auditlog"
-	"github.com/jmoiron/sqlx"
 	"sync"
+
+	"github.com/assanoff/skit/auditlog"
+	"github.com/assanoff/skit/dbx"
 )
 
 // Ensure, that StoreMock does implement auditlog.Store.
@@ -41,7 +42,7 @@ var _ auditlog.Store = &StoreMock{}
 //			VersionsFunc: func(ctx context.Context, modelType string, modelID string) ([]int, error) {
 //				panic("mock out the Versions method")
 //			},
-//			WithTxFunc: func(tx sqlx.ExtContext) auditlog.Store {
+//			WithTxFunc: func(tx dbx.Querier) auditlog.Store {
 //				panic("mock out the WithTx method")
 //			},
 //		}
@@ -73,7 +74,7 @@ type StoreMock struct {
 	VersionsFunc func(ctx context.Context, modelType string, modelID string) ([]int, error)
 
 	// WithTxFunc mocks the WithTx method.
-	WithTxFunc func(tx sqlx.ExtContext) auditlog.Store
+	WithTxFunc func(tx dbx.Querier) auditlog.Store
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -145,7 +146,7 @@ type StoreMock struct {
 		// WithTx holds details about calls to the WithTx method.
 		WithTx []struct {
 			// Tx is the tx argument value.
-			Tx sqlx.ExtContext
+			Tx dbx.Querier
 		}
 	}
 	lockDeleteVersions        sync.RWMutex
@@ -443,12 +444,12 @@ func (mock *StoreMock) VersionsCalls() []struct {
 }
 
 // WithTx calls WithTxFunc.
-func (mock *StoreMock) WithTx(tx sqlx.ExtContext) auditlog.Store {
+func (mock *StoreMock) WithTx(tx dbx.Querier) auditlog.Store {
 	if mock.WithTxFunc == nil {
 		panic("StoreMock.WithTxFunc: method is nil but Store.WithTx was just called")
 	}
 	callInfo := struct {
-		Tx sqlx.ExtContext
+		Tx dbx.Querier
 	}{
 		Tx: tx,
 	}
@@ -463,10 +464,10 @@ func (mock *StoreMock) WithTx(tx sqlx.ExtContext) auditlog.Store {
 //
 //	len(mockedStore.WithTxCalls())
 func (mock *StoreMock) WithTxCalls() []struct {
-	Tx sqlx.ExtContext
+	Tx dbx.Querier
 } {
 	var calls []struct {
-		Tx sqlx.ExtContext
+		Tx dbx.Querier
 	}
 	mock.lockWithTx.RLock()
 	calls = mock.calls.WithTx

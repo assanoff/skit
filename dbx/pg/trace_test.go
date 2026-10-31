@@ -1,4 +1,4 @@
-package dbx
+package pg
 
 import (
 	"context"

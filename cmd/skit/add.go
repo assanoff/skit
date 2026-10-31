@@ -985,7 +985,7 @@ Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic)
 
 4. Publish transactionally from your core (atomic with the domain write):
 
-   outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
+   outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
        // ... domain writes on tx ...
        return pub.Publish(ctx, %[1]s.%[3]s{ID: id})
    })
@@ -1007,7 +1007,7 @@ Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic)
 
 3. Publish transactionally from your core (atomic with the domain write):
 
-   outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
+   outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
        // ... domain writes on tx ...
        return pub.Publish(ctx, %[1]s.%[3]s{ID: id})
    })

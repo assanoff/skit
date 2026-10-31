@@ -28,7 +28,7 @@ HTTP middleware / gRPC interceptor.
 ## Setup
 
 ```go
-store := auditdb.NewStore(log, db)      // db is *sqlx.DB
+store := auditpg.NewStore(log, db)      // db is *dbx.DB
 core  := auditlog.NewCore(log, store)
 
 // Tests / simple boot: EnsureSchema runs the DDL under a transaction-level
@@ -54,7 +54,7 @@ All paths converge on `Core.Create`. Pick the entry point per call site:
 
 ```go
 // Direct, atomic with the business change:
-err := dbx.WithinTran(ctx, log, db, func(tx *sqlx.Tx) error {
+err := dbx.WithinTran(ctx, log, db, func(tx *dbx.Tx) error {
     if err := widgetStore.WithTx(tx).Update(ctx, w); err != nil { return err }
     _, err := auditlog.NewCore(log, store.WithTx(tx)).Create(ctx, auditlog.NewAuditLog{
         ModelType: "widget", ModelID: w.ID, CreatedBy: actor(ctx), Payload: w,

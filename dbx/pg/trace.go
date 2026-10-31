@@ -1,4 +1,4 @@
-package dbx
+package pg
 
 import (
 	"cmp"
@@ -16,7 +16,7 @@ import (
 )
 
 // scope names the tracer of this package.
-const scope = "github.com/assanoff/skit/dbx"
+const scope = "github.com/assanoff/skit/dbx/pg"
 
 // maxQueryText bounds db.query.text: a bulk insert of many rows must not turn
 // into an attribute the size of the statement.

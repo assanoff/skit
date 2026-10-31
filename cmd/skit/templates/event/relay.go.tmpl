@@ -12,10 +12,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/outbox"
 	"github.com/assanoff/skit/worker"
 )
@@ -23,7 +23,7 @@ import (
 // NewStore builds the outbox Store and provisions its table if absent (advisory
 // -lock guarded, so replicas booting together do not race). Call once at
 // startup.
-func NewStore(ctx context.Context, log *slog.Logger, db *sqlx.DB) (*outbox.PG, error) {
+func NewStore(ctx context.Context, log *slog.Logger, db *dbx.DB) (*outbox.PG, error) {
 	s := outbox.NewPG(log, db, outbox.Options{})
 	if err := s.EnsureSchema(ctx); err != nil {
 		return nil, err

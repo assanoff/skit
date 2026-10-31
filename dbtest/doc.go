@@ -23,7 +23,7 @@
 //	    ctx := context.Background()
 //	    pg := dbtest.NewPostgres(ctx, t, dbtest.Config{Migrations: migrationsFS})
 //
-//	    repo := widget.NewStore(pg.DB) // pg.DB is an open, migrated *sqlx.DB
+//	    repo := widget.NewStore(pg.DB) // pg.DB is an open, migrated *dbx.DB
 //	    // ... exercise repo against a real Postgres ...
 //	}
 //
@@ -50,7 +50,7 @@
 //	    os.Exit(code)
 //	}
 //
-// The returned Postgres also exposes Config, an dbx.Config pointing at the
+// The returned Postgres also exposes Config, a pg.Config pointing at the
 // container, for handing to application code that opens its own pool.
 //
 // # API

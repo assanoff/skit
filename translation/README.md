@@ -82,7 +82,7 @@ back into a required one.
 ## 2. Build the translator
 
 ```go
-store := translationpg.NewStore(log, db) // db is *sqlx.DB
+store := translationpg.NewStore(log, db) // db is *dbx.DB
 tr, err := translation.New(translation.Config{
     Store:           store,
     DefaultLanguage: translation.LanguageRu,

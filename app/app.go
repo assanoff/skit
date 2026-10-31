@@ -12,7 +12,7 @@ import (
 //
 //	func initStore(d *Deps) (dim.CleanupFunc, error) {
 //		var cleanup dim.CleanupFunc
-//		d.DB, cleanup = dim.NewResource("DB", postgres.Resource(dbx.Config{...}))
+//		d.DB, cleanup = dim.NewResource("DB", postgres.Resource(pg.Config{...}))
 //		return cleanup, nil // closes the pool if it was opened
 //	}
 //

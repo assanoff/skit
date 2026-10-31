@@ -14,8 +14,6 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 	"github.com/assanoff/skit/dbx"
@@ -26,11 +24,11 @@ import (
 // Store implements {{.Pkg}}core.Store against Postgres.
 type Store struct {
 	log *slog.Logger
-	db  sqlx.ExtContext
+	db  dbx.Querier
 }
 
-// NewStore builds a Store. Pass a *sqlx.DB for pool-backed use.
-func NewStore(log *slog.Logger, db *sqlx.DB) *Store {
+// NewStore builds a Store over a pool.
+func NewStore(log *slog.Logger, db *dbx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 

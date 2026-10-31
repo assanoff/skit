@@ -5,15 +5,16 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
+	"log/slog"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 	"github.com/matryer/is"
 )
 
-// execStub is a sqlx.ExtContext whose ExecContext records the query and
-// returns err; the query methods are never reached by the exec helpers.
+// execStub is a Querier whose ExecContext records the query and returns err;
+// the query methods are never reached by the exec helpers.
 type execStub struct {
 	sqlx.ExtContext
 
@@ -30,6 +31,27 @@ func (s execStub) ExecContext(_ context.Context, q string, _ ...any) (sql.Result
 	return driver.RowsAffected(0), s.err
 }
 
+func (execStub) within(context.Context, *slog.Logger, func(tx *Tx) error) error {
+	return errors.New("not implemented")
+}
+
+func (execStub) classify(err error) error {
+	return classify(dupClassifier{}, err)
+}
+
+// errTaken stands for a driver error of a unique key that dupClassifier
+// marks a duplicate.
+var errTaken = errors.New("unique violation")
+
+type dupClassifier struct{}
+
+func (dupClassifier) Classify(err error) error {
+	if errors.Is(err, errTaken) {
+		return fmt.Errorf("%w: %w", ErrDBDuplicatedEntry, err)
+	}
+	return err
+}
+
 func TestExecRunsQueryAsWritten(t *testing.T) {
 	is := is.New(t)
 	var got string
@@ -39,14 +61,12 @@ func TestExecRunsQueryAsWritten(t *testing.T) {
 	is.Equal(got, q) // no :name parsing: :: stays a cast, :b and :note text
 }
 
-func TestExecDuplicateKeepsDriverError(t *testing.T) {
+func TestExecClassifiesDriverError(t *testing.T) {
 	is := is.New(t)
 	var got string
-	pgErr := &pgconn.PgError{Code: uniqueViolation, ConstraintName: "widgets_name_key"}
+	driverErr := fmt.Errorf("widgets_name_key: %w", errTaken)
 
-	err := NamedExec(t.Context(), execStub{query: &got, err: pgErr}, "INSERT INTO t VALUES (1)", struct{}{})
+	err := NamedExec(t.Context(), execStub{query: &got, err: driverErr}, "INSERT INTO t VALUES (1)", struct{}{})
 	is.True(errors.Is(err, ErrDBDuplicatedEntry))
-	wrapped, ok := errors.AsType[*pgconn.PgError](err)
-	is.True(ok) // wrapped, not replaced
-	is.Equal(wrapped.ConstraintName, "widgets_name_key")
+	is.True(errors.Is(err, driverErr)) // wrapped, not replaced
 }

@@ -68,7 +68,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `chx` | Optional ClickHouse helper (connect + goose migrations); pulls the ClickHouse driver only when imported |
 | `grpcgateway` | grpc-gateway REST↔gRPC transcoding as a `worker.Runnable`, sharing the app's server core |
 | `grpctest` | In-process gRPC test harness over `bufconn` running the real `grpcserver` interceptor chain |
-| `provider/postgres` | Ready `dim` factory of a Postgres pool: `dbx.Open`, a reachability check, close on shutdown |
+| `provider/postgres` | Ready `dim` factory of a Postgres pool: `pg.Open` of `dbx/pg`, a reachability check, close on shutdown |
 | `provider/redis` | Ready `dim` factory of a go-redis client: PING on open, close on shutdown |
 | `provider/sentry` | Ready `dim` factory of the Sentry SDK: init, flush on shutdown |
 | `provider/translator` | Ready `dim` factory of an `i18n.Translator` from the service's message files |
@@ -176,7 +176,7 @@ with a domain layer that knows nothing about SQL or the transport:
 - The domain emits a **plain typed value** through a tx-bound `outbox.Publisher`:
 
   ```go
-  err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
+  err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
       if err := repo.WithTx(tx).Create(ctx, w); err != nil { // domain write
           return err
       }

@@ -10,9 +10,9 @@ import (
 	"uuid"
 
 	"github.com/brianvoe/gofakeit/v7"
-	"github.com/jmoiron/sqlx"
 	"github.com/matryer/is"
 
+	"github.com/assanoff/skit/dbx"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 	"{{.Module}}/core/{{.Pkg}}/{{.Pkg}}db"
@@ -81,7 +81,7 @@ func Test_{{.Type}}(t *testing.T) {
 
 // insert{{.Type}}Seed writes a few {{.Plural}} through the store (gofakeit data) so
 // the read endpoints have something to return.
-func insert{{.Type}}Seed(ctx context.Context, t *testing.T, db *sqlx.DB) {{.Pkg}}Seed {
+func insert{{.Type}}Seed(ctx context.Context, t *testing.T, db *dbx.DB) {{.Pkg}}Seed {
 	t.Helper()
 	log := slog.New(slog.DiscardHandler)
 	store := {{.Pkg}}db.NewStore(log, db)

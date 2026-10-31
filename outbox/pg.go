@@ -8,8 +8,6 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/retry"
 )
@@ -22,8 +20,8 @@ import (
 // truth.
 //
 // All statements go through the dbx named-query helpers for consistent
-// tracing and error wrapping. The Store holds its handle as sqlx.ExtContext, so
-// the same type works against either a *sqlx.DB (pool-bound) or a *sqlx.Tx
+// tracing and error wrapping. The Store holds its handle as a dbx.Querier, so
+// the same type works against either a *dbx.DB (pool-bound) or a *dbx.Tx
 // (transaction-bound, via WithTx) — that is how Insert joins the caller's
 // domain transaction in WithinTran.
 //
@@ -31,7 +29,7 @@ import (
 // LeasePending and SweepExpiredLeases claim rows with FOR UPDATE SKIP LOCKED.
 type PG struct {
 	log     *slog.Logger
-	db      sqlx.ExtContext
+	db      dbx.Querier
 	backoff retry.Backoff
 }
 
@@ -49,7 +47,7 @@ type Options struct {
 
 // NewPG builds a Postgres outbox store. The table is provisioned by
 // EnsureSchema (call it at startup), not here.
-func NewPG(log *slog.Logger, db *sqlx.DB, opts Options) *PG {
+func NewPG(log *slog.Logger, db *dbx.DB, opts Options) *PG {
 	bo := opts.Backoff
 	if bo.Base == 0 {
 		bo.Base = 2 * time.Second
@@ -64,7 +62,7 @@ func NewPG(log *slog.Logger, db *sqlx.DB, opts Options) *PG {
 }
 
 // WithTx returns a sibling store whose queries run on tx.
-func (s *PG) WithTx(tx sqlx.ExtContext) Store {
+func (s *PG) WithTx(tx dbx.Querier) Store {
 	c := *s
 	c.db = tx
 	return &c
@@ -80,7 +78,7 @@ var schemaLockKey = dbx.AdvisoryKey("skit.outbox.schema")
 // racing on CREATE TABLE. A tx-bound store (via WithTx) just runs the DDL — the
 // caller owns the transaction and any locking.
 func (s *PG) EnsureSchema(ctx context.Context) error {
-	db, ok := s.db.(*sqlx.DB)
+	db, ok := s.db.(*dbx.DB)
 	if !ok {
 		return dbx.Exec(ctx, s.db, Schema())
 	}

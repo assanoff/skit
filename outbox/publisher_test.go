@@ -8,15 +8,16 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/jmoiron/sqlx"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/assanoff/skit/dbx"
 )
 
 // fakeStore is a minimal Store that records inserted events; only WithTx and
 // Insert are exercised by the producer-side tests.
 type fakeStore struct{ inserted []Event }
 
-func (s *fakeStore) WithTx(sqlx.ExtContext) Store { return s }
+func (s *fakeStore) WithTx(dbx.Querier) Store { return s }
 func (s *fakeStore) Insert(_ context.Context, events ...Event) error {
 	s.inserted = append(s.inserted, events...)
 	return nil

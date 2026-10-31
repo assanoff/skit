@@ -2,7 +2,6 @@ package dbx_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 
@@ -14,8 +13,8 @@ import (
 )
 
 // TestQueryPostgres runs the query helpers against Postgres: an error after
-// the first row, queries as written, no rows, named arguments, a duplicate key
-// and the pool defaults.
+// the first row, queries as written, no rows, named arguments and a duplicate
+// key.
 func TestQueryPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test requires docker")
@@ -121,25 +120,5 @@ func TestQueryPostgres(t *testing.T) {
 		pgErr, ok := errors.AsType[*pgconn.PgError](err)
 		is.True(ok) // constraint and detail survive the translation
 		is.Equal(pgErr.ConstraintName, "dups_pkey")
-	})
-
-	t.Run("PoolDefaults", func(t *testing.T) {
-		is := is.New(t)
-		cfg := pg.Config
-		cfg.MaxIdleConns, cfg.MaxOpenConns = 0, 0
-		pool, err := dbx.Open(cfg)
-		is.NoErr(err)
-		defer pool.Close()
-
-		conns := make([]*sql.Conn, 6)
-		for i := range conns {
-			conns[i], err = pool.Conn(ctx)
-			is.NoErr(err)
-		}
-		for _, c := range conns {
-			is.NoErr(c.Close())
-		}
-		is.Equal(pool.Stats().MaxOpenConnections, 20)
-		is.Equal(pool.Stats().Idle, 5) // zero MaxIdleConns kept none before
 	})
 }

@@ -1,6 +1,6 @@
 // Package page provides a small, validated value for query paging, shared by
 // the transport (parsing ?page=/?rows= or gRPC fields) and the store (binding
-// :offset / :rows_per_page, e.g. with dbx/dialect.Paginate).
+// :offset / :rows_per_page).
 //
 // # Usage
 //

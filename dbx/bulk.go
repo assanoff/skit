@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // maxParameters bounds how many bind parameters go into a single statement.
@@ -19,9 +17,9 @@ const maxParameters = 1000
 // [r0c0, r0c1, r1c0, r1c1, ...].
 //
 // The query is built with "?" markers and rebound to the driver's bind style via
-// db.Rebind (sqlx), so it is engine-portable: Postgres gets "$1,$2,…", SQLite/
+// q.Rebind (sqlx), so it is engine-portable: Postgres gets "$1,$2,…", SQLite/
 // MySQL keep "?". No per-dialect placeholder handling is needed.
-func BulkInsert(ctx context.Context, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
+func BulkInsert(ctx context.Context, q Querier, table string, columns []string, values []any, conflictAction string) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("dbx: bulk insert into %s: no columns", table)
 	}
@@ -41,16 +39,16 @@ func BulkInsert(ctx context.Context, db sqlx.ExtContext, table string, columns [
 	for left := 0; left < len(values); left += stride {
 		right := min(left+stride, len(values))
 		batch := values[left:right]
-		query := db.Rebind(buildInsertQuery(table, columns, len(batch), conflictAction))
-		if _, err := db.ExecContext(ctx, query, batch...); err != nil {
-			return fmt.Errorf("dbx: bulk insert into %s [%d:%d]: %w", table, left, right, translateError(err))
+		query := q.Rebind(buildInsertQuery(table, columns, len(batch), conflictAction))
+		if _, err := q.ExecContext(ctx, query, batch...); err != nil {
+			return fmt.Errorf("dbx: bulk insert into %s [%d:%d]: %w", table, left, right, q.classify(err))
 		}
 	}
 	return nil
 }
 
 // buildInsertQuery renders a multi-row INSERT with "?" placeholders; callers
-// rebind it to the driver's bind style (db.Rebind).
+// rebind it to the driver's bind style (q.Rebind).
 func buildInsertQuery(table string, columns []string, nValues int, conflictAction string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "INSERT INTO %s (%s) VALUES ", table, strings.Join(columns, ", "))

@@ -269,6 +269,7 @@ import (
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/dbx/pg"
 	"github.com/assanoff/skit/metrics"
 	"github.com/assanoff/skit/outbox"
 )
@@ -286,7 +287,7 @@ func New(ctx context.Context, log *slog.Logger, cfg Config) (*Deps, error) {
 	m := metrics.New()
 
 	cfg.DB.Metrics = m // пул БД: go_sql_*{db_name,host}
-	db, err := dbx.Open(cfg.DB)
+	db, err := pg.Open(cfg.DB)
 	if err != nil {
 		return nil, err
 	}

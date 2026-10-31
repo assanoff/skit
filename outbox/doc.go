@@ -117,7 +117,7 @@
 // bind its own store: store.WithTx(tx)) and a tx-bound Publisher:
 //
 //	err := outbox.WithinTran(ctx, log, db, store, reg,
-//	    func(tx *sqlx.Tx, pub outbox.Publisher) error {
+//	    func(tx *dbx.Tx, pub outbox.Publisher) error {
 //	        if err := repo.WithTx(tx).Create(ctx, w); err != nil { // domain write
 //	            return err
 //	        }

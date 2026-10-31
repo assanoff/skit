@@ -10,8 +10,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/translation"
 )
@@ -19,11 +17,11 @@ import (
 // Store implements translation.Store against Postgres.
 type Store struct {
 	log *slog.Logger
-	db  *sqlx.DB
+	db  *dbx.DB
 }
 
 // NewStore creates a Postgres-backed Store.
-func NewStore(log *slog.Logger, db *sqlx.DB) *Store {
+func NewStore(log *slog.Logger, db *dbx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 
@@ -86,7 +84,7 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 		WHERE model_name = :model_name AND column_name = :column_name
 		  AND key_id = :key_id AND language_id = :language_id`
 
-	return dbx.WithinTran(ctx, s.log, s.db, func(tx *sqlx.Tx) error {
+	return dbx.WithinTran(ctx, s.log, s.db, func(tx *dbx.Tx) error {
 		for column, value := range data.Columns {
 			row := translationRow{
 				ModelName:        data.ModelName,

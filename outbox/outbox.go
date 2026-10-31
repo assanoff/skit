@@ -8,7 +8,7 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/assanoff/skit/dbx"
 )
 
 // Event statuses stored in the status column.
@@ -105,7 +105,7 @@ func NewEvent(eventType, topic, contentType string, payload []byte, headers map[
 type Store interface {
 	// WithTx returns a sibling Store whose queries run on tx. Used by WithinTran
 	// to insert events in the caller's domain transaction.
-	WithTx(tx sqlx.ExtContext) Store
+	WithTx(tx dbx.Querier) Store
 
 	// Insert writes pending events. Bound to a transaction when the Store was
 	// derived via WithTx.

@@ -1,31 +1,20 @@
 // Package dbx provides SQL helpers on top of jmoiron/sqlx and database/sql:
-// connection setup (Postgres through the pgx driver, SQLite through a driver
-// the caller registers), query and exec helpers, transactions, and bulk
-// insert. The helpers run on any driver; the error translation and the
-// transaction retry know Postgres codes only.
+// a pool and a transaction behind one Querier, query and exec helpers,
+// transactions that open on a pool and join on a transaction, and bulk
+// insert. It imports no driver: the presets dbx/pg (Postgres through pgx) and
+// dbx/sqlite open a pool with a Classifier of their engine's errors, and
+// New binds a pool of any other driver.
 //
-// Open builds a *sqlx.DB from a Config; StatusCheck waits for it to become
-// reachable. The query helpers return their result and translate well-known
-// Postgres errors into the package sentinels (ErrDBNotFound,
-// ErrDBDuplicatedEntry, ErrUndefinedTable), so callers match them with
-// errors.Is instead of inspecting driver codes. The sentinel wraps the driver
-// error: errors.As still reaches the *pgconn.PgError with its constraint and
-// detail. They log nothing: the caller handles the error once, and the query
-// text is on the span (see Tracing). WithinTran runs a function inside a
-// transaction, committing on success and rolling back on error or panic, and
-// transparently re-runs it when Postgres aborts it as a deadlock victim or on a
-// serialization failure. BulkInsert batches large multi-row writes within
-// Postgres's parameter limit.
+// The query helpers return their result and classify a failure into the
+// package sentinels (ErrDBNotFound, ErrDBDuplicatedEntry, ErrDBRetryable), so
+// callers match them with errors.Is instead of inspecting driver codes. The
+// sentinel wraps the driver error: errors.As still reaches it with its details.
+// They log nothing: the caller handles the error once, and a preset records the
+// query on a span.
 //
 // # Usage
 //
-//	cfg := dbx.Config{
-//	    User: "postgres", Password: "postgres",
-//	    Host: "localhost:5432", Name: "app",
-//	    Schema: "public", MaxIdleConns: 2, MaxOpenConns: 5,
-//	    DisableTLS: true,
-//	}
-//	db, err := dbx.Open(cfg)
+//	db, err := pg.Open(pg.Config{Host: "localhost:5432", Name: "app"})
 //	if err != nil {
 //	    return err
 //	}
@@ -56,7 +45,7 @@
 //	)
 //
 //	// Write inside a transaction.
-//	err = dbx.WithinTran(ctx, log, db, func(tx *sqlx.Tx) error {
+//	err = dbx.WithinTran(ctx, log, db, func(tx *dbx.Tx) error {
 //	    const ins = `INSERT INTO widgets (id, name) VALUES (:id, :name)`
 //	    return dbx.NamedExec(ctx, tx, ins, w)
 //	})
@@ -64,25 +53,26 @@
 //	    // unique violation
 //	}
 //
-// # Metrics
+// # Pool and transaction
 //
-// With Config.Metrics set, Open registers the pool metrics there: go_sql_*
-// (open, in-use and idle connections, waits, closes) labeled db_name with
-// Config.Name and host with Config.Host, so a replica on another host is its
-// own series. They read the pool stats on each scrape, without a query. A
-// second pool of the same Host and Name on one registry is an error of Open.
+// A *DB is a pool, a *Tx a transaction; both are a Querier, which every helper
+// takes. Only this package implements Querier. A *Tx has no Begin, Commit or
+// Rollback: what is built over it — a store, a Core over that store — can only
+// join it. So a store holds a Querier and has one constructor for both:
 //
-// # Tracing
+//	widgetdb.NewStore(log, db) // WithinTran opens a transaction
+//	widgetdb.NewStore(log, tx) // WithinTran joins tx
 //
-// Open records every query of the pool as a CLIENT span on
-// Config.TracerProvider, named after the database (Config.Name). BEGIN and
-// COMMIT are queries too, so a transaction shows as its own spans; StatusCheck
-// pings past the tracer. The span carries db.system.name, db.namespace,
-// server.address, server.port and db.query.text: the query as written, cut to
-// 2 KiB. The arguments are never recorded — pass values as arguments, never in
-// the query text. A Postgres error sets db.response.status_code and error.type
-// to its SQLSTATE; no rows is not an error. A query from a suppressed context
-// (otel.Suppress, the ticks of worker.Loop) records nothing.
+// Nothing goes through ctx: whether WithinTran opens or joins is decided by the
+// type of the value passed in.
+//
+// # Errors
+//
+// A Classifier maps the errors of one engine onto the sentinels; the presets
+// ship one each, and a pool of another driver passes its own to New. Without a
+// Classifier only ErrDBNotFound is recognized. ErrDBRetryable marks an error
+// after which the whole transaction may run again; on Postgres a deadlock
+// victim (40P01) and a serialization failure (40001).
 //
 // # Querying
 //
@@ -116,6 +106,33 @@
 // length. ANY works on Postgres only; NamedQueryListUsingIn expands IN (:ids)
 // on any database.
 //
+// # Transactions
+//
+// WithinTran on a *DB opens a transaction: it commits when the function
+// returns nil and rolls back on an error or a panic. An error the Classifier
+// marks ErrDBRetryable rolls the transaction back in full, so WithinTran re-runs
+// the function in a fresh transaction with a short exponential backoff (3
+// attempts) and only then returns the error. The function must therefore be
+// safe to run more than once — keep side effects inside the transaction and do
+// not mutate captured state between runs.
+//
+// WithinTran on a *Tx joins it: the function runs in that transaction, and the
+// WithinTran that opened it commits, rolls back or retries. A joined call is
+// not a savepoint: if it wrote and failed, return its error, or half of its
+// work commits.
+//
+// Tran is a transaction over a set the domain declares — repositories,
+// publishers, the Cores of other domains — built by a function from the
+// transaction on every attempt:
+//
+//	tran := dbx.NewTran(log, db, func(tx *dbx.Tx) widget.Unit {
+//	    return widget.Unit{Repo: widgetdb.NewStore(log, tx), Users: users(tx)}
+//	})
+//	err := tran.WithinTran(ctx, func(u widget.Unit) error { ... })
+//
+// It satisfies the domain's interface with the same WithinTran method without
+// an adapter. Over a *Tx it joins, so Trans nest.
+//
 // # UUID columns
 //
 // database/sql scans and binds the standard uuid.UUID, and pgx and
@@ -134,33 +151,11 @@
 // string form, so on Postgres-only paths prefer uuid.UUID: a []UUID in ANY
 // encodes about ten times slower.
 //
-// # Dialects
-//
-// Subpackage dbx/dialect captures the few SQL fragments that differ between
-// engines (currently pagination) behind a small Dialect interface, with Postgres
-// and SQLite implementations, so a store can compose portable SQL.
-//
 // # Bulk writes
 //
 // BulkInsert writes len(values)/len(columns) rows, splitting into batches that
 // stay under Postgres's bind-parameter cap, with values laid out row-major. An
 // optional conflictAction (e.g. "ON CONFLICT DO NOTHING") is appended verbatim.
-//
-// # Transactions
-//
-// WithinTran runs a function in a transaction on a pool: it commits when the
-// function returns nil and rolls back on an error or a panic.
-//
-// When two transactions lock the same rows in different orders Postgres aborts
-// one of them with SQLSTATE 40P01 ("deadlock detected"); a serializable or
-// repeatable read transaction that conflicts with another fails with 40001
-// ("could not serialize access"). Either is rolled back in full. WithinTran
-// treats both as transient: it re-runs the function in a fresh transaction
-// with a short exponential backoff (3 attempts) and only then returns the
-// error. The function must therefore be safe to run more than once — keep side
-// effects inside the transaction and do not mutate captured state between
-// runs. IsDeadlock exposes the deadlock check for statements that run outside
-// WithinTran.
 //
 // # Schema provisioning
 //
@@ -170,16 +165,4 @@
 // (outbox, queue, auditlog, translation) create their own tables without a
 // hand-written migration. AdvisoryKey derives a stable, collision-resistant lock
 // key from a namespaced name (e.g. "skit.outbox.schema").
-//
-// # Config
-//
-// Config fields: User, Password, Host, Name, Schema (sets search_path),
-// MaxIdleConns and MaxOpenConns (zero keeps 5 idle and 20 open connections),
-// DisableTLS (DisableTLS=true selects sslmode=disable, otherwise
-// sslmode=require), Metrics (the registry of the pool metrics; nil disables
-// them). Open always sets timezone=utc.
-//
-// OpenSQLite keeps 2 idle connections by default and leaves the open ones
-// unbounded. An in-memory database keeps one connection that never closes:
-// each connection to it opens its own empty database.
 package dbx

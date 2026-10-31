@@ -9,8 +9,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/assanoff/skit/dbx"
 )
 
@@ -65,7 +63,7 @@ func WithAutoCompact(every int, opts CompactOptions) Option {
 // sibling bound to a transaction, so callers that need the audit write to commit
 // atomically with their business change can run Create on a tx-bound Core.
 type Store interface {
-	WithTx(tx sqlx.ExtContext) Store
+	WithTx(tx dbx.Querier) Store
 	Save(ctx context.Context, al AuditLog) error
 	QueryLastByModelID(ctx context.Context, modelType, modelID string) (AuditLog, error)
 	QueryHistoryByModelID(ctx context.Context, modelType, modelID string) ([]AuditLog, error)

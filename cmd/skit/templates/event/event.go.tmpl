@@ -34,7 +34,7 @@ type {{.Type}} struct {
 //
 // Publish it transactionally from your core:
 //
-//	err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
+//	err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
 //	    // ... domain writes on tx ...
 //	    return pub.Publish(ctx, {{.Pkg}}.{{.Type}}{ID: id, OccurredAt: now})
 //	})

@@ -1,17 +1,18 @@
-package dbx
+package pg
 
 import (
 	"testing"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/matryer/is"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/assanoff/skit/dbx"
 )
 
 // openPool opens a pool of database name on host with metrics on reg; Open
 // does not connect, so no server is needed.
-func openPool(t *testing.T, reg prometheus.Registerer, host, name string) (*sqlx.DB, error) {
+func openPool(t *testing.T, reg prometheus.Registerer, host, name string) (*dbx.DB, error) {
 	t.Helper()
 	db, err := Open(Config{User: "u", Host: host, Name: name, DisableTLS: true, Metrics: reg})
 	if err == nil {

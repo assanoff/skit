@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/dbx/pg"
 	"github.com/assanoff/skit/migrate"
 )
 
@@ -48,10 +48,10 @@ func (c Config) withDefaults() Config {
 // Postgres is a running Postgres test container with an open connection.
 type Postgres struct {
 	// DB is an open, migrated connection pool to the container.
-	DB *sqlx.DB
-	// Config is an dbx.Config pointing at the container, suitable for handing
+	DB *dbx.DB
+	// Config is a pg.Config pointing at the container, suitable for handing
 	// to application code that opens its own pool.
-	Config dbx.Config
+	Config pg.Config
 
 	container *tcpostgres.PostgresContainer
 }
@@ -126,7 +126,7 @@ func (p *Postgres) connect(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("dbtest: mapped port: %w", err)
 	}
 
-	p.Config = dbx.Config{
+	p.Config = pg.Config{
 		User:         cfg.User,
 		Password:     cfg.Password,
 		Host:         host + ":" + port.Port(),
@@ -136,7 +136,7 @@ func (p *Postgres) connect(ctx context.Context, cfg Config) error {
 		MaxOpenConns: 5,
 		DisableTLS:   true,
 	}
-	db, err := dbx.Open(p.Config)
+	db, err := pg.Open(p.Config)
 	if err != nil {
 		return fmt.Errorf("dbtest: open db: %w", err)
 	}
@@ -152,8 +152,8 @@ func (p *Postgres) connect(ctx context.Context, cfg Config) error {
 }
 
 // migrateUp applies every migration in migrations to db.
-func migrateUp(ctx context.Context, db *sqlx.DB, migrations fs.FS) error {
-	m, err := migrate.New(db.DB, migrations)
+func migrateUp(ctx context.Context, db *dbx.DB, migrations fs.FS) error {
+	m, err := migrate.New(db.DB.DB, migrations)
 	if err != nil {
 		return fmt.Errorf("dbtest: build migrator: %w", err)
 	}

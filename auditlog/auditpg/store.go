@@ -19,11 +19,11 @@ import (
 // Store implements auditlog.Store against Postgres.
 type Store struct {
 	log *slog.Logger
-	db  sqlx.ExtContext
+	db  dbx.Querier
 }
 
-// NewStore builds a Store. Pass a *sqlx.DB for pool-backed use.
-func NewStore(log *slog.Logger, db *sqlx.DB) *Store {
+// NewStore builds a Store. Pass a *dbx.DB for pool-backed use.
+func NewStore(log *slog.Logger, db *dbx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 
@@ -32,7 +32,7 @@ var _ auditlog.Store = (*Store)(nil)
 
 // WithTx returns a sibling Store whose queries run on tx, so an audit write can
 // commit atomically with the caller's business change.
-func (s *Store) WithTx(tx sqlx.ExtContext) auditlog.Store {
+func (s *Store) WithTx(tx dbx.Querier) auditlog.Store {
 	return &Store{log: s.log, db: tx}
 }
 
@@ -46,7 +46,7 @@ var schemaLockKey = dbx.AdvisoryKey("skit.auditlog.schema")
 // boots serialize instead of racing on CREATE TABLE. A tx-bound store (via
 // WithTx) just runs the DDL — the caller owns the transaction and any locking.
 func (s *Store) EnsureSchema(ctx context.Context) error {
-	db, ok := s.db.(*sqlx.DB)
+	db, ok := s.db.(*dbx.DB)
 	if !ok {
 		return dbx.Exec(ctx, s.db, Schema())
 	}
