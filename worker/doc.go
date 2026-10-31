@@ -35,8 +35,14 @@
 // decided by IsTerminal). With FailFast the first retryable failure stops the
 // batch, and a Sink that is a Releaser returns the rest to the Source
 // untouched: a dependency that is down costs one failed item per tick, not a
-// batch. A Processor is not itself a Runnable: call Tick (or PacedTick) to get
-// a tick function and wrap it in a Loop.
+// batch. A canceled tick and BatchTimeout stop the batch before its next item
+// and release the rest the same way, so no item is handled past the lease of
+// its source. Marks and releases run without the cancellation of the tick,
+// each under its own timeout: an item handled at shutdown is still
+// acknowledged. A panic in the Handler is recovered per item and logged with
+// its stack; by default the item is retried, and OnPanic can decide otherwise.
+// A Processor is not itself a Runnable: call Tick (or PacedTick) to get a tick
+// function and wrap it in a Loop.
 //
 // # Usage
 //
@@ -109,8 +115,9 @@
 // when a tick panics.
 //
 // ProcessorConfig: Name (default "processor"), BatchSize (default 100),
-// HandleTimeout, IsTerminal (nil = all failures retryable), FailFast, Now
-// (default time.Now().UTC; override in tests).
+// HandleTimeout, BatchTimeout, IsTerminal (nil = all failures retryable),
+// FailFast, OnPanic (nil = a panicked item is retried), Now (default
+// time.Now().UTC; override in tests).
 //
 // Retry wraps a Handler using retry.Config (Backoff + IsTerminal); the backoff
 // policy itself now lives in the retry package.

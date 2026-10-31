@@ -29,9 +29,10 @@ type PG struct {
 
 // Compile-time checks: PG is a Queue and plugs into worker.Processor.
 var (
-	_ Queue               = (*PG)(nil)
-	_ worker.Source[Task] = (*PG)(nil)
-	_ worker.Sink[Task]   = (*PG)(nil)
+	_ Queue                 = (*PG)(nil)
+	_ worker.Source[Task]   = (*PG)(nil)
+	_ worker.Sink[Task]     = (*PG)(nil)
+	_ worker.Releaser[Task] = (*PG)(nil)
 )
 
 // Options configures a queue (PG and InMem share it).
@@ -101,11 +102,13 @@ ON CONFLICT (name) DO NOTHING`
 }
 
 // Claim atomically leases up to limit ready tasks (run_at <= now, not currently
-// leased or lease expired) under a fresh lease id, bumping their attempt count.
-// A single CTE + UPDATE … RETURNING does selection and lease assignment in one
-// round-trip; FOR UPDATE SKIP LOCKED lets consumers split the work. The lease
-// cutoff is computed in Go (now - leaseTimeout) and the lease id is generated
-// Go-side and shared by the whole batch (one per Claim).
+// leased or lease expired) under a fresh lease id, bumping their attempt count,
+// and returns them in run_at, id order. A single statement does selection and
+// lease assignment in one round-trip; FOR UPDATE SKIP LOCKED lets consumers
+// split the work, and the outer SELECT orders the batch, which UPDATE …
+// RETURNING alone returns in storage order. The lease cutoff is computed in Go
+// (now - leaseTimeout) and the lease id is generated Go-side and shared by the
+// whole batch (one per Claim).
 func (q *PG) Claim(ctx context.Context, now time.Time, limit int) ([]Task, error) {
 	const query = `
 WITH next AS (
@@ -116,13 +119,16 @@ WITH next AS (
     ORDER BY run_at, id
     LIMIT :limit
     FOR UPDATE SKIP LOCKED
+), leased AS (
+    UPDATE queue_tasks t
+    SET lease_id = :lease_id, leased_at = :now, attempts = attempts + 1
+    FROM next
+    WHERE t.id = next.id
+    RETURNING t.*
 )
-UPDATE queue_tasks t
-SET lease_id = :lease_id, leased_at = :now, attempts = attempts + 1
-FROM next
-WHERE t.id = next.id
-RETURNING t.id, t.name, t.kind, t.payload, t.created_at, t.run_at,
-          t.attempts, t.lease_id, t.last_error`
+SELECT id, name, kind, payload, created_at, run_at, attempts, lease_id, last_error
+FROM leased
+ORDER BY run_at, id`
 	args := struct {
 		Now         time.Time `db:"now"`
 		LeaseCutoff time.Time `db:"lease_cutoff"`
@@ -187,6 +193,33 @@ WHERE id = :id AND lease_id = :lease_id AND done_at IS NULL`
 	}
 	if n == 0 {
 		return ErrLeaseLost
+	}
+	return nil
+}
+
+// Release returns tasks of one Claim to the queue untouched: their lease is
+// cleared and the attempt Claim counted is taken back, so each keeps its place
+// and its attempt count. A task no longer under the lease of the first task
+// stays as it is. Release makes PG a worker.Releaser: a Processor releases the
+// rest of a batch it stops.
+func (q *PG) Release(ctx context.Context, tasks []Task) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	const query = `
+UPDATE queue_tasks SET lease_id = NULL, leased_at = NULL, attempts = attempts - 1
+WHERE id = ANY(:ids) AND lease_id = :lease_id`
+	ids := make([]int64, len(tasks))
+	for i := range tasks {
+		ids[i] = tasks[i].ID
+	}
+	args := struct {
+		IDs     []int64 `db:"ids"`
+		LeaseID string  `db:"lease_id"`
+	}{IDs: ids, LeaseID: tasks[0].LeaseID}
+
+	if err := dbx.NamedExec(ctx, q.db, query, args); err != nil {
+		return fmt.Errorf("queue release: %w", err)
 	}
 	return nil
 }

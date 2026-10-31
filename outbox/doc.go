@@ -72,7 +72,9 @@
 // A failed publish goes back to pending with backoff (up to 5 minutes) and no
 // attempt limit; only an error the publisher marks broker.Permanent makes it
 // failed. The first failed publish of a batch stops it, and Release returns the
-// rest of the batch to pending untouched.
+// rest of the batch to pending untouched; so do a batch that runs 45 seconds
+// and a relay that shuts down. Leases come back in next_attempt_at, created_at
+// order.
 //
 // At-least-once: if a relay dies after publishing but before MarkSent, the
 // Sweeper returns the row to pending and it is republished; consumers dedupe on

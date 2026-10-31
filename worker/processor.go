@@ -2,11 +2,15 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/otel"
+	"github.com/assanoff/skit/safetick"
 )
 
 // Source leases a batch of pending items for processing. Implementations must be
@@ -35,10 +39,11 @@ type Sink[T any] interface {
 }
 
 // Releaser returns claimed items to their source untouched: no attempt is
-// counted and each item keeps its place. A Processor with FailFast releases the
-// rest of a batch it stops through its Sink, when the Sink implements Releaser;
-// otherwise the rest stays claimed until the source reclaims it on its own,
-// such as by a lease that expires. items is never empty.
+// counted and each item keeps its place. A Processor releases the rest of a
+// batch it stops — at a FailFast failure, at BatchTimeout or when its tick is
+// canceled — through its Sink, when the Sink implements Releaser; otherwise the
+// rest stays claimed until the source reclaims it on its own, such as by a
+// lease that expires. items is never empty.
 type Releaser[T any] interface {
 	Release(ctx context.Context, items []T) error
 }
@@ -65,11 +70,17 @@ type ProcessorConfig struct {
 	Name string
 	// BatchSize is the max number of items leased per tick (defaults to 100).
 	BatchSize int
-	// HandleTimeout bounds each Handle call and, independently, its follow-up
-	// mark: each gets its own budget so a slow-but-successful Handle cannot
-	// starve the mark (which would leave the item unacknowledged and cause a
-	// redelivery). 0 = inherit the tick context with no extra bound.
+	// HandleTimeout bounds each Handle call. 0 = inherit the tick context with
+	// no extra bound. A mark or a release is not bounded by it: each runs on
+	// the tick context without its cancellation, under its own 5s timeout, so
+	// the outcome of a handled item is recorded even when the Handle was slow
+	// or the tick was canceled meanwhile.
 	HandleTimeout time.Duration
+	// BatchTimeout stops a batch that has run this long since its claim: no
+	// further item starts, and the rest goes back to the source through the
+	// Sink as a Releaser. Set it to the lease of the source minus HandleTimeout
+	// and a margin, so that no item is handled past its lease. 0 = no bound.
+	BatchTimeout time.Duration
 	// IsTerminal classifies a Handle error as permanent (true) or retryable
 	// (false). When nil, every failure is treated as retryable.
 	IsTerminal func(err error) bool
@@ -79,6 +90,12 @@ type ProcessorConfig struct {
 	// dependency is down, so the rest of the batch would fail the same way; a
 	// terminal failure concerns its item only and does not stop the batch.
 	FailFast bool
+	// OnPanic decides the outcome of an item whose Handle panicked. The panic
+	// is recovered and logged with its stack, then the item is marked with the
+	// error OnPanic returns: nil marks it done, an error IsTerminal accepts
+	// marks it terminal, any other reschedules it. item is the T of the
+	// Processor. nil returns p: the item is retried like a retryable failure.
+	OnPanic func(ctx context.Context, item any, p *safetick.PanicError) error
 	// Now returns the tick clock; defaults to time.Now().UTC. Override in tests.
 	Now func() time.Time
 }
@@ -93,16 +110,28 @@ func (c ProcessorConfig) withDefaults() ProcessorConfig {
 	if c.IsTerminal == nil {
 		c.IsTerminal = func(error) bool { return false }
 	}
+	if c.OnPanic == nil {
+		c.OnPanic = retryPanic
+	}
 	if c.Now == nil {
 		c.Now = func() time.Time { return time.Now().UTC() }
 	}
 	return c
 }
 
+// retryPanic is the default OnPanic: the item is retried.
+func retryPanic(_ context.Context, _ any, p *safetick.PanicError) error {
+	return p
+}
+
+// markTimeout bounds each mark and each release of a Processor.
+const markTimeout = 5 * time.Second
+
 // Processor is the reliable batch-processing FSM shared by the outbox relay,
 // push pipelines, and pgqueue consumers: each tick leases a batch from the
 // Source, runs the Handler on each item, then records the outcome via the Sink
-// (done on success, failed/terminal-or-retryable on error).
+// (done on success, failed/terminal-or-retryable on error). A panic in the
+// Handler is recovered per item and becomes its outcome through OnPanic.
 //
 // A Processor is not itself a Runnable; call Tick to get a TickFunc and wrap it
 // in a Loop to run it on a schedule. Run several processors over the same Source
@@ -133,6 +162,7 @@ func (p *Processor[T]) PacedTick() PacedTickFunc { return p.drain }
 // process runs one full claim -> handle -> mark cycle. It returns an error only
 // when the claim itself fails (so the surrounding Loop can log it); per-item
 // failures are recorded via the Sink and abort the batch only with FailFast.
+// A canceled tick or BatchTimeout stops the batch before its next item.
 func (p *Processor[T]) process(ctx context.Context) error {
 	_, err := p.drain(ctx)
 	return err
@@ -140,14 +170,18 @@ func (p *Processor[T]) process(ctx context.Context) error {
 
 // drain is process plus the pace of the tick.
 func (p *Processor[T]) drain(ctx context.Context) (Pace, error) {
-	now := p.cfg.Now()
+	start := p.cfg.Now()
 
-	items, err := p.src.Claim(ctx, now, p.cfg.BatchSize)
+	items, err := p.src.Claim(ctx, start, p.cfg.BatchSize)
 	if err != nil {
 		return Idle, err
 	}
 
 	for i, item := range items {
+		if p.expired(ctx, start) {
+			p.release(ctx, items[i:])
+			break
+		}
 		if p.stops(p.handleOne(ctx, item)) {
 			p.release(ctx, items[i+1:])
 			return Idle, nil
@@ -157,6 +191,15 @@ func (p *Processor[T]) drain(ctx context.Context) (Pace, error) {
 		return Busy, nil
 	}
 	return Idle, nil
+}
+
+// expired reports whether the batch claimed at start must stop before its next
+// item: the tick is canceled, or BatchTimeout has passed since the claim.
+func (p *Processor[T]) expired(ctx context.Context, start time.Time) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	return p.cfg.BatchTimeout > 0 && p.cfg.Now().Sub(start) >= p.cfg.BatchTimeout
 }
 
 // stops reports whether err of Handle stops the batch: with FailFast, a
@@ -173,7 +216,7 @@ func (p *Processor[T]) release(ctx context.Context, rest []T) {
 	if !ok || len(rest) == 0 {
 		return
 	}
-	err := p.bounded(ctx, func(c context.Context) error {
+	err := settle(ctx, func(c context.Context) error {
 		return r.Release(c, rest)
 	})
 	if err != nil && p.log != nil {
@@ -181,23 +224,19 @@ func (p *Processor[T]) release(ctx context.Context, rest []T) {
 	}
 }
 
-// handleOne processes a single item, records its outcome and returns the error
-// of Handle. Mark failures are logged but not propagated — the surrounding tick
-// has no caller to surface them to, and the next tick (or the sweeper) will
-// reclaim an unacknowledged item.
+// handleOne processes a single item, records its outcome and returns it: the
+// error of Handle, or of OnPanic when Handle panicked. Mark failures are
+// logged but not propagated — the surrounding tick has no caller to surface
+// them to, and the next tick (or the sweeper) will reclaim an unacknowledged
+// item.
 func (p *Processor[T]) handleOne(ctx context.Context, item T) error {
 	now := p.cfg.Now()
 
-	// The tick is suppressed; the item is work worth tracing, so its handler
-	// runs with the mark lifted and sets the trace of the item itself. The
-	// mark below stays suppressed.
-	handleErr := p.bounded(otel.Unsuppress(ctx), func(c context.Context) error {
-		return p.h.Handle(c, item)
-	})
+	handleErr := p.handle(ctx, item)
 
-	// The mark gets its own timeout derived from the parent ctx, not the handle
-	// context, so a slow handle cannot leave the mark on a near-expired deadline.
-	markErr := p.bounded(ctx, func(c context.Context) error {
+	// The mark is settled apart from the handle context, so a slow handle or
+	// a canceled tick cannot leave the item unacknowledged.
+	markErr := settle(ctx, func(c context.Context) error {
 		if handleErr != nil {
 			terminal := p.cfg.IsTerminal(handleErr)
 			return p.sink.MarkFailed(c, item, errs.Sanitize(handleErr.Error()), terminal, now)
@@ -214,6 +253,40 @@ func (p *Processor[T]) handleOne(ctx context.Context, item T) error {
 		)
 	}
 	return handleErr
+}
+
+// handle runs Handle on item under HandleTimeout and returns the outcome of the
+// item. A panic in Handle is recovered and logged, and OnPanic turns it into
+// the outcome.
+func (p *Processor[T]) handle(ctx context.Context, item T) error {
+	// The tick is suppressed; the item is work worth tracing, so its handler
+	// runs with the mark lifted and sets the trace of the item itself. The
+	// mark stays suppressed.
+	err := p.bounded(otel.Unsuppress(ctx), func(c context.Context) error {
+		return safetick.Call(func() error { return p.h.Handle(c, item) })
+	})
+	pe, ok := errors.AsType[*safetick.PanicError](err)
+	if !ok {
+		return err
+	}
+	if p.log != nil {
+		p.log.ErrorContext(ctx,
+			"processor handler panic recovered",
+			"worker", p.cfg.Name,
+			"err", pe,
+			string(semconv.ExceptionStacktraceKey), string(pe.Stack),
+		)
+	}
+	return p.cfg.OnPanic(ctx, item, pe)
+}
+
+// settle runs op, a mark or a release, on ctx without its cancellation and
+// under its own markTimeout: the outcome of a handled item is recorded even
+// when the tick is canceled or past its deadline.
+func settle(ctx context.Context, op func(context.Context) error) error {
+	c, cancel := context.WithTimeout(context.WithoutCancel(ctx), markTimeout)
+	defer cancel()
+	return op(c)
 }
 
 // bounded runs op under a fresh HandleTimeout derived from ctx (each call gets

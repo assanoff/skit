@@ -9,6 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/assanoff/skit/safetick"
 	"github.com/assanoff/skit/worker"
 )
 
@@ -67,9 +68,8 @@ func WithFallback(fn JobFunc) MuxOption {
 //
 // kind is the kind given to Register; a task of another kind is recorded as
 // "<fallback>" with WithFallback and as "<unknown>" without it. A handler that
-// panics is not recorded here: the panic ends the tick, and the Loop counts it
-// in skit_worker_ticks_total{result="panic"}. A nil reg turns the metrics off:
-// the Mux records them, but nothing exposes them.
+// panics is recorded as an error. A nil reg turns the metrics off: the Mux
+// records them, but nothing exposes them.
 func WithMetrics(reg prometheus.Registerer) MuxOption {
 	return func(o *muxOptions) {
 		o.reg = reg
@@ -112,11 +112,13 @@ func (m *Mux) Register(kind string, fn JobFunc) error {
 }
 
 // Handle implements worker.Handler[Task]: it dispatches t to the handler
-// registered for t.Kind, or the fallback (default: ErrUnknownKind).
+// registered for t.Kind, or the fallback (default: ErrUnknownKind). A panic
+// in the handler is returned as a *safetick.PanicError, which a
+// worker.Processor logs and passes to its OnPanic.
 func (m *Mux) Handle(ctx context.Context, t Task) error {
 	r := m.lookup(t.Kind)
 	start := time.Now()
-	err := r.fn(ctx, t)
+	err := safetick.Call(func() error { return r.fn(ctx, t) })
 	r.metrics.observe(ctx, time.Since(start), err)
 	return err
 }

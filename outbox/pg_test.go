@@ -67,6 +67,48 @@ func TestPGLeaseLifecycle(t *testing.T) {
 	is.True(again[0].LeaseID != uuid.Nil()) // re-leased under a fresh lease id
 }
 
+// LeasePending returns its batch in next_attempt_at, created_at order, not in
+// the order the rows were stored.
+func TestPGLeaseOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+
+	is := is.New(t)
+	ctx := t.Context()
+	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
+	store := outbox.NewPG(slog.New(slog.DiscardHandler), pg.DB, outbox.Options{})
+	is.NoErr(store.EnsureSchema(ctx))
+
+	base := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
+	// Stored in this order, the reverse of the order they are due in.
+	rows := []struct {
+		typ     string
+		created time.Duration // before base
+		due     time.Duration // before base
+	}{
+		{"c", 1 * time.Millisecond, 0},
+		{"b", 2 * time.Millisecond, 0},
+		{"a", 3 * time.Millisecond, 0},
+		{"d", 0, time.Second},
+	}
+	for _, r := range rows {
+		ev, err := outbox.NewEvent(r.typ, "widgets", "application/json", []byte(`{}`), nil)
+		is.NoErr(err)
+		ev.CreatedAt = base.Add(-r.created)
+		ev.NextAttemptAt = base.Add(-r.due)
+		is.NoErr(store.Insert(ctx, ev))
+	}
+
+	leased, err := store.LeasePending(ctx, time.Now().UTC(), 10)
+	is.NoErr(err)
+	var types []string
+	for _, ev := range leased {
+		types = append(types, ev.Type)
+	}
+	is.Equal(types, []string{"d", "a", "b", "c"}) // due first, then created first
+}
+
 // TestPGFailAndRelease covers the failure path of the relay: a retryable
 // failure reschedules the row with no attempt limit, a terminal one fails it,
 // and Release returns the rest of the batch untouched.

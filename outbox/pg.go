@@ -103,10 +103,12 @@ INSERT INTO outbox_events (
 }
 
 // LeasePending atomically claims up to limit pending events whose
-// next_attempt_at <= now and marks them in_flight under a fresh lease id. A
-// single CTE + UPDATE … RETURNING does selection and lease assignment in one
-// round-trip; FOR UPDATE SKIP LOCKED lets relay replicas split the work. The
-// whole batch shares one lease id (one per relay tick).
+// next_attempt_at <= now, marks them in_flight under a fresh lease id and
+// returns them in next_attempt_at, created_at order. A single statement does
+// selection and lease assignment in one round-trip; FOR UPDATE SKIP LOCKED
+// lets relay replicas split the work, and the outer SELECT orders the batch,
+// which UPDATE … RETURNING alone returns in storage order. The whole batch
+// shares one lease id (one per relay tick).
 func (s *PG) LeasePending(ctx context.Context, now time.Time, limit int) ([]Event, error) {
 	const q = `
 WITH cte AS (
@@ -115,14 +117,18 @@ WITH cte AS (
     ORDER BY next_attempt_at, created_at
     LIMIT :limit
     FOR UPDATE SKIP LOCKED
+), leased AS (
+    UPDATE outbox_events e
+    SET status = :in_flight, leased_at = :now, lease_id = :lease_id
+    FROM cte
+    WHERE e.id = cte.id
+    RETURNING e.*
 )
-UPDATE outbox_events e
-SET status = :in_flight, leased_at = :now, lease_id = :lease_id
-FROM cte
-WHERE e.id = cte.id
-RETURNING e.id, e.type, e.content_type, e.topic, e.payload, e.headers,
-          e.status, e.attempts, e.max_attempts, e.last_error,
-          e.next_attempt_at, e.created_at, e.sent_at, e.leased_at, e.lease_id`
+SELECT id, type, content_type, topic, payload, headers,
+       status, attempts, max_attempts, last_error,
+       next_attempt_at, created_at, sent_at, leased_at, lease_id
+FROM leased
+ORDER BY next_attempt_at, created_at`
 	args := struct {
 		Pending  string    `db:"pending"`
 		InFlight string    `db:"in_flight"`

@@ -73,9 +73,14 @@
 // # Semantics
 //
 // Claim leases up to limit ready tasks (run_at <= now and not currently leased,
-// or with an expired lease), bumps each task's attempt count, and stamps a
-// fresh LeaseID that MarkDone/MarkFailed must echo back. MarkDone acknowledges
-// success and removes the task. MarkFailed with terminal=false releases the
+// or with an expired lease), bumps each task's attempt count, stamps a fresh
+// LeaseID that MarkDone/MarkFailed must echo back, and returns the batch in
+// run_at, id order. MarkDone acknowledges success and removes the task.
+// PG.Release returns tasks claimed but not handled with their attempt taken
+// back: a worker.Processor releases the rest of a batch it stops (FailFast,
+// BatchTimeout, shutdown). A panic in a handler of the Mux is returned as a
+// *safetick.PanicError; the Processor logs it and, by default, retries the
+// task. MarkFailed with terminal=false releases the
 // lease and reschedules the task to now+RetryDelay so a later Claim retries it
 // without busy-looping; terminal=true parks it as a dead letter. When a lease
 // no longer matches — because it expired and another

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/matryer/is"
+
+	"github.com/assanoff/skit/safetick"
 )
 
 // memItem is a trivial work item keyed by id.
@@ -259,4 +261,122 @@ func TestProcessorFullBatchIsBusy(t *testing.T) {
 	pace, err := p.PacedTick()(t.Context())
 	is.NoErr(err)
 	is.Equal(pace, Busy)
+}
+
+// A panic in Handle is recovered per item: by default the item is retried with
+// the panic as its error, and the batch goes on.
+func TestProcessorPanicRetries(t *testing.T) {
+	is := is.New(t)
+	store := newMemStore(memItem{1}, memItem{2}, memItem{3})
+	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+		if it.id == 2 {
+			panic("boom")
+		}
+		return nil
+	})
+	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{})
+
+	is.NoErr(p.Tick()(t.Context()))
+	is.Equal(store.done, []memItem{{1}, {3}}) // the batch goes on past the panic
+	is.Equal(store.failed, []memItem{{2}})    // the panicked item is marked failed
+	is.Equal(store.terminal[2], false)        // as retryable
+	is.Equal(store.failMsg[2], "panic: boom") // with the panic as its error
+}
+
+// OnPanic decides the outcome of a panicked item: nil marks it done, an error
+// IsTerminal accepts marks it terminal.
+func TestProcessorOnPanic(t *testing.T) {
+	is := is.New(t)
+	errDead := errors.New("dead")
+	store := newMemStore(memItem{1}, memItem{2})
+	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+		panic(it.id)
+	})
+	var seen []any
+	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{
+		IsTerminal: func(err error) bool { return errors.Is(err, errDead) },
+		OnPanic: func(_ context.Context, item any, pe *safetick.PanicError) error {
+			seen = append(seen, item, pe.Value)
+			if item.(memItem).id == 1 {
+				return nil
+			}
+			return errDead
+		},
+	})
+
+	is.NoErr(p.Tick()(t.Context()))
+	is.Equal(seen, []any{memItem{1}, 1, memItem{2}, 2}) // OnPanic gets the item and the panic value
+	is.Equal(store.done, []memItem{{1}})                // nil marks the item done
+	is.Equal(store.failed, []memItem{{2}})              // an error marks it failed
+	is.Equal(store.terminal[2], true)                   // terminal as IsTerminal says
+}
+
+// settleStore is a releasingStore that counts the marks and releases it got
+// with a done context.
+type settleStore struct {
+	*releasingStore
+
+	doneCtx int
+}
+
+func (s *settleStore) MarkDone(ctx context.Context, item memItem, now time.Time) error {
+	if ctx.Err() != nil {
+		s.doneCtx++
+	}
+	return s.memStore.MarkDone(ctx, item, now)
+}
+
+func (s *settleStore) Release(ctx context.Context, items []memItem) error {
+	if ctx.Err() != nil {
+		s.doneCtx++
+	}
+	return s.releasingStore.Release(ctx, items)
+}
+
+// A tick canceled mid-batch still marks the item it handled and releases the
+// rest instead of handling it.
+func TestProcessorCanceledMidBatch(t *testing.T) {
+	is := is.New(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	store := &settleStore{releasingStore: &releasingStore{
+		memStore: newMemStore(memItem{1}, memItem{2}, memItem{3}),
+	}}
+	var handled []int
+	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+		handled = append(handled, it.id)
+		cancel() // shutdown while the item is handled
+		return nil
+	})
+	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{})
+
+	is.NoErr(p.Tick()(ctx))
+	is.Equal(handled, []int{1})                   // no item starts after the cancel
+	is.Equal(store.done, []memItem{{1}})          // the handled item is marked
+	is.Equal(store.released, []memItem{{2}, {3}}) // the rest goes back
+	is.Equal(store.doneCtx, 0)                    // neither on the canceled context
+}
+
+// BatchTimeout stops the batch before its next item once it has run that long
+// since the claim, and releases the rest.
+func TestProcessorBatchTimeout(t *testing.T) {
+	is := is.New(t)
+	store := &releasingStore{memStore: newMemStore(memItem{1}, memItem{2}, memItem{3}, memItem{4})}
+	clock := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	var handled []int
+	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+		handled = append(handled, it.id)
+		clock = clock.Add(time.Second) // each item takes a second
+		return nil
+	})
+	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{
+		BatchSize:    4,
+		BatchTimeout: 2 * time.Second,
+		Now:          func() time.Time { return clock },
+	})
+
+	pace, err := p.PacedTick()(t.Context())
+	is.NoErr(err)
+	is.Equal(handled, []int{1, 2})                // the third item would start at the timeout
+	is.Equal(store.released, []memItem{{3}, {4}}) // so the rest goes back
+	is.Equal(pace, Busy)                          // a full batch still drains again at once
 }

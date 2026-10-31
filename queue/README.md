@@ -234,8 +234,7 @@ group.Add(worker.NewLoop(log, worker.LoopConfig{
 
 `kind` is the kind given to `Register`; a task of another kind is recorded as
 `<fallback>` with `WithFallback` and as `<unknown>` without it. A panicking
-handler ends the tick, so the `worker.Loop` counts it in
-`skit_worker_ticks_total{result="panic"}` when its `LoopConfig.Metrics` is set.
+handler is recorded as `error`.
 
 `NewBacklog` builds the `worker.Loop` that reads `PG.Stats` every 30 seconds into
 the gauges `skit_queue_pending` (ready to claim), `skit_queue_leased` and
@@ -278,7 +277,10 @@ across processes.
 ## Semantics summary
 
 - **Claim** leases up to `limit` ready tasks (`run_at <= now`, unleased or
-  lease-expired), bumps each task's `Attempts`, and stamps a fresh `LeaseID`.
+  lease-expired), bumps each task's `Attempts`, stamps a fresh `LeaseID`, and
+  returns the batch in `run_at, id` order.
+- **Release** (`PG`) returns tasks claimed but not handled and takes back
+  their attempt; a `worker.Processor` releases the rest of a batch it stops.
 - **MarkDone** acks success and removes the task.
 - **MarkFailed** (terminal=false) reschedules to `now + RetryDelay`;
   (terminal=true) parks a dead letter.

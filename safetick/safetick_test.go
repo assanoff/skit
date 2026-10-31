@@ -3,6 +3,7 @@ package safetick_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -98,4 +99,27 @@ func TestGuardNoPanicReturnsFalse(t *testing.T) {
 
 	is.True(ran)        // fn ran to completion
 	is.True(!recovered) // no panic -> false
+}
+
+func TestCallReturnsPanicError(t *testing.T) {
+	is := is.New(t)
+
+	err := safetick.Call(func() error {
+		panic("boom")
+	})
+
+	pe, ok := errors.AsType[*safetick.PanicError](err)
+	is.True(ok)                                       // the panic comes back as a *PanicError
+	is.Equal(pe.Value, "boom")                        // with the value passed to panic
+	is.Equal(err.Error(), "panic: boom")              // and its message
+	is.True(bytes.Contains(pe.Stack, []byte("Call"))) // and the stack of the panic
+}
+
+func TestCallReturnsError(t *testing.T) {
+	is := is.New(t)
+	errBoom := errors.New("boom")
+
+	// Call returns the error of fn, and nil when fn returns nil.
+	is.Equal(safetick.Call(func() error { return errBoom }), errBoom)
+	is.NoErr(safetick.Call(func() error { return nil }))
 }

@@ -2,7 +2,9 @@ package safetick
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 
 	"github.com/assanoff/skit/logger"
 )
@@ -48,4 +50,33 @@ func Guard(ctx context.Context, log *slog.Logger, worker string, onPanic PanicHa
 	}()
 	fn()
 	return false
+}
+
+// PanicError is a panic that Call recovered: the value passed to panic and the
+// stack of the goroutine that panicked.
+type PanicError struct {
+	Value any
+	Stack []byte
+}
+
+// Error implements error: "panic: <value>".
+func (e *PanicError) Error() string {
+	return fmt.Sprintf("panic: %v", e.Value)
+}
+
+// Call runs fn and returns its error; a panic in fn is recovered and returned
+// as a *PanicError instead, so the caller decides what the panic means. Call
+// neither logs the panic nor counts it:
+//
+//	err := safetick.Call(func() error { return h.Handle(ctx, item) })
+//	if pe, ok := errors.AsType[*safetick.PanicError](err); ok {
+//	    log.Error("handler panic", "err", pe, "stack", string(pe.Stack))
+//	}
+func Call(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = &PanicError{Value: r, Stack: debug.Stack()}
+		}
+	}()
+	return fn()
 }

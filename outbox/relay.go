@@ -27,9 +27,9 @@ type RelayConfig struct {
 	MaxPollInterval time.Duration
 	// BatchSize is the max events leased per tick (default 100).
 	BatchSize int
-	// PublishTimeout bounds each publish + its follow-up mark (default 5s). A
-	// broker that is down costs one PublishTimeout per tick: the first failed
-	// publish stops the batch.
+	// PublishTimeout bounds each publish (default 5s); its follow-up mark has
+	// a timeout of its own. A broker that is down costs one PublishTimeout per
+	// tick: the first failed publish stops the batch.
 	PublishTimeout time.Duration
 	// Metrics is the registry of the publish metrics
 	// (skit_outbox_relay_published_total, …_relay_publish_failures_total,
@@ -55,7 +55,9 @@ type RelayConfig struct {
 // error the publisher marks broker.Permanent moves the event to failed. The
 // first retryable failure stops the batch: the event is rescheduled, the rest
 // of the batch goes back to pending untouched, and the relay waits
-// PollInterval before the next try.
+// PollInterval before the next try. A batch stops the same way after 45
+// seconds, so that no event is published past its lease (one minute, the
+// default of SweeperConfig.LeaseTimeout), and when the relay shuts down.
 func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConfig) *worker.Loop {
 	if cfg.Name == "" {
 		cfg.Name = "outbox-relay"
@@ -79,6 +81,7 @@ func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConf
 			Name:          cfg.Name,
 			BatchSize:     cfg.BatchSize,
 			HandleTimeout: cfg.PublishTimeout,
+			BatchTimeout:  relayBatchTimeout,
 			// A permanent error concerns its event only; any other means the
 			// broker is down, so the rest of the batch would fail the same way.
 			IsTerminal: broker.IsPermanent,
@@ -93,6 +96,10 @@ func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConf
 		Metrics:            cfg.Metrics,
 	}, proc.PacedTick())
 }
+
+// relayBatchTimeout bounds a batch of the relay: the default lease of one
+// minute minus the default PublishTimeout of 5 seconds and a margin of 10.
+const relayBatchTimeout = 45 * time.Second
 
 // relaySource adapts Store.LeasePending to worker.Source[Event].
 type relaySource struct{ store Store }
