@@ -2,11 +2,13 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/matryer/is"
 	kgo "github.com/segmentio/kafka-go"
 
 	"github.com/assanoff/skit/broker"
@@ -130,4 +132,51 @@ func TestConsumeReturnsWhenReaderClosed(t *testing.T) {
 	if n := logged.Load(); n != 0 {
 		t.Errorf("logged %d records for a closed reader, want 0", n)
 	}
+}
+
+func TestPublishTooLargeIsPermanent(t *testing.T) {
+	is := is.New(t)
+	p, err := NewPublisher(Config{Brokers: []string{"localhost:1"}}, PublisherConfig{Source: "test"})
+	is.NoErr(err)
+	t.Cleanup(func() { _ = p.Close() })
+
+	// Over BatchBytes of the writer (1 MiB): rejected before any dial.
+	err = p.Publish(t.Context(), broker.Message{
+		Type: "x", Topic: "t",
+		ContentType: "application/octet-stream",
+		Data:        make([]byte, 2<<20),
+	})
+	is.True(broker.IsPermanent(err))
+}
+
+func TestPartitionKeyError(t *testing.T) {
+	is := is.New(t)
+	keyErr := errors.New("no id")
+	for _, tc := range []struct {
+		err       error
+		permanent bool
+	}{
+		{keyErr, false},                  // the function may be wrong: retried
+		{broker.Permanent(keyErr), true}, // the message has no key: failed
+	} {
+		key := func(broker.Message) (string, error) {
+			return "", tc.err
+		}
+		p, err := NewPublisher(Config{Brokers: []string{"localhost:1"}},
+			PublisherConfig{Source: "test"}, WithPartitionKey(key))
+		is.NoErr(err)
+		t.Cleanup(func() { _ = p.Close() })
+
+		// The key comes before any dial.
+		err = p.Publish(t.Context(), broker.Message{Type: "x", Topic: "t"})
+		is.True(errors.Is(err, keyErr))
+		is.Equal(broker.IsPermanent(err), tc.permanent)
+	}
+}
+
+func TestTooLarge(t *testing.T) {
+	is := is.New(t)
+	is.True(tooLarge(kgo.WriteErrors{kgo.MessageSizeTooLarge})) // from the brokers
+	is.True(!tooLarge(kgo.WriteErrors{kgo.LeaderNotAvailable}))
+	is.True(!tooLarge(context.DeadlineExceeded))
 }

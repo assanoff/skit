@@ -189,11 +189,12 @@ with a domain layer that knows nothing about SQL or the transport:
   or routing key; it doesn't even hold a transaction.
 
 - Routing is a **wiring concern**. A `Registry`, populated once at startup, maps
-  each event's Go type to a transport-neutral `Topic` + optional `Key`:
+  each event's Go type to its event type and a transport-neutral `Topic`, and
+  encodes events with one codec (JSON unless `outbox.WithCodec` sets another):
 
   ```go
   reg := outbox.NewRegistry()
-  reg.Register[widget.Created]("widget.created", "widgets", outbox.WithKey("created"))
+  reg.Register[widget.Created]("widget.created", "widgets")
   ```
 
 - `outbox.Relay` (a `worker.Processor`) drains pending events to any
@@ -206,9 +207,10 @@ with a domain layer that knows nothing about SQL or the transport:
   throughput) and the `outbox.NewBacklog` worker (pending/in-flight/failed depth
   and oldest-pending age). SDK and business metrics never collide — distinct
   name prefixes on one registry (see `metrics`).
-- Each transport maps `Topic`/`Key` to its own concepts (RabbitMQ
-  exchange+routing key via `WithTopicMapper`, Kafka topic+partition key, NATS
-  subject), so the same event row can ship over any broker. `broker/rabbitmq`
+- Each transport maps `Topic` to its own concept and derives a key from the
+  message (RabbitMQ: exchange, routing key = event type or
+  `rabbitmq.WithRoutingKey`; Kafka: topic, no key or `kafka.WithPartitionKey`),
+  so the same event row can ship over any broker. `broker/rabbitmq`
   publishes CloudEvents v1.0 with publisher confirms and consumes them via a
   supervised `worker.Runnable`.
 

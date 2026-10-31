@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -134,4 +135,82 @@ func TestRelaySendsInCreationTrace(t *testing.T) {
 	is.Equal(spans[1].Name, "send widgets")
 	is.Equal(spans[1].Parent.SpanID(), spans[0].SpanContext.SpanID())
 	is.Equal(spans[1].SpanContext.TraceID(), spans[0].SpanContext.TraceID())
+}
+
+// failStore leases its events once under one lease and records the failure
+// marks and the releases of the relay. After a lease that finds nothing it
+// signals drained.
+type failStore struct {
+	fakeStore
+
+	events   []Event
+	terminal map[string]bool
+	released []uuid.UUID
+	drained  chan struct{}
+}
+
+func (s *failStore) LeasePending(context.Context, time.Time, int) ([]Event, error) {
+	events := s.events
+	s.events = nil
+	if len(events) == 0 {
+		select {
+		case s.drained <- struct{}{}:
+		default:
+		}
+	}
+	return events, nil
+}
+
+func (s *failStore) MarkFailed(_ context.Context, ev Event, _ uuid.UUID, _ string, terminal bool, _ time.Time) error {
+	s.terminal[ev.Type] = terminal
+	return nil
+}
+
+func (s *failStore) Release(_ context.Context, leaseID uuid.UUID) (int64, error) {
+	s.released = append(s.released, leaseID)
+	return 1, nil
+}
+
+// typePublisher fails a publish with the error of its type and records the
+// types it was asked to publish.
+type typePublisher struct {
+	errs map[string]error
+	sent *[]string
+}
+
+func (p typePublisher) Publish(_ context.Context, m broker.Message) error {
+	*p.sent = append(*p.sent, m.Type)
+	return p.errs[m.Type]
+}
+
+func (typePublisher) Close() error { return nil }
+
+// A permanent error fails its event and the batch goes on; the first other
+// error stops the batch, and the rest goes back under its lease.
+func TestRelayFailFast(t *testing.T) {
+	is := is.New(t)
+	lease := uuid.New()
+	var events []Event
+	for _, typ := range []string{"bad", "down", "rest"} {
+		events = append(events, Event{ID: uuid.New(), Type: typ, Topic: "t", LeaseID: lease})
+	}
+	store := &failStore{events: events, terminal: map[string]bool{}, drained: make(chan struct{}, 1)}
+	var sent []string
+	pub := typePublisher{
+		errs: map[string]error{"bad": broker.Permanent(errors.New("too large")), "down": errors.New("refused")},
+		sent: &sent,
+	}
+	relay := NewRelay(nil, store, pub, RelayConfig{PollInterval: time.Millisecond})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- relay.Start(ctx) }()
+
+	<-store.drained
+	cancel()
+	<-done
+
+	is.Equal(sent, []string{"bad", "down"}) // the rest is not published
+	is.Equal(store.terminal["bad"], true)   // a permanent error fails its event
+	is.Equal(store.terminal["down"], false) // any other reschedules it
+	is.Equal(store.released, []uuid.UUID{lease})
 }

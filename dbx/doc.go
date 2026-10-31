@@ -1,22 +1,21 @@
 // Package dbx provides SQL helpers on top of jmoiron/sqlx and database/sql:
 // connection setup (Postgres through the pgx driver, SQLite through a driver
-// the caller registers), named query/exec wrappers that log failed statements,
-// transactions, and bulk insert/upsert. The helpers run on any driver; the
-// error translation and the transaction retry know Postgres codes only.
+// the caller registers), query and exec helpers, transactions, and bulk
+// insert. The helpers run on any driver; the error translation and the
+// transaction retry know Postgres codes only.
 //
 // Open builds a *sqlx.DB from a Config; StatusCheck waits for it to become
-// reachable. The Named* helpers run named queries/execs, log a failed
-// statement with its expanded SQL at info level (the record's source is the
-// store method that called the helper; ErrDBNotFound and ErrDBDuplicatedEntry,
-// the outcomes the caller handles, are not logged), and translate well-known
+// reachable. The query helpers return their result and translate well-known
 // Postgres errors into the package sentinels (ErrDBNotFound,
-// ErrDBDuplicatedEntry, ErrUndefinedTable) so callers match them with
+// ErrDBDuplicatedEntry, ErrUndefinedTable), so callers match them with
 // errors.Is instead of inspecting driver codes. The sentinel wraps the driver
 // error: errors.As still reaches the *pgconn.PgError with its constraint and
-// detail. WithinTran runs a function inside a transaction, committing on
-// success and rolling back on error or panic, and transparently re-runs it
-// when Postgres aborts it as a deadlock victim or on a serialization failure.
-// Bulk* batch large multi-row writes within Postgres's parameter limit.
+// detail. They log nothing: the caller handles the error once, and the query
+// text is on the span (see Tracing). WithinTran runs a function inside a
+// transaction, committing on success and rolling back on error or panic, and
+// transparently re-runs it when Postgres aborts it as a deadlock victim or on a
+// serialization failure. BulkInsert batches large multi-row writes within
+// Postgres's parameter limit.
 //
 // # Usage
 //
@@ -34,30 +33,32 @@
 //	    return err
 //	}
 //
-//	// Named query into a slice.
-//	var widgets []Widget
-//	const q = `SELECT id, name FROM widgets WHERE name = :name`
-//	arg := struct {
-//	    Name string `db:"name"`
-//	}{Name: "gadget"}
-//	if err := dbx.NamedQuerySlice(ctx, log, db, q, arg, &widgets); err != nil {
-//	    return err
+//	// One row by key: no rows is ErrDBNotFound.
+//	const get = `SELECT id, name FROM widgets WHERE id = :id`
+//	w, err := dbx.NamedQueryOne[Widget](ctx, db, get, map[string]any{"id": id})
+//	if errors.Is(err, dbx.ErrDBNotFound) {
+//	    // the store returns its domain not-found error
 //	}
+//
+//	// A list: no rows is an empty result, not an error.
+//	const q = `SELECT id, name FROM widgets WHERE name = :name`
+//	widgets, err := dbx.NamedQueryList[Widget](ctx, db, q, map[string]any{"name": "gadget"})
+//
+//	// A scalar.
+//	n, err := dbx.QueryOne[int](ctx, db, `SELECT count(*) FROM widgets`)
 //
 //	// Postgres only: pass a slice as a single array parameter; pgx binds it
 //	// as a Postgres array, so ANY(:ids) filters without expanding
-//	// placeholders. On other databases use NamedQuerySliceUsingIn.
-//	var out []Widget
-//	err := dbx.NamedQuerySlice(ctx, log, db,
+//	// placeholders. On other databases use NamedQueryListUsingIn.
+//	out, err := dbx.NamedQueryList[Widget](ctx, db,
 //	    `SELECT * FROM widgets WHERE id = ANY(:ids)`,
 //	    map[string]any{"ids": []int64{235, 401, 512}}, // slice -> one $1 -> int8[]
-//	    &out,
 //	)
 //
 //	// Write inside a transaction.
 //	err = dbx.WithinTran(ctx, log, db, func(tx *sqlx.Tx) error {
 //	    const ins = `INSERT INTO widgets (id, name) VALUES (:id, :name)`
-//	    return dbx.NamedExecContext(ctx, log, tx, ins, w)
+//	    return dbx.NamedExec(ctx, tx, ins, w)
 //	})
 //	if errors.Is(err, dbx.ErrDBDuplicatedEntry) {
 //	    // unique violation
@@ -85,23 +86,35 @@
 //
 // # Querying
 //
-//   - ExecContext / NamedExecContext run statements; the RowsAffected
-//     variant returns the affected-row count.
-//   - QueryStruct / NamedQueryStruct scan the first row (ErrDBNotFound when
-//     there is none); an error later in the result is still returned.
-//   - QuerySlice / NamedQuerySlice scan every row into a *[]T.
-//   - NamedQuerySliceUsingIn / NamedQueryStructUsingIn handle a query with an IN
-//     clause: they expand a slice parameter (sqlx.In) and rebind before running.
+// Two families; the name tells the mode. Without a prefix a query takes no
+// parameters and runs as written: it is not parsed for :name, so DDL, casts
+// (::) and colons in literals pass through. The Named variants bind :name from
+// a struct via its `db` tags or from a map[string]any; inside them write a cast
+// as CAST(… AS …), since :: breaks the :name parsing.
+//
+//   - Exec / NamedExec run a statement; ExecRowsAffected /
+//     NamedExecRowsAffected return the number of rows it changed.
+//   - QueryOne / NamedQueryOne scan the first row into a struct or a scalar T;
+//     no rows is ErrDBNotFound, and an error later in the result is returned.
+//   - QueryList / NamedQueryList scan every row into a []T; no rows is a nil
+//     slice and no error.
+//   - NamedQueryListUsingIn handles a query with an IN (:ids) clause: it
+//     expands the slice parameter (sqlx.In) and rebinds before running. An
+//     empty slice is an error.
+//
+// What no rows means is decided where the meaning is known. A row by key is
+// ErrDBNotFound, which the store turns into its domain not-found error. A list
+// may be empty. The affected-row count means changed, not matched — MySQL
+// without clientFoundRows counts an UPDATE to the same values as 0, a
+// Postgres BEFORE trigger may skip a row — so the store that updates or
+// deletes by key turns 0 into its not-found error, and other callers read the
+// count as they need.
 //
 // For an IN-style filter on Postgres, bind the slice as a single array
 // parameter and match with ANY(:ids) (see Usage): pgx encodes []int64/[]string
 // as a Postgres array, so the query text stays constant regardless of list
-// length. ANY works on Postgres only; the …UsingIn helpers expand IN (:ids) on
-// any database.
-//
-// The plain (non-Named) variants take no parameters and run the query as
-// written: it is not parsed for :name, so casts (::) and colons in literals
-// pass through. The Named variants bind from a struct via its `db` tags.
+// length. ANY works on Postgres only; NamedQueryListUsingIn expands IN (:ids)
+// on any database.
 //
 // # UUID columns
 //
@@ -132,8 +145,6 @@
 // BulkInsert writes len(values)/len(columns) rows, splitting into batches that
 // stay under Postgres's bind-parameter cap, with values laid out row-major. An
 // optional conflictAction (e.g. "ON CONFLICT DO NOTHING") is appended verbatim.
-// BulkUpsert builds the ON CONFLICT … DO UPDATE clause for you from the
-// conflict columns.
 //
 // # Transactions
 //

@@ -125,7 +125,6 @@ func (r *kafkaRunnable) consume(ctx context.Context, rd *kgo.Reader) {
 func (r *kafkaRunnable) handle(ctx context.Context, rd *kgo.Reader, msg kgo.Message) {
 	route := func(m *broker.Message) {
 		m.Topic = msg.Topic
-		m.Key = string(msg.Key)
 		m.Headers = kafka.Headers(msg.Headers)
 	}
 	for attempt := 0; ; attempt++ {

@@ -2,6 +2,7 @@ package rest_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/matryer/is"
@@ -115,4 +116,16 @@ func TestNewCursorResultAndEncode(t *testing.T) {
 	is.Equal(d["next"], "next-token")
 	_, hasPrev := d["prev"]
 	is.True(!hasPrev) // prev omitted when empty
+}
+
+func TestNilItemsEncodeAsEmptyList(t *testing.T) {
+	is := is.New(t)
+
+	data, _, err := rest.NewResult[string](nil, 0, page.New(1, 10)).Encode()
+	is.NoErr(err)
+	is.True(strings.Contains(string(data), `"items":[]`)) // not null
+
+	data, _, err = rest.NewCursorResult[string](nil, "", "").Encode()
+	is.NoErr(err)
+	is.True(strings.Contains(string(data), `"items":[]`))
 }

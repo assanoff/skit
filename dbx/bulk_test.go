@@ -40,18 +40,3 @@ func TestBuildInsertQuery(t *testing.T) {
 		})
 	}
 }
-
-func TestBuildUpsertConflictAction(t *testing.T) {
-	got := buildUpsertConflictAction([]string{"id", "name", "email"}, []string{"id"})
-	want := "ON CONFLICT (id) DO UPDATE SET name = excluded.name, email = excluded.email"
-	if got != want {
-		t.Errorf("got  %q\nwant %q", got, want)
-	}
-
-	// All columns are conflict keys -> DO NOTHING.
-	got = buildUpsertConflictAction([]string{"id"}, []string{"id"})
-	want = "ON CONFLICT (id) DO NOTHING"
-	if got != want {
-		t.Errorf("got  %q\nwant %q", got, want)
-	}
-}

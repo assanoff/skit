@@ -61,8 +61,9 @@ func New(conn *Conn, log *slog.Logger, sub broker.Subscription, h broker.Handler
 	}, h)
 }
 
-// NewConsumer declares the topology and builds a Consumer. Register it on a
-// worker.Group like any other Runnable.
+// NewConsumer builds a Consumer; Start declares its topology (exchange, queue,
+// bindings) and consumes. Until then a message published to the exchange has
+// no queue to land in. Register it on a worker.Group like any other Runnable.
 func NewConsumer(conn *Conn, log *slog.Logger, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
 	if cfg.Queue == "" {
 		return nil, errors.New("rabbitmq: new consumer: queue is required")
@@ -149,11 +150,11 @@ func (c *Consumer) close() {
 
 // dispatch decodes one delivery into a broker.Message and runs the handler
 // under panic recovery, mapping the broker.Action back to an rmq.Action. A
-// malformed envelope is Ack'd (dropped) — requeuing it would loop forever.
+// malformed envelope is discarded (nack without requeue): requeuing it would
+// loop forever, and a dead-letter exchange of the queue receives it.
 func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
 	action := broker.Process(ctx, c.log, c.cfg.Name, d.Body, func(m *broker.Message) {
 		m.Topic = d.Exchange
-		m.Key = d.RoutingKey
 		m.Headers = Headers(d.Headers)
 	}, c.handler)
 	return ToAction(action)

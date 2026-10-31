@@ -2,6 +2,7 @@ package jsonapi_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/matryer/is"
@@ -105,4 +106,14 @@ func TestNewResultEmpty(t *testing.T) {
 	is.Equal(pag["total_pages"].(float64), float64(0))
 	is.Equal(pag["page"].(float64), float64(0))
 	is.Equal(pag["size"].(float64), float64(0))
+}
+
+// TestNewResultNilItems checks nil items encode as an empty data list, not
+// null.
+func TestNewResultNilItems(t *testing.T) {
+	is := is.New(t)
+
+	data, _, err := jsonapi.NewResult[*widget](nil, 0, page.New(1, 10)).Encode()
+	is.NoErr(err)
+	is.True(strings.Contains(string(data), `"data":[]`))
 }

@@ -119,6 +119,9 @@ func (c *Core) Update(ctx context.Context, id uuid.UUID, u Update{{.Type}}) ({{.
 	}
 	item.UpdatedAt = time.Now().UTC()
 	if err := c.store.Update(ctx, item); err != nil {
+		if errors.Is(err, dbx.ErrDBNotFound) {
+			return {{.Type}}{}, errs.Newf(errs.NotFound, "{{.Pkg}} %s not found", id)
+		}
 		return {{.Type}}{}, errs.New(errs.Internal, err)
 	}
 	return item, nil

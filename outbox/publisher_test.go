@@ -30,8 +30,12 @@ func (s *fakeStore) MarkSent(context.Context, Event, uuid.UUID, time.Time) error
 	return nil
 }
 
-func (s *fakeStore) MarkFailed(context.Context, Event, uuid.UUID, string, time.Time) error {
+func (s *fakeStore) MarkFailed(context.Context, Event, uuid.UUID, string, bool, time.Time) error {
 	return nil
+}
+
+func (s *fakeStore) Release(context.Context, uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 func (s *fakeStore) SweepExpiredLeases(context.Context, time.Duration, time.Time, int) (int64, error) {
@@ -49,16 +53,16 @@ type widgetCreated struct {
 
 // mustRegister registers T's route and fails the test on a wiring error, so the
 // setup in the success-path tests stays a single line.
-func mustRegister[T any](t *testing.T, r *Registry, eventType, topic string, opts ...RouteOption) {
+func mustRegister[T any](t *testing.T, r *Registry, eventType, topic string) {
 	t.Helper()
-	if err := r.Register[T](eventType, topic, opts...); err != nil {
+	if err := r.Register[T](eventType, topic); err != nil {
 		t.Fatalf("register %s: %v", eventType, err)
 	}
 }
 
 func TestRegistryPublishResolvesRoute(t *testing.T) {
 	reg := NewRegistry()
-	mustRegister[widgetCreated](t, reg, "widget.created", "widgets", WithKey("created"))
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)
@@ -70,8 +74,8 @@ func TestRegistryPublishResolvesRoute(t *testing.T) {
 		t.Fatalf("expected 1 inserted event, got %d", len(store.inserted))
 	}
 	ev := store.inserted[0]
-	if ev.Type != "widget.created" || ev.Topic != "widgets" || ev.Key != "created" {
-		t.Errorf("route mismatch: type=%q topic=%q key=%q", ev.Type, ev.Topic, ev.Key)
+	if ev.Type != "widget.created" || ev.Topic != "widgets" {
+		t.Errorf("route mismatch: type=%q topic=%q", ev.Type, ev.Topic)
 	}
 	if ev.ContentType != "application/json" {
 		t.Errorf("content type = %q, want application/json", ev.ContentType)
@@ -133,36 +137,36 @@ func TestPublishWithoutTraceLeavesHeadersEmpty(t *testing.T) {
 	}
 }
 
-func TestPublishOptionsOverrideRoute(t *testing.T) {
-	// One Go payload type registered with a default route; each publish picks a
-	// different CloudEvents type at runtime via As — the promocode/events shape.
+// amountCreated and percentageCreated share the payload of widgetCreated: one
+// Go type per event type is how one payload goes out as several events.
+type (
+	amountCreated     widgetCreated
+	percentageCreated widgetCreated
+)
+
+func TestTypesSharingAPayloadResolveTheirRoutes(t *testing.T) {
 	reg := NewRegistry()
-	mustRegister[widgetCreated](t, reg, "promo.created", "push-gateway", WithKey("push-gateway.send"))
+	mustRegister[amountCreated](t, reg, "amount.promo.created", "push-gateway")
+	mustRegister[percentageCreated](t, reg, "percentage.promo.created", "other")
 
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)
-
-	if err := pub.Publish(context.Background(), widgetCreated{ID: "1"},
-		As("amount.promo.created")); err != nil {
-		t.Fatalf("publish As: %v", err)
+	if err := pub.Publish(context.Background(), amountCreated{ID: "1"}); err != nil {
+		t.Fatalf("publish amount: %v", err)
 	}
-	if err := pub.Publish(context.Background(), widgetCreated{ID: "2"},
-		As("percentage.promo.created"), OnTopic("other"), WithRouteKey("k2")); err != nil {
-		t.Fatalf("publish overrides: %v", err)
+	if err := pub.Publish(context.Background(), percentageCreated{ID: "2"}); err != nil {
+		t.Fatalf("publish percentage: %v", err)
 	}
 
 	if len(store.inserted) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(store.inserted))
 	}
-	// First: only the type overridden, topic/key keep the registered defaults.
-	e0 := store.inserted[0]
-	if e0.Type != "amount.promo.created" || e0.Topic != "push-gateway" || e0.Key != "push-gateway.send" {
-		t.Errorf("event 0: type=%q topic=%q key=%q", e0.Type, e0.Topic, e0.Key)
+	e0, e1 := store.inserted[0], store.inserted[1]
+	if e0.Type != "amount.promo.created" || e0.Topic != "push-gateway" {
+		t.Errorf("event 0: type=%q topic=%q", e0.Type, e0.Topic)
 	}
-	// Second: all three overridden.
-	e1 := store.inserted[1]
-	if e1.Type != "percentage.promo.created" || e1.Topic != "other" || e1.Key != "k2" {
-		t.Errorf("event 1: type=%q topic=%q key=%q", e1.Type, e1.Topic, e1.Key)
+	if e1.Type != "percentage.promo.created" || e1.Topic != "other" {
+		t.Errorf("event 1: type=%q topic=%q", e1.Type, e1.Topic)
 	}
 }
 
@@ -216,11 +220,16 @@ func TestRegisterValidationErrors(t *testing.T) {
 	}
 }
 
-func TestWithContentTypeAndMarshaler(t *testing.T) {
-	reg := NewRegistry()
-	mustRegister[widgetCreated](t, reg, "widget.created", "widgets",
-		WithContentType("application/x-custom"),
-		WithMarshaler(func(any) ([]byte, error) { return []byte("RAW"), nil }))
+// rawCodec stores every event as the same bytes.
+type rawCodec struct{}
+
+func (rawCodec) ContentType() string { return "application/x-custom" }
+
+func (rawCodec) Marshal(any) ([]byte, error) { return []byte("RAW"), nil }
+
+func TestWithCodec(t *testing.T) {
+	reg := NewRegistry(WithCodec(rawCodec{}))
+	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 
 	store := &fakeStore{}
 	pub := Bind(nil, store, reg)

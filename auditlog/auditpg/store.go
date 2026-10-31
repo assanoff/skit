@@ -48,7 +48,7 @@ var schemaLockKey = dbx.AdvisoryKey("skit.auditlog.schema")
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	db, ok := s.db.(*sqlx.DB)
 	if !ok {
-		return dbx.ExecContext(ctx, s.log, s.db, Schema())
+		return dbx.Exec(ctx, s.db, Schema())
 	}
 	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
 }
@@ -60,7 +60,7 @@ func (s *Store) Save(ctx context.Context, al auditlog.AuditLog) error {
 			(model_id, model_type, version, method, path, payload, created_at, created_by)
 		VALUES
 			(:model_id, :model_type, :version, :method, :path, :payload, :created_at, :created_by)`
-	if err := dbx.NamedExecContext(ctx, s.log, s.db, q, toDBAuditLog(al)); err != nil {
+	if err := dbx.NamedExec(ctx, s.db, q, toDBAuditLog(al)); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}
 	return nil
@@ -80,8 +80,8 @@ func (s *Store) QueryLastByModelID(ctx context.Context, modelType, modelID strin
 		ORDER BY version DESC
 		LIMIT 1`
 
-	var row auditLogDB
-	if err := dbx.NamedQueryStruct(ctx, s.log, s.db, q, data, &row); err != nil {
+	row, err := dbx.NamedQueryOne[auditLogDB](ctx, s.db, q, data)
+	if err != nil {
 		if errors.Is(err, dbx.ErrDBNotFound) {
 			return auditlog.AuditLog{}, fmt.Errorf("querylastbymodelid: %w", auditlog.ErrNotFound)
 		}
@@ -103,8 +103,8 @@ func (s *Store) QueryHistoryByModelID(ctx context.Context, modelType, modelID st
 		WHERE model_id = :model_id AND model_type = :model_type
 		ORDER BY version ASC`
 
-	var rows []auditLogDB
-	if err := dbx.NamedQuerySlice(ctx, s.log, s.db, q, data, &rows); err != nil {
+	rows, err := dbx.NamedQueryList[auditLogDB](ctx, s.db, q, data)
+	if err != nil {
 		return nil, fmt.Errorf("queryhistorybymodelid: %w", err)
 	}
 	return toCoreAuditLogSlice(rows), nil
@@ -123,8 +123,8 @@ func (s *Store) QueryModelByVersion(ctx context.Context, modelType, modelID stri
 		FROM audit_log
 		WHERE model_id = :model_id AND model_type = :model_type AND version = :version`
 
-	var row auditLogDB
-	if err := dbx.NamedQueryStruct(ctx, s.log, s.db, q, data, &row); err != nil {
+	row, err := dbx.NamedQueryOne[auditLogDB](ctx, s.db, q, data)
+	if err != nil {
 		if errors.Is(err, dbx.ErrDBNotFound) {
 			return auditlog.AuditLog{}, fmt.Errorf("querymodelbyversion: %w", auditlog.ErrNotFound)
 		}

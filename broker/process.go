@@ -13,7 +13,8 @@ import (
 // logic. It:
 //
 //   - decodes body as a CloudEvents v1.0 envelope; a malformed envelope is
-//     logged and returns Ack (drop — requeuing it would loop forever);
+//     logged at warn level and returns Discard: requeuing it would loop
+//     forever, and a dead-letter destination keeps it for a look;
 //   - applies route to fill the transport fields (Topic/Key/Headers) onto the
 //     decoded Message, when route is non-nil;
 //   - runs h under panic recovery, returning Requeue on panic so the message is
@@ -25,9 +26,9 @@ func Process(ctx context.Context, log *slog.Logger, name string, body []byte, ro
 	m, err := UnmarshalCloudEvent(body)
 	if err != nil {
 		if log != nil {
-			log.WarnContext(ctx, "broker: malformed message, dropping", "consumer", name, "err", err, "body_size", len(body))
+			log.WarnContext(ctx, "broker: malformed message, discarding", "consumer", name, "err", err, "body_size", len(body))
 		}
-		return Ack
+		return Discard
 	}
 	if route != nil {
 		route(&m)

@@ -82,7 +82,7 @@ var schemaLockKey = dbx.AdvisoryKey("skit.outbox.schema")
 func (s *PG) EnsureSchema(ctx context.Context) error {
 	db, ok := s.db.(*sqlx.DB)
 	if !ok {
-		return dbx.ExecContext(ctx, s.log, s.db, Schema())
+		return dbx.Exec(ctx, s.db, Schema())
 	}
 	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
 }
@@ -92,10 +92,10 @@ func (s *PG) EnsureSchema(ctx context.Context) error {
 func (s *PG) Insert(ctx context.Context, events ...Event) error {
 	const q = `
 INSERT INTO outbox_events (
-    id, type, content_type, topic, route_key, payload, headers,
+    id, type, content_type, topic, payload, headers,
     status, attempts, max_attempts, last_error, next_attempt_at, created_at
 ) VALUES (
-    :id, :type, :content_type, :topic, :route_key, :payload, :headers,
+    :id, :type, :content_type, :topic, :payload, :headers,
     :status, :attempts, :max_attempts, :last_error, :next_attempt_at, :created_at
 )`
 	for i := range events {
@@ -104,7 +104,7 @@ INSERT INTO outbox_events (
 		if len(events[i].Headers) == 0 || !json.Valid(events[i].Headers) {
 			return fmt.Errorf("outbox insert: invalid headers JSON for event %s", events[i].ID)
 		}
-		if err := dbx.NamedExecContext(ctx, s.log, s.db, q, toDBRow(events[i])); err != nil {
+		if err := dbx.NamedExec(ctx, s.db, q, toDBRow(events[i])); err != nil {
 			return fmt.Errorf("outbox insert: %w", err)
 		}
 	}
@@ -129,7 +129,7 @@ UPDATE outbox_events e
 SET status = :in_flight, leased_at = :now, lease_id = :lease_id
 FROM cte
 WHERE e.id = cte.id
-RETURNING e.id, e.type, e.content_type, e.topic, e.route_key, e.payload, e.headers,
+RETURNING e.id, e.type, e.content_type, e.topic, e.payload, e.headers,
           e.status, e.attempts, e.max_attempts, e.last_error,
           e.next_attempt_at, e.created_at, e.sent_at, e.leased_at, e.lease_id`
 	args := struct {
@@ -146,8 +146,8 @@ RETURNING e.id, e.type, e.content_type, e.topic, e.route_key, e.payload, e.heade
 		LeaseID:  dbx.UUID(uuid.New()),
 	}
 
-	var rows []rowDB
-	if err := dbx.NamedQuerySlice(ctx, s.log, s.db, q, args, &rows); err != nil {
+	rows, err := dbx.NamedQueryList[rowDB](ctx, s.db, q, args)
+	if err != nil {
 		return nil, fmt.Errorf("outbox lease pending: %w", err)
 	}
 	return toCoreRows(rows), nil
@@ -170,7 +170,7 @@ WHERE id = :id AND lease_id = :lease_id AND status = :in_flight`
 		LeaseID  dbx.UUID  `db:"lease_id"`
 	}{Sent: StatusSent, InFlight: StatusInFlight, Now: now, ID: dbx.UUID(ev.ID), LeaseID: dbx.UUID(leaseID)}
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, args)
 	if err != nil {
 		return fmt.Errorf("outbox mark sent: %w", err)
 	}
@@ -180,14 +180,15 @@ WHERE id = :id AND lease_id = :lease_id AND status = :in_flight`
 	return nil
 }
 
-// MarkFailed transitions in_flight -> pending (with backoff) when the retry
-// budget remains, or -> failed once attempts+1 reaches max_attempts. Guarded by
-// the same lease predicate as MarkSent.
-func (s *PG) MarkFailed(ctx context.Context, ev Event, leaseID uuid.UUID, errMsg string, now time.Time) error {
+// MarkFailed transitions in_flight -> failed when terminal, otherwise ->
+// pending with next_attempt_at advanced by backoff (up to its Max, 5m by
+// default). attempts grows either way and limits nothing. Guarded by the same
+// lease predicate as MarkSent.
+func (s *PG) MarkFailed(ctx context.Context, ev Event, leaseID uuid.UUID, errMsg string, terminal bool, now time.Time) error {
 	attempts := ev.Attempts + 1
 	status := StatusPending
 	nextAttempt := now.Add(s.backoff.Next(attempts))
-	if attempts >= ev.MaxAttempts {
+	if terminal {
 		status = StatusFailed
 		nextAttempt = now // terminal; value is informational
 	}
@@ -215,7 +216,7 @@ WHERE id = :id AND lease_id = :lease_id AND status = :in_flight`
 		LeaseID:       dbx.UUID(leaseID),
 	}
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, args)
 	if err != nil {
 		return fmt.Errorf("outbox mark failed: %w", err)
 	}
@@ -223,6 +224,29 @@ WHERE id = :id AND lease_id = :lease_id AND status = :in_flight`
 		return ErrLeaseLost
 	}
 	return nil
+}
+
+// Release returns the rows still in_flight under leaseID to pending: the rest
+// of a batch the relay stopped at a failed publish. attempts and
+// next_attempt_at stay as they were, so the rows keep their place in the
+// queue. Rows of the batch already marked have no lease left and stay as they
+// are. Returns the number released.
+func (s *PG) Release(ctx context.Context, leaseID uuid.UUID) (int64, error) {
+	const q = `
+UPDATE outbox_events
+SET status = :pending, leased_at = NULL, lease_id = NULL
+WHERE lease_id = :lease_id AND status = :in_flight`
+	args := struct {
+		Pending  string   `db:"pending"`
+		InFlight string   `db:"in_flight"`
+		LeaseID  dbx.UUID `db:"lease_id"`
+	}{Pending: StatusPending, InFlight: StatusInFlight, LeaseID: dbx.UUID(leaseID)}
+
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, args)
+	if err != nil {
+		return 0, fmt.Errorf("outbox release: %w", err)
+	}
+	return n, nil
 }
 
 // SweepExpiredLeases returns in_flight rows whose lease is older than
@@ -256,7 +280,7 @@ WHERE e.id = expired.id`
 		Limit:    limit,
 	}
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, args)
 	if err != nil {
 		return 0, fmt.Errorf("outbox sweep: %w", err)
 	}
@@ -275,7 +299,7 @@ WHERE status IN (:sent, :failed) AND created_at < :cutoff`
 		Cutoff time.Time `db:"cutoff"`
 	}{Sent: StatusSent, Failed: StatusFailed, Cutoff: now.Add(-retention)}
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, args)
 	if err != nil {
 		return 0, fmt.Errorf("outbox cleanup: %w", err)
 	}
@@ -300,13 +324,14 @@ FROM outbox_events`
 		Now      time.Time `db:"now"`
 	}{Pending: StatusPending, InFlight: StatusInFlight, Failed: StatusFailed, Now: now}
 
-	var row struct {
+	type statsRow struct {
 		Pending           int64   `db:"pending"`
 		InFlight          int64   `db:"in_flight"`
 		Failed            int64   `db:"failed"`
 		OldestPendingSecs float64 `db:"oldest_pending_secs"`
 	}
-	if err := dbx.NamedQueryStruct(ctx, s.log, s.db, q, args, &row); err != nil {
+	row, err := dbx.NamedQueryOne[statsRow](ctx, s.db, q, args)
+	if err != nil {
 		return Stats{}, fmt.Errorf("outbox stats: %w", err)
 	}
 	return Stats{
@@ -328,7 +353,6 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     type            TEXT NOT NULL,
     content_type    TEXT NOT NULL,
     topic           TEXT NOT NULL,
-    route_key       TEXT NOT NULL DEFAULT '',
     payload         BYTEA NOT NULL,
     headers         JSONB NOT NULL DEFAULT '{}',
     status          TEXT NOT NULL DEFAULT 'pending',

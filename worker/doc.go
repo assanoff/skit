@@ -32,8 +32,11 @@
 // (canonically SELECT ... FOR UPDATE SKIP LOCKED, so replicas can run
 // concurrently), runs the Handler on each item, then records the outcome via
 // the Sink (MarkDone on success, MarkFailed on error with terminal/retryable
-// decided by IsTerminal). A Processor is not itself a Runnable: call Tick (or
-// PacedTick) to get a tick function and wrap it in a Loop.
+// decided by IsTerminal). With FailFast the first retryable failure stops the
+// batch, and a Sink that is a Releaser returns the rest to the Source
+// untouched: a dependency that is down costs one failed item per tick, not a
+// batch. A Processor is not itself a Runnable: call Tick (or PacedTick) to get
+// a tick function and wrap it in a Loop.
 //
 // # Usage
 //
@@ -106,8 +109,8 @@
 // when a tick panics.
 //
 // ProcessorConfig: Name (default "processor"), BatchSize (default 100),
-// HandleTimeout, IsTerminal (nil = all failures retryable), Now (default
-// time.Now().UTC; override in tests).
+// HandleTimeout, IsTerminal (nil = all failures retryable), FailFast, Now
+// (default time.Now().UTC; override in tests).
 //
 // Retry wraps a Handler using retry.Config (Backoff + IsTerminal); the backoff
 // policy itself now lives in the retry package.

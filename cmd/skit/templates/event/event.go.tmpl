@@ -29,15 +29,18 @@ type {{.Type}} struct {
 
 // Register maps {{.Type}} to its CloudEvents type and topic on reg. Call it once
 // at startup, before the relay starts, so the outbox knows how to route the
-// event. Marshaling defaults to JSON; override per route with outbox options.
+// event. The payload is JSON unless the registry has another codec
+// (outbox.WithCodec).
 //
 // Publish it transactionally from your core:
 //
 //	err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *sqlx.Tx, pub outbox.Publisher) error {
 //	    // ... domain writes on tx ...
-//	    return pub.Publish(ctx, {{.Pkg}}.{{.Type}}{ID: id, OccurredAt: now},
-//	        outbox.WithRouteKey(id.String())) // key = aggregate id for ordering
+//	    return pub.Publish(ctx, {{.Pkg}}.{{.Type}}{ID: id, OccurredAt: now})
 //	})
+//
+// The broker publisher derives any key from the message: Kafka keeps the
+// events of one aggregate in order with kafka.WithPartitionKey.
 func Register(reg *outbox.Registry) error {
 	return reg.Register[{{.Type}}](EventType, Topic)
 }

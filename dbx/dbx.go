@@ -6,13 +6,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/client_golang/prometheus"
@@ -147,8 +145,8 @@ const DefaultSQLiteDriver = "sqlite"
 // OpenSQLite opens a sqlx.DB for SQLite using a caller-registered driver (default
 // "sqlite" = modernc.org/sqlite). It does not verify connectivity; call
 // StatusCheck for that. All the dbx query helpers work against the returned
-// handle unchanged — BulkInsert/BulkUpsert rebind placeholders to the SQLite bind
-// style via db.Rebind.
+// handle unchanged — BulkInsert rebinds placeholders to the SQLite bind style
+// via db.Rebind.
 func OpenSQLite(cfg SQLiteConfig) (*sqlx.DB, error) {
 	driver := cfg.Driver
 	if driver == "" {
@@ -247,156 +245,4 @@ func StatusCheck(ctx context.Context, db *sqlx.DB) error {
 		return fmt.Errorf("dbx: status check: %w", err)
 	}
 	return nil
-}
-
-// ExecContext runs a parameterless statement as written: the query is not
-// parsed for :name, so casts (::) and colons in literals pass through.
-func ExecContext(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string) error {
-	_, err := db.ExecContext(ctx, query)
-	return logQuery(ctx, log, caller(), "dbx.exec", query, nil, translateError(err))
-}
-
-// NamedExecContext runs an INSERT/UPDATE/DELETE with named parameters bound from
-// data. It translates well-known Postgres errors and logs a failed statement
-// with the expanded query.
-func NamedExecContext(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data any) error {
-	_, err := namedExec(ctx, db, query, data)
-	return logQuery(ctx, log, caller(), "dbx.exec", query, data, err)
-}
-
-// NamedExecContextRowsAffected is like NamedExecContext but returns the number
-// of affected rows.
-func NamedExecContextRowsAffected(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data any) (int64, error) {
-	res, err := namedExec(ctx, db, query, data)
-	if err != nil {
-		return 0, logQuery(ctx, log, caller(), "dbx.exec", query, data, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("dbx: rows affected: %w", err)
-	}
-	return n, nil
-}
-
-func namedExec(ctx context.Context, db sqlx.ExtContext, query string, data any) (sql.Result, error) {
-	res, err := sqlx.NamedExecContext(ctx, db, query, data)
-	if err != nil {
-		return nil, translateError(err)
-	}
-	return res, nil
-}
-
-// QueryStruct runs a parameterless query as written (no :name parsing) and
-// scans its first row into dest (a pointer to a struct).
-func QueryStruct(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, dest any) error {
-	err := queryStruct(ctx, db, query, dest)
-	return logQuery(ctx, log, caller(), "dbx.query", query, nil, err)
-}
-
-// NamedQueryStruct runs a named query and scans its first row into dest.
-func NamedQueryStruct(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data, dest any) error {
-	err := namedQueryStruct(ctx, db, query, data, dest)
-	return logQuery(ctx, log, caller(), "dbx.query", query, data, err)
-}
-
-func queryStruct(ctx context.Context, db sqlx.ExtContext, query string, dest any) error {
-	rows, err := db.QueryxContext(ctx, query)
-	if err != nil {
-		return translateError(err)
-	}
-	return scanFirst(rows, dest)
-}
-
-func namedQueryStruct(ctx context.Context, db sqlx.ExtContext, query string, data, dest any) error {
-	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
-	if err != nil {
-		return translateError(err)
-	}
-	return scanFirst(rows, dest)
-}
-
-// scanFirst scans the first row of rows into dest and closes rows. Close reads
-// the rest of the result, so an error that comes after the first row — a
-// division by zero in the third — is returned, not lost.
-func scanFirst(rows *sqlx.Rows, dest any) error {
-	defer func() { _ = rows.Close() }()
-
-	if !rows.Next() {
-		// rows.Next returning false also covers a mid-stream failure (conn
-		// reset, ctx cancel); surface it instead of reporting "not found".
-		if err := rows.Err(); err != nil {
-			return translateError(err)
-		}
-		return ErrDBNotFound
-	}
-	if err := rows.StructScan(dest); err != nil {
-		return fmt.Errorf("dbx: scan: %w", err)
-	}
-	return translateError(rows.Close())
-}
-
-// QuerySlice runs a parameterless query as written (no :name parsing) and
-// scans all rows into *[]T.
-func QuerySlice[T any](ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, dest *[]T) error {
-	err := querySlice(ctx, db, query, dest)
-	return logQuery(ctx, log, caller(), "dbx.query", query, nil, err)
-}
-
-// NamedQuerySlice runs a named query and scans all rows into *[]T.
-func NamedQuerySlice[T any](ctx context.Context, log *slog.Logger, db sqlx.ExtContext, query string, data any, dest *[]T) error {
-	err := namedQuerySlice(ctx, db, query, data, dest)
-	return logQuery(ctx, log, caller(), "dbx.query", query, data, err)
-}
-
-func querySlice[T any](ctx context.Context, db sqlx.ExtContext, query string, dest *[]T) error {
-	rows, err := db.QueryxContext(ctx, query)
-	if err != nil {
-		return translateError(err)
-	}
-	return scanAll(rows, dest)
-}
-
-func namedQuerySlice[T any](ctx context.Context, db sqlx.ExtContext, query string, data any, dest *[]T) error {
-	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
-	if err != nil {
-		return translateError(err)
-	}
-	return scanAll(rows, dest)
-}
-
-// scanAll scans every row of rows into *dest and closes rows.
-func scanAll[T any](rows *sqlx.Rows, dest *[]T) error {
-	defer func() { _ = rows.Close() }()
-
-	var out []T
-	for rows.Next() {
-		var v T
-		if err := rows.StructScan(&v); err != nil {
-			return fmt.Errorf("dbx: scan: %w", err)
-		}
-		out = append(out, v)
-	}
-	*dest = out
-	return translateError(rows.Err())
-}
-
-// translateError maps well-known Postgres errors onto the package sentinels.
-// It wraps the driver error rather than replacing it, so the *pgconn.PgError
-// with its constraint and detail stays reachable through errors.As.
-func translateError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
-		switch pgErr.Code {
-		case uniqueViolation:
-			return fmt.Errorf("%w: %w", ErrDBDuplicatedEntry, err)
-		case undefinedTable:
-			return fmt.Errorf("%w: %w", ErrUndefinedTable, err)
-		}
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrDBNotFound
-	}
-	return err
 }

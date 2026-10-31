@@ -9,8 +9,8 @@ import (
 )
 
 // rowDB is the persistence model for an outbox_events row. Nullable columns map
-// to sql.Null* wrappers; UUID columns map to dbx.UUID (the stdlib uuid.UUID has
-// no sql.Scanner); non-null timestamps map directly to time.Time. Payload and
+// to sql.Null* wrappers; UUID columns map to dbx.UUID, which binds through its
+// string form; non-null timestamps map directly to time.Time. Payload and
 // Headers are byte blobs (BYTEA / JSONB).
 //
 // It is deliberately separate from the core Event (outbox.go): Event is the
@@ -23,7 +23,6 @@ type rowDB struct {
 	Type          string             `db:"type"`
 	ContentType   string             `db:"content_type"`
 	Topic         string             `db:"topic"`
-	Key           string             `db:"route_key"`
 	Payload       []byte             `db:"payload"`
 	Headers       []byte             `db:"headers"`
 	Status        string             `db:"status"`
@@ -45,7 +44,6 @@ func toDBRow(e Event) rowDB {
 		Type:          e.Type,
 		ContentType:   e.ContentType,
 		Topic:         e.Topic,
-		Key:           e.Key,
 		Payload:       e.Payload,
 		Headers:       e.Headers,
 		Status:        e.Status,
@@ -70,7 +68,6 @@ func toCoreRow(r rowDB) Event {
 		Type:          r.Type,
 		ContentType:   r.ContentType,
 		Topic:         r.Topic,
-		Key:           r.Key,
 		Payload:       r.Payload,
 		Headers:       r.Headers,
 		Status:        r.Status,

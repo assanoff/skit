@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/matryer/is"
 )
 
 // memItem is a trivial work item keyed by id.
@@ -190,4 +192,71 @@ func TestProcessorSurfacesClaimError(t *testing.T) {
 	if err := p.Tick()(context.Background()); !errors.Is(err, wantErr) {
 		t.Errorf("expected claim error surfaced, got %v", err)
 	}
+}
+
+// releasingStore is a memStore that is also a Releaser.
+type releasingStore struct {
+	*memStore
+
+	released []memItem
+}
+
+func (s *releasingStore) Release(_ context.Context, items []memItem) error {
+	s.released = append(s.released, items...)
+	return nil
+}
+
+func TestProcessorFailFast(t *testing.T) {
+	is := is.New(t)
+	errTerminal := errors.New("bad item")
+	errDown := errors.New("broker down")
+	store := &releasingStore{memStore: newMemStore(memItem{1}, memItem{2}, memItem{3}, memItem{4})}
+	var handled []int
+	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+		handled = append(handled, it.id)
+		if it.id == 1 {
+			return errTerminal
+		}
+		return errDown
+	})
+	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{
+		BatchSize:  4,
+		IsTerminal: func(err error) bool { return errors.Is(err, errTerminal) },
+		FailFast:   true,
+	})
+
+	pace, err := p.PacedTick()(t.Context())
+	is.NoErr(err)
+	is.Equal(handled, []int{1, 2})                   // a terminal failure goes on, a retryable one stops
+	is.Equal(len(store.failed), 2)                   // both failures are marked
+	is.True(store.terminal[1] && !store.terminal[2]) // with their own terminality
+	is.Equal(store.released, []memItem{{3}, {4}})    // the rest goes back untouched
+	is.Equal(pace, Idle)                             // a full but stopped batch does not drain again at once
+}
+
+func TestProcessorFailFastWithoutReleaser(t *testing.T) {
+	is := is.New(t)
+	store := newMemStore(memItem{1}, memItem{2})
+	var handled int
+	h := HandlerFunc[memItem](func(context.Context, memItem) error {
+		handled++
+		return errors.New("down")
+	})
+	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{FailFast: true})
+
+	is.NoErr(p.Tick()(t.Context()))
+	is.Equal(handled, 1) // stopped; the rest stays claimed for the source to reclaim
+}
+
+func TestProcessorFullBatchIsBusy(t *testing.T) {
+	is := is.New(t)
+	store := newMemStore(memItem{1}, memItem{2})
+	h := HandlerFunc[memItem](func(context.Context, memItem) error {
+		return nil
+	})
+	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{BatchSize: 2, FailFast: true})
+
+	pace, err := p.PacedTick()(t.Context())
+	is.NoErr(err)
+	is.Equal(pace, Busy)
 }

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbtest"
+	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 
@@ -139,6 +141,31 @@ func Test{{.Type}}StoreOffsetAndCount(t *testing.T) {
 	p3, err := s.Query(ctx, {{.Pkg}}core.QueryFilter{}, {{.Pkg}}core.DefaultOrder, page.New(3, 2))
 	is.NoErr(err)
 	is.Equal(len(p3), 1) // remainder
+}
+
+// Test{{.Type}}StoreNotFound pins what "nothing there" means: a get, update or
+// delete by a missing key is ErrDBNotFound, a list that matches nothing is
+// empty and no error.
+func Test{{.Type}}StoreNotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+	is := is.New(t)
+
+	ctx := context.Background()
+	s := new{{.Type}}Store(ctx, t)
+	missing := uuid.New()
+
+	_, err := s.QueryByID(ctx, missing)
+	is.True(errors.Is(err, dbx.ErrDBNotFound)) // get
+	err = s.Update(ctx, {{.Pkg}}core.{{.Type}}{ID: missing, Name: "x"})
+	is.True(errors.Is(err, dbx.ErrDBNotFound)) // update changes no row
+	err = s.Delete(ctx, missing)
+	is.True(errors.Is(err, dbx.ErrDBNotFound)) // delete changes no row
+
+	items, err := s.Query(ctx, {{.Pkg}}core.QueryFilter{}, {{.Pkg}}core.DefaultOrder, page.New(1, 10))
+	is.NoErr(err)          // an empty list is not an error
+	is.Equal(len(items), 0)
 }
 
 // Test{{.Type}}StoreFilter exercises QueryFilter: name and description are

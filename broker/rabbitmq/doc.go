@@ -27,10 +27,10 @@
 //	if err != nil { /* ... */ }
 //	defer pub.Close()
 //	err = pub.Publish(ctx, broker.Message{
-//	    Type:            "widget.created",
-//	    DataContentType: "application/json",
-//	    Data:            []byte(`{"id":"w-1"}`),
-//	    Topic:           "widgets", // → exchange; Key → routing key
+//	    Type:        "widget.created", // → routing key
+//	    ContentType: "application/json",
+//	    Data:        []byte(`{"id":"w-1"}`),
+//	    Topic:       "widgets", // → exchange
 //	})
 //
 //	h := broker.Instrument(func(ctx context.Context, m broker.Message) broker.Action {
@@ -38,23 +38,30 @@
 //	    return broker.Ack
 //	}, broker.InstrumentConfig{Consumer: "widgets", System: "rabbitmq", TracerProvider: tp})
 //	cons, err := rabbitmq.NewConsumer(conn, log, rabbitmq.ConsumerConfig{
-//	    Queue:    "widgets.worker",
-//	    Exchange: "widgets",
+//	    Queue:       "widgets.worker",
+//	    Exchange:    "widgets",
+//	    RoutingKeys: []string{"widget.created"},
 //	}, h)
 //	if err != nil { /* ... */ }
 //	group.Add(cons) // a worker.Runnable; Start blocks until ctx is canceled
 //
-// # Topic mapping
+// # Routing key
 //
-// By default Message.Topic maps to the exchange and Message.Key to the routing
-// key, falling back to the topic as the routing key when no key is set (so a
-// single-key topic still routes with no configuration). Override the mapping
-// with WithTopicMapper when topic naming does not map 1:1 to exchanges:
+// A message goes to the exchange Message.Topic under the routing key
+// Message.Type, so a queue binds to the event types it consumes, as above.
+// WithRoutingKey derives the key from the whole message instead — say, to
+// publish into a queue of another system bound to a key of its own:
 //
 //	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "myapp"},
-//	    rabbitmq.WithTopicMapper(func(topic, key string) (exchange, rk string) {
-//	        return "events", topic + "." + key
+//	    rabbitmq.WithRoutingKey(func(m broker.Message) string {
+//	        return "legacy." + m.Type
 //	    }))
+//
+// A key of "" fails the publish with an error that is not broker.Permanent: the
+// function is wrong, not the message, so the outbox relay retries the event
+// until a fixed function ships. Publishes are not mandatory: the broker drops a
+// message that no binding matches without an error, so the event types are
+// part of the contract of the bindings.
 //
 // # Tracing
 //
@@ -72,10 +79,11 @@
 //   - Publisher: NewPublisher(conn, PublisherConfig, opts...); runs in
 //     confirm mode for at-least-once delivery. PublisherConfig fields: Source
 //     (required; the CloudEvents source stamped on messages that carry none),
-//     TracerProvider (nil → the global provider). Option: WithTopicMapper.
+//     TracerProvider (nil → the global provider). Option: WithRoutingKey.
 //   - Consumer: NewConsumer(conn, log, ConsumerConfig, handler). ConsumerConfig
 //     fields: Queue (required), Exchange, ExchangeKind (default "topic"),
 //     RoutingKeys (default ["#"] when Exchange is set), Concurrency (default 1),
-//     Name (default "consumer"). A malformed envelope is Ack'd (dropped); a
+//     Name (default "consumer"). A malformed envelope is discarded (nack
+//     without requeue, so a dead-letter exchange of the queue receives it); a
 //     panicking handler is recovered and the delivery is requeued.
 package rabbitmq

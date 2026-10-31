@@ -34,6 +34,15 @@ type Sink[T any] interface {
 	MarkFailed(ctx context.Context, item T, errMsg string, terminal bool, now time.Time) error
 }
 
+// Releaser returns claimed items to their source untouched: no attempt is
+// counted and each item keeps its place. A Processor with FailFast releases the
+// rest of a batch it stops through its Sink, when the Sink implements Releaser;
+// otherwise the rest stays claimed until the source reclaims it on its own,
+// such as by a lease that expires. items is never empty.
+type Releaser[T any] interface {
+	Release(ctx context.Context, items []T) error
+}
+
 // SourceFunc adapts a plain function to a Source.
 type SourceFunc[T any] func(ctx context.Context, now time.Time, limit int) ([]T, error)
 
@@ -64,6 +73,12 @@ type ProcessorConfig struct {
 	// IsTerminal classifies a Handle error as permanent (true) or retryable
 	// (false). When nil, every failure is treated as retryable.
 	IsTerminal func(err error) bool
+	// FailFast stops a batch at its first retryable failure: that item is
+	// marked failed, and the rest goes back to the source untouched through
+	// the Sink as a Releaser. Set it when a retryable failure means a
+	// dependency is down, so the rest of the batch would fail the same way; a
+	// terminal failure concerns its item only and does not stop the batch.
+	FailFast bool
 	// Now returns the tick clock; defaults to time.Now().UTC. Override in tests.
 	Now func() time.Time
 }
@@ -110,52 +125,67 @@ func NewProcessor[T any](log *slog.Logger, src Source[T], h Handler[T], sink Sin
 func (p *Processor[T]) Tick() TickFunc { return p.process }
 
 // PacedTick returns the drain cycle as a PacedTickFunc for NewPacedLoop: it
-// reports Busy when it leased a full batch (a backlog likely remains, so the
-// adaptive loop drains again promptly) and Idle otherwise.
-func (p *Processor[T]) PacedTick() PacedTickFunc {
-	return func(ctx context.Context) (Pace, error) {
-		n, err := p.processN(ctx)
-		if err != nil {
-			return Idle, err
-		}
-		if n >= p.cfg.BatchSize {
-			return Busy, nil
-		}
-		return Idle, nil
-	}
-}
+// reports Busy when it handled a full batch (a backlog likely remains, so the
+// adaptive loop drains again promptly) and Idle otherwise. A batch stopped by
+// FailFast is Idle: a dependency that is down is retried at the idle pace.
+func (p *Processor[T]) PacedTick() PacedTickFunc { return p.drain }
 
 // process runs one full claim -> handle -> mark cycle. It returns an error only
 // when the claim itself fails (so the surrounding Loop can log it); per-item
-// failures are recorded via the Sink and do not abort the batch.
+// failures are recorded via the Sink and abort the batch only with FailFast.
 func (p *Processor[T]) process(ctx context.Context) error {
-	_, err := p.processN(ctx)
+	_, err := p.drain(ctx)
 	return err
 }
 
-// processN is process plus the number of items claimed this tick (used by
-// PacedTick to detect a full batch).
-func (p *Processor[T]) processN(ctx context.Context) (int, error) {
+// drain is process plus the pace of the tick.
+func (p *Processor[T]) drain(ctx context.Context) (Pace, error) {
 	now := p.cfg.Now()
 
 	items, err := p.src.Claim(ctx, now, p.cfg.BatchSize)
 	if err != nil {
-		return 0, err
-	}
-	if len(items) == 0 {
-		return 0, nil
+		return Idle, err
 	}
 
-	for _, item := range items {
-		p.handleOne(ctx, item)
+	for i, item := range items {
+		if p.stops(p.handleOne(ctx, item)) {
+			p.release(ctx, items[i+1:])
+			return Idle, nil
+		}
 	}
-	return len(items), nil
+	if len(items) >= p.cfg.BatchSize {
+		return Busy, nil
+	}
+	return Idle, nil
 }
 
-// handleOne processes a single item and records its outcome. Mark failures are
-// logged but not propagated — the surrounding tick has no caller to surface them
-// to, and the next tick (or the sweeper) will reclaim an unacknowledged item.
-func (p *Processor[T]) handleOne(ctx context.Context, item T) {
+// stops reports whether err of Handle stops the batch: with FailFast, a
+// retryable failure does.
+func (p *Processor[T]) stops(err error) bool {
+	return err != nil && p.cfg.FailFast && !p.cfg.IsTerminal(err)
+}
+
+// release hands the rest of a stopped batch back to the source, when the Sink
+// is a Releaser. A failed release is logged: the rest stays claimed until the
+// source reclaims it.
+func (p *Processor[T]) release(ctx context.Context, rest []T) {
+	r, ok := p.sink.(Releaser[T])
+	if !ok || len(rest) == 0 {
+		return
+	}
+	err := p.bounded(ctx, func(c context.Context) error {
+		return r.Release(c, rest)
+	})
+	if err != nil && p.log != nil {
+		p.log.ErrorContext(ctx, "processor release failed", "worker", p.cfg.Name, "err", err)
+	}
+}
+
+// handleOne processes a single item, records its outcome and returns the error
+// of Handle. Mark failures are logged but not propagated — the surrounding tick
+// has no caller to surface them to, and the next tick (or the sweeper) will
+// reclaim an unacknowledged item.
+func (p *Processor[T]) handleOne(ctx context.Context, item T) error {
 	now := p.cfg.Now()
 
 	// The tick is suppressed; the item is work worth tracing, so its handler
@@ -183,6 +213,7 @@ func (p *Processor[T]) handleOne(ctx context.Context, item T) {
 			"mark_err", markErr,
 		)
 	}
+	return handleErr
 }
 
 // bounded runs op under a fresh HandleTimeout derived from ctx (each call gets

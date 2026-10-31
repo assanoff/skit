@@ -29,9 +29,9 @@ func TestPGLeaseLifecycle(t *testing.T) {
 	store := outbox.NewPG(log, pg.DB, outbox.Options{})
 	is.NoErr(store.EnsureSchema(ctx))
 
-	sent, err := outbox.NewEvent("widget.created", "widgets", "k", "application/json", []byte(`{}`), nil)
+	sent, err := outbox.NewEvent("widget.created", "widgets", "application/json", []byte(`{}`), nil)
 	is.NoErr(err)
-	failed, err := outbox.NewEvent("widget.deleted", "widgets", "", "application/json", []byte(`{}`), nil)
+	failed, err := outbox.NewEvent("widget.deleted", "widgets", "application/json", []byte(`{}`), nil)
 	is.NoErr(err)
 	is.NoErr(store.Insert(ctx, sent, failed))
 
@@ -51,7 +51,7 @@ func TestPGLeaseLifecycle(t *testing.T) {
 	err = store.MarkSent(ctx, gotSent, uuid.New(), now)
 	is.True(errors.Is(err, outbox.ErrLeaseLost)) // a foreign lease id must not match
 	is.NoErr(store.MarkSent(ctx, gotSent, gotSent.LeaseID, now))
-	is.NoErr(store.MarkFailed(ctx, byID[failed.ID], byID[failed.ID].LeaseID, "boom", now))
+	is.NoErr(store.MarkFailed(ctx, byID[failed.ID], byID[failed.ID].LeaseID, "boom", false, now))
 
 	stats, err := store.Stats(ctx, now)
 	is.NoErr(err)
@@ -64,4 +64,61 @@ func TestPGLeaseLifecycle(t *testing.T) {
 	is.Equal(again[0].ID, failed.ID)        // and it is the failed one
 	is.Equal(again[0].LastError, "boom")    // with its error recorded
 	is.True(again[0].LeaseID != uuid.Nil()) // re-leased under a fresh lease id
+}
+
+// TestPGFailAndRelease covers the failure path of the relay: a retryable
+// failure reschedules the row with no attempt limit, a terminal one fails it,
+// and Release returns the rest of the batch untouched.
+func TestPGFailAndRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+
+	is := is.New(t)
+	ctx := t.Context()
+	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
+	store := outbox.NewPG(slog.New(slog.DiscardHandler), pg.DB, outbox.Options{})
+	is.NoErr(store.EnsureSchema(ctx))
+
+	var events []outbox.Event
+	for _, typ := range []string{"a", "b", "c"} {
+		ev, err := outbox.NewEvent(typ, "widgets", "application/json", []byte(`{}`), nil)
+		is.NoErr(err)
+		events = append(events, ev)
+	}
+	is.NoErr(store.Insert(ctx, events...))
+
+	now := time.Now().UTC()
+	leased, err := store.LeasePending(ctx, now, 10)
+	is.NoErr(err)
+	byType := map[string]outbox.Event{}
+	for _, ev := range leased {
+		byType[ev.Type] = ev
+	}
+
+	retried := byType["a"]
+	retried.Attempts = retried.MaxAttempts + 5 // far past the old budget
+	is.NoErr(store.MarkFailed(ctx, retried, retried.LeaseID, "down", false, now))
+	is.NoErr(store.MarkFailed(ctx, byType["b"], byType["b"].LeaseID, "too large", true, now))
+	n, err := store.Release(ctx, byType["c"].LeaseID)
+	is.NoErr(err)
+	is.Equal(n, int64(1)) // only the row still in flight
+
+	stats, err := store.Stats(ctx, now)
+	is.NoErr(err)
+	is.Equal(stats.Pending, int64(2)) // retried and released
+	is.Equal(stats.Failed, int64(1))  // only the terminal one
+	is.Equal(stats.InFlight, int64(0))
+
+	again, err := store.LeasePending(ctx, now, 10)
+	is.NoErr(err)
+	is.Equal(len(again), 1)        // the retried row waits for its backoff
+	is.Equal(again[0].Type, "c")   // the released row is due at once
+	is.Equal(again[0].Attempts, 0) // and its attempts stay as they were
+
+	later, err := store.LeasePending(ctx, now.Add(time.Hour), 10)
+	is.NoErr(err)
+	is.Equal(len(later), 1)
+	is.Equal(later[0].Type, "a")
+	is.Equal(later[0].Attempts, retried.Attempts+1) // still counted, never limiting
 }

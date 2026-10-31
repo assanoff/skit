@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 	"uuid"
 
@@ -24,9 +25,10 @@ const scope = "github.com/assanoff/skit/broker/kafka"
 // structured-mode JSON. It writes with RequireAll acks, so Publish returns nil
 // only after every in-sync replica has the record — at-least-once delivery.
 type Publisher struct {
-	w      *kgo.Writer
-	source string
-	tracer trace.Tracer
+	w            *kgo.Writer
+	source       string
+	partitionKey func(m broker.Message) (string, error)
+	tracer       trace.Tracer
 }
 
 // Compile-time check.
@@ -42,8 +44,26 @@ type PublisherConfig struct {
 	TracerProvider trace.TracerProvider
 }
 
+// PublisherOption customizes a Publisher.
+type PublisherOption func(*Publisher)
+
+// WithPartitionKey sets how the partition key of a message is derived; by
+// default a record has no key. The records of one key keep their order within
+// a partition. An error of fn fails the publish as it is: wrap it in
+// broker.Permanent when the message itself has no key.
+func WithPartitionKey(fn func(m broker.Message) (string, error)) PublisherOption {
+	return func(p *Publisher) {
+		if fn != nil {
+			p.partitionKey = fn
+		}
+	}
+}
+
+// noKey leaves a record without a key.
+func noKey(broker.Message) (string, error) { return "", nil }
+
 // NewPublisher builds a Kafka publisher on the brokers of cfg.
-func NewPublisher(cfg Config, pcfg PublisherConfig) (*Publisher, error) {
+func NewPublisher(cfg Config, pcfg PublisherConfig, opts ...PublisherOption) (*Publisher, error) {
 	if pcfg.Source == "" {
 		return nil, errors.New("kafka: new publisher: source is required")
 	}
@@ -57,14 +77,27 @@ func NewPublisher(cfg Config, pcfg PublisherConfig) (*Publisher, error) {
 		Balancer:               &kgo.Hash{},
 		RequiredAcks:           kgo.RequireAll,
 		AllowAutoTopicCreation: true,
+		// Publish writes one record and waits for it: the default 1s timer
+		// would hold every record for a batch that never fills.
+		BatchTimeout: time.Millisecond,
 	}
-	return &Publisher{w: w, source: pcfg.Source, tracer: otel.Tracer(pcfg.TracerProvider, scope)}, nil
+	p := &Publisher{
+		w:            w,
+		source:       pcfg.Source,
+		partitionKey: noKey,
+		tracer:       otel.Tracer(pcfg.TracerProvider, scope),
+	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p, nil
 }
 
-// Publish sends m to the Kafka topic m.Topic, keyed by m.Key, as a CloudEvents
-// record and blocks until the brokers acknowledge it. The span "send <topic>"
+// Publish sends m to the Kafka topic m.Topic, under its partition key, as a
+// CloudEvents record and blocks until the brokers acknowledge it. The span "send <topic>"
 // covers the write; without a trace context in m.Headers it is the creation
-// context of the message and goes out in its headers.
+// context of the message and goes out in its headers. A record over the size
+// limit fails with a broker.Permanent error.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Topic == "" {
 		return errors.New("kafka publish: topic is required")
@@ -80,20 +113,25 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Time.IsZero() {
 		m.Time = time.Now().UTC()
 	}
+	key, err := p.partitionKey(m)
+	if err != nil {
+		return fmt.Errorf("kafka publish: partition key: %w", err)
+	}
 
 	attrs := []attribute.KeyValue{semconv.MessagingSystemKafka, semconv.MessagingMessageID(m.ID)}
-	if m.Key != "" {
-		attrs = append(attrs, semconv.MessagingKafkaMessageKey(m.Key))
+	if key != "" {
+		attrs = append(attrs, semconv.MessagingKafkaMessageKey(key))
 	}
 	ctx, span, headers := brokertrace.StartSend(ctx, p.tracer, m.Topic, m.Headers, attrs...)
 	m.Headers = headers
-	err := p.send(ctx, m)
+	err = p.send(ctx, m, key)
 	brokertrace.End(span, err)
 	return err
 }
 
-// send writes m as a CloudEvents record and waits for the acknowledgement.
-func (p *Publisher) send(ctx context.Context, m broker.Message) error {
+// send writes m as a CloudEvents record under key ("" for none) and waits for
+// the acknowledgement.
+func (p *Publisher) send(ctx context.Context, m broker.Message, key string) error {
 	body, err := broker.MarshalCloudEvent(m)
 	if err != nil {
 		return fmt.Errorf("kafka publish: %w", err)
@@ -110,14 +148,29 @@ func (p *Publisher) send(ctx context.Context, m broker.Message) error {
 		Headers: headers,
 		Time:    m.Time,
 	}
-	if m.Key != "" {
-		msg.Key = []byte(m.Key)
+	if key != "" {
+		msg.Key = []byte(key)
 	}
 
 	if err := p.w.WriteMessages(ctx, msg); err != nil {
+		if tooLarge(err) {
+			err = broker.Permanent(err)
+		}
 		return fmt.Errorf("kafka publish: %w", err)
 	}
 	return nil
+}
+
+// tooLarge reports whether a write failed on the size of the record: over
+// BatchBytes of the writer or over the limit of the brokers. WriteMessages
+// returns the error of the brokers in WriteErrors, which does not unwrap.
+func tooLarge(err error) bool {
+	if werr, ok := errors.AsType[kgo.WriteErrors](err); ok {
+		return slices.ContainsFunc(werr, func(e error) bool {
+			return errors.Is(e, kgo.MessageSizeTooLarge)
+		})
+	}
+	return errors.Is(err, kgo.MessageSizeTooLarge)
 }
 
 // Close flushes and closes the underlying writer.

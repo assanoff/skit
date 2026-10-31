@@ -10,12 +10,13 @@
 //
 // # The abstraction
 //
-// Message carries CloudEvents context attributes (ID/Type/Source/Subject/Time/
-// DataContentType) plus the business payload (Data) and transport-neutral
-// routing: Topic (the logical destination) and an optional Key (routing/
-// ordering key within the topic). Each transport maps Topic/Key to its own
-// concept — a RabbitMQ exchange + routing key, a Kafka topic + partition key,
-// a NATS subject. Headers carry transport headers such as W3C trace context.
+// Message carries CloudEvents context attributes (ID/Type/Source/Time/
+// ContentType) plus the business payload (Data) and the logical destination
+// (Topic), which each transport maps to its own concept — a RabbitMQ exchange,
+// a Kafka topic. A key within the topic is the transport's concern: it derives
+// one from the whole message by a function the client gives the publisher
+// (rabbitmq.WithRoutingKey, kafka.WithPartitionKey). Headers carry transport
+// headers such as W3C trace context.
 //
 //   - Publisher delivers a Message; implementations provide at-least-once
 //     semantics, so a nil error means the broker durably accepted it.
@@ -27,28 +28,30 @@
 //
 // MarshalCloudEvent serializes a Message into a CloudEvents v1.0 structured-mode
 // JSON envelope (SpecVersion is stamped automatically, ContentTypeCloudEvents is
-// the wire content type); the business payload lands under "data". Transport
-// fields (Topic, Key, Headers) are NOT part of the envelope — the transport
-// applies them at publish time. UnmarshalCloudEvent reverses it, leaving the
+// the wire content type); the business payload lands under "data", or base64
+// under "data_base64" when ContentType is not JSON. Transport fields (Topic,
+// Headers) are NOT part of the envelope — the transport applies them at
+// publish time. UnmarshalCloudEvent reverses it, leaving the
 // transport fields zero for the adapter to fill from the delivery.
 //
 //	body, err := broker.MarshalCloudEvent(broker.Message{
-//	    Type:            "widget.created",
-//	    DataContentType: "application/json",
-//	    Data:            []byte(`{"id":"w-1"}`),
-//	    Topic:           "widgets",
+//	    Type:        "widget.created",
+//	    ContentType: "application/json",
+//	    Data:        []byte(`{"id":"w-1"}`),
+//	    Topic:       "widgets",
 //	})
 //
-//	m, err := broker.UnmarshalCloudEvent(body) // m.Topic/Key/Headers are zero
+//	m, err := broker.UnmarshalCloudEvent(body) // m.Topic/Headers are zero
 //
 // # How a transport plugs in
 //
 // A concrete adapter implements Publisher (and, for consumers, worker.Runnable)
-// in a sub-package. broker/rabbitmq is the reference adapter: its Publisher maps
-// Message.Topic/Key to a RabbitMQ exchange/routing key and publishes the
-// CloudEvents body with publisher confirms; its Consumer decodes deliveries back
-// into Messages and dispatches them to a broker.Handler. Application and domain
-// code depend only on broker.Publisher / broker.Handler, never on the adapter.
+// in a sub-package. broker/rabbitmq is the reference adapter: its Publisher
+// sends to the exchange Message.Topic under the routing key Message.Type and
+// publishes the CloudEvents body with publisher confirms; its Consumer decodes
+// deliveries back into Messages and dispatches them to a broker.Handler.
+// Application and domain code depend only on broker.Publisher /
+// broker.Handler, never on the adapter.
 //
 // # Metrics
 //

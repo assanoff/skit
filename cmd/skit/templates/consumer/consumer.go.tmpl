@@ -33,7 +33,7 @@ type Event struct {
 // Handle processes one delivered message and returns the broker's verdict. It is
 // a broker.Handler: transport-agnostic and safe for concurrent use when the
 // subscription runs with Concurrency > 1. The transport has already recovered
-// panics, decoded the CloudEvent envelope, and dropped malformed envelopes
+// panics, decoded the CloudEvent envelope, and discarded malformed envelopes
 // before calling this — here we decode the business payload and act.
 //
 // Map outcomes to the Action the broker should take:

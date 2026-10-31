@@ -3,7 +3,6 @@ package dbx
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -19,20 +18,10 @@ const maxParameters = 1000
 // verbatim (e.g. "ON CONFLICT DO NOTHING"). values are laid out row-major:
 // [r0c0, r0c1, r1c0, r1c1, ...].
 //
-// For upserts prefer BulkUpsert, which builds the conflict clause for you.
-//
 // The query is built with "?" markers and rebound to the driver's bind style via
 // db.Rebind (sqlx), so it is engine-portable: Postgres gets "$1,$2,…", SQLite/
 // MySQL keep "?". No per-dialect placeholder handling is needed.
-func BulkInsert(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
-	err := bulkInsert(ctx, db, table, columns, values, conflictAction)
-	if loggable(ctx, log, err) {
-		logFailure(ctx, log, caller(), "dbx.bulk_insert", err, slog.String("table", table))
-	}
-	return err
-}
-
-func bulkInsert(ctx context.Context, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
+func BulkInsert(ctx context.Context, db sqlx.ExtContext, table string, columns []string, values []any, conflictAction string) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("dbx: bulk insert into %s: no columns", table)
 	}
@@ -58,18 +47,6 @@ func bulkInsert(ctx context.Context, db sqlx.ExtContext, table string, columns [
 		}
 	}
 	return nil
-}
-
-// BulkUpsert inserts rows and, on conflict over conflictColumns, updates every
-// non-conflict column from the proposed row. The ON CONFLICT … DO UPDATE SET …
-// = excluded.… form is understood by both Postgres and SQLite (3.24+); the query
-// is rebound to the driver's placeholder style by BulkInsert.
-func BulkUpsert(ctx context.Context, log *slog.Logger, db sqlx.ExtContext, table string, columns []string, values []any, conflictColumns []string) error {
-	err := bulkInsert(ctx, db, table, columns, values, buildUpsertConflictAction(columns, conflictColumns))
-	if loggable(ctx, log, err) {
-		logFailure(ctx, log, caller(), "dbx.bulk_upsert", err, slog.String("table", table))
-	}
-	return err
 }
 
 // buildInsertQuery renders a multi-row INSERT with "?" placeholders; callers
@@ -99,23 +76,4 @@ func buildInsertQuery(table string, columns []string, nValues int, conflictActio
 		b.WriteString(conflictAction)
 	}
 	return b.String()
-}
-
-func buildUpsertConflictAction(columns, conflictColumns []string) string {
-	conflict := make(map[string]struct{}, len(conflictColumns))
-	for _, c := range conflictColumns {
-		conflict[c] = struct{}{}
-	}
-
-	var sets []string
-	for _, c := range columns {
-		if _, isKey := conflict[c]; isKey {
-			continue
-		}
-		sets = append(sets, fmt.Sprintf("%s = excluded.%s", c, c))
-	}
-	if len(sets) == 0 {
-		return fmt.Sprintf("ON CONFLICT (%s) DO NOTHING", strings.Join(conflictColumns, ", "))
-	}
-	return fmt.Sprintf("ON CONFLICT (%s) DO UPDATE SET %s", strings.Join(conflictColumns, ", "), strings.Join(sets, ", "))
 }

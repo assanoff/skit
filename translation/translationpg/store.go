@@ -101,7 +101,7 @@ func (s *Store) SaveTranslation(ctx context.Context, data translation.Data) erro
 			if value == "" {
 				q = clearRow
 			}
-			if err := dbx.NamedExecContext(ctx, s.log, tx, q, row); err != nil {
+			if err := dbx.NamedExec(ctx, tx, q, row); err != nil {
 				return fmt.Errorf("save column %s: %w", column, err)
 			}
 		}
@@ -122,8 +122,8 @@ func (s *Store) GetTranslations(ctx context.Context, modelName, keyID string, la
 		FROM translations
 		WHERE model_name = :model_name AND key_id = :key_id AND language_id = :language_id`
 
-	var rows []translationResult
-	if err := dbx.NamedQuerySlice(ctx, s.log, s.db, q, data, &rows); err != nil {
+	rows, err := dbx.NamedQueryList[translationResult](ctx, s.db, q, data)
+	if err != nil {
 		return nil, fmt.Errorf("get translations: %w", err)
 	}
 	if len(rows) == 0 {
@@ -149,7 +149,7 @@ func (s *Store) DeleteTranslations(ctx context.Context, modelName, keyID string,
 		DELETE FROM translations
 		WHERE model_name = :model_name AND key_id = :key_id AND language_id = :language_id`
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, data)
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, data)
 	if err != nil {
 		return fmt.Errorf("delete translations: %w", err)
 	}
@@ -189,8 +189,8 @@ func (s *Store) CheckTranslationsExist(ctx context.Context, modelName, keyID str
 		  AND language_id IN (:language_ids)
 		  AND translation_value <> ''`
 
-	var rows []existingRow
-	if err := dbx.NamedQuerySliceUsingIn(ctx, s.log, s.db, q, data, &rows); err != nil {
+	rows, err := dbx.NamedQueryListUsingIn[existingRow](ctx, s.db, q, data)
+	if err != nil {
 		return fmt.Errorf("query translations: %w", err)
 	}
 
@@ -233,8 +233,8 @@ func (s *Store) GetTranslationsBatch(ctx context.Context, modelName string, keyI
 		WHERE model_name = :model_name AND language_id = :language_id
 		  AND key_id IN (:key_ids)`
 
-	var rows []batchRow
-	if err := dbx.NamedQuerySliceUsingIn(ctx, s.log, s.db, q, data, &rows); err != nil {
+	rows, err := dbx.NamedQueryListUsingIn[batchRow](ctx, s.db, q, data)
+	if err != nil {
 		return nil, fmt.Errorf("query batch translations: %w", err)
 	}
 

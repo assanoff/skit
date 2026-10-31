@@ -90,7 +90,6 @@ func (r *rmqRunnable) Start(ctx context.Context) error {
 	err := r.rc.Run(func(d rmq.Delivery) rmq.Action {
 		action := broker.Process(ctx, r.log, r.name, d.Body, func(m *broker.Message) {
 			m.Topic = d.Exchange
-			m.Key = d.RoutingKey
 			m.Headers = rabbitmq.Headers(d.Headers)
 		}, r.h)
 		return rabbitmq.ToAction(action)

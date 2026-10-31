@@ -95,7 +95,7 @@ ON CONFLICT (name) DO NOTHING`
 		RunAt   time.Time `db:"run_at"`
 	}{Name: name, Kind: p.Kind, Payload: p.Payload, RunAt: time.Now().UTC().Add(p.Delay)}
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, q.log, q.db, query, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, q.db, query, args)
 	if err != nil {
 		return false, fmt.Errorf("queue schedule: %w", err)
 	}
@@ -132,8 +132,8 @@ RETURNING t.id, t.name, t.kind, t.payload, t.created_at, t.run_at,
 		Limit       int       `db:"limit"`
 	}{Now: now, LeaseCutoff: now.Add(-q.leaseTimeout), LeaseID: uuid.New().String(), Limit: limit}
 
-	var rows []taskRow
-	if err := dbx.NamedQuerySlice(ctx, q.log, q.db, query, args, &rows); err != nil {
+	rows, err := dbx.NamedQueryList[taskRow](ctx, q.db, query, args)
+	if err != nil {
 		return nil, fmt.Errorf("queue claim: %w", err)
 	}
 	return toTasks(rows), nil
@@ -149,7 +149,7 @@ func (q *PG) MarkDone(ctx context.Context, t Task, _ time.Time) error {
 		LeaseID string `db:"lease_id"`
 	}{ID: t.ID, LeaseID: t.LeaseID}
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, q.log, q.db, query, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, q.db, query, args)
 	if err != nil {
 		return fmt.Errorf("queue mark done: %w", err)
 	}
@@ -183,7 +183,7 @@ WHERE id = :id AND lease_id = :lease_id AND done_at IS NULL`
 	if terminal {
 		query = deadQuery
 	}
-	n, err := dbx.NamedExecContextRowsAffected(ctx, q.log, q.db, query, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, q.db, query, args)
 	if err != nil {
 		return fmt.Errorf("queue mark failed: %w", err)
 	}
@@ -201,7 +201,7 @@ func (q *PG) Cleanup(ctx context.Context, before time.Time) (int64, error) {
 		Before time.Time `db:"before"`
 	}{Before: before}
 
-	n, err := dbx.NamedExecContextRowsAffected(ctx, q.log, q.db, query, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, q.db, query, args)
 	if err != nil {
 		return 0, fmt.Errorf("queue cleanup: %w", err)
 	}
@@ -221,13 +221,14 @@ FROM queue_tasks`
 		Now time.Time `db:"now"`
 	}{Now: now}
 
-	var row struct {
+	type statsRow struct {
 		Pending int64 `db:"pending"`
 		Leased  int64 `db:"leased"`
 		Dead    int64 `db:"dead"`
 	}
-	if err := dbx.NamedQueryStruct(ctx, q.log, q.db, query, args, &row); err != nil {
+	row, err := dbx.NamedQueryOne[statsRow](ctx, q.db, query, args)
+	if err != nil {
 		return Stats{}, fmt.Errorf("queue stats: %w", err)
 	}
-	return Stats{Pending: row.Pending, Leased: row.Leased, Dead: row.Dead}, nil
+	return Stats(row), nil
 }

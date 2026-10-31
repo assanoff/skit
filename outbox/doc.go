@@ -25,13 +25,16 @@
 //   - Sweeper = worker.Loop reclaiming leases abandoned by crashed relays.
 //   - Cleaner = worker.Loop deleting terminal rows past a retention window.
 //
-// Producer side: a Registry maps each event's Go type to a route; Publisher
-// (obtained from WithinTran or Bind) records typed values into the outbox in
-// the caller's transaction; PublishOption overrides the route per call.
+// Producer side: a Registry maps each event's Go type to its event type and
+// topic and encodes it with one Codec; Publisher (obtained from WithinTran or
+// Bind) records typed values into the outbox in the caller's transaction. A
+// key within the topic is the broker adapter's concern
+// (rabbitmq.WithRoutingKey, kafka.WithPartitionKey).
 //
 // The Relay paces adaptively (worker.NewPacedLoop): a full batch means a backlog
-// likely remains, so it drains again at once; an empty batch idles for
-// PollInterval (optionally backing off to MaxPollInterval).
+// likely remains, so it drains again at once; an empty batch, or one stopped at
+// a failed publish, idles for PollInterval (optionally backing off to
+// MaxPollInterval).
 //
 // # Metrics
 //
@@ -61,8 +64,15 @@
 //	   ▼
 //	pending ──Lease──► in_flight ──MarkSent──► sent     (terminal)
 //	   ▲                   │
-//	   │ MarkFailed/Sweep │ MarkFailed (attempts >= max)
-//	   ──────────────────┴──────────► failed           (terminal)
+//	   │ MarkFailed,       │
+//	   │ Release, Sweep    │
+//	   └───────────────────┤
+//	                       └──MarkFailed (broker.Permanent)──► failed (terminal)
+//
+// A failed publish goes back to pending with backoff (up to 5 minutes) and no
+// attempt limit; only an error the publisher marks broker.Permanent makes it
+// failed. The first failed publish of a batch stops it, and Release returns the
+// rest of the batch to pending untouched.
 //
 // At-least-once: if a relay dies after publishing but before MarkSent, the
 // Sweeper returns the row to pending and it is republished; consumers dedupe on
@@ -90,8 +100,7 @@
 // Register each event type, then build the store and the workers:
 //
 //	reg := outbox.NewRegistry()
-//	if err := reg.Register[widget.Created]("widget.created", "widgets",
-//	    outbox.WithKey("created")); err != nil {
+//	if err := reg.Register[widget.Created]("widget.created", "widgets"); err != nil {
 //	    return err
 //	}
 //
@@ -115,26 +124,29 @@
 //	        return pub.Publish(ctx, widget.Created{ID: w.ID.String()}) // domain event
 //	    })
 //
-// # One type, many events (PublishOption)
+// # One payload, many events
 //
-// When one payload type fans out to several CloudEvents types chosen at runtime
-// — e.g. a promocode whose discount kind decides the event — register a default
-// route and override it per publish with As (and optionally OnTopic /
-// WithRouteKey). The routing-by-condition stays domain logic:
+// A Go type is one event type. When one payload goes out as several events
+// chosen at runtime — e.g. a promocode whose discount kind decides the event —
+// declare a type per event over the payload and register each. The choice
+// stays domain logic:
 //
-//	// reg.Register[PushPayload]("promo.created", "push-gateway", WithKey("push-gateway.send"))
-//	for _, batch := range batches { // fan-out: N events, one transaction
-//	    if err := pub.Publish(ctx, PushPayload{...}, outbox.As(eventType)); err != nil {
-//	        return err // any failure rolls back the whole unit of work
-//	    }
+//	type AmountCreated PushPayload
+//	type PercentageCreated PushPayload
+//
+//	// reg.Register[AmountCreated]("amount.promo.created", "push-gateway")
+//	// reg.Register[PercentageCreated]("percentage.promo.created", "push-gateway")
+//	var ev any = AmountCreated(p)
+//	if p.Percent {
+//	    ev = PercentageCreated(p)
+//	}
+//	if err := pub.Publish(ctx, ev); err != nil {
+//	    return err // any failure rolls back the whole unit of work
 //	}
 //
 // # Options
 //
-//   - Register options: WithKey, WithContentType (default application/json),
-//     WithMarshaler (default encoding/json).
-//   - Publish options: As (override CloudEvents type), OnTopic (override topic),
-//     WithRouteKey (override key).
+//   - Registry option: WithCodec (default JSON, application/json).
 //   - Store options (Options): Backoff (retry schedule for
 //     failed-but-retryable events). The table is fixed (outbox_events).
 //   - Worker configs: RelayConfig (PollInterval/MaxPollInterval/BatchSize/
@@ -147,7 +159,7 @@
 // For a fully dynamic event built without the Registry, construct it with
 // NewEvent and insert it on the transaction directly:
 //
-//	ev, _ := outbox.NewEvent(eventType, topic, key, "application/json", payload, nil)
+//	ev, _ := outbox.NewEvent(eventType, topic, "application/json", payload, nil)
 //	err := store.WithTx(tx).Insert(ctx, ev)
 //
 // Publisher (this package) writes events into the outbox table; it is distinct

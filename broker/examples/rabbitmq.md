@@ -30,11 +30,10 @@ type App struct {
 
 func (a *App) Created(ctx context.Context, id string, body []byte) error {
 	return a.Pub.Publish(ctx, broker.Message{
-		Type:            "order.created",
-		DataContentType: "application/json",
-		Data:            body,
-		Topic:           "orders",
-		Key:             id,
+		Type:        "order.created",
+		ContentType: "application/json",
+		Data:        body,
+		Topic:       "orders",
 	})
 }
 
@@ -125,3 +124,7 @@ cons, err := kafka.NewConsumer(kafka.ConsumerConfig{ /* … */ }, log, app.Handl
 ```
 
 Домен не меняется — контракт (`broker.Publisher`, `broker.Handler`) живёт в `broker`.
+Ключ тоже задаёт сборка: RabbitMQ по умолчанию маршрутизирует по `Type`
+(`rabbitmq.WithRoutingKey` — своя маршрутизация), Kafka пишет записи без ключа, а порядок
+событий одного заказа даёт `kafka.WithPartitionKey`, который берёт id заказа из `Data`
+(`broker/kafka/doc.go`).

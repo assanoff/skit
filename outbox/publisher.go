@@ -21,45 +21,10 @@ import (
 // outbox table inside the producer's transaction.
 type Publisher interface {
 	// Publish records event in the outbox within the bound transaction. event's
-	// Go type must be registered; its route (topic, key, content type) and
-	// marshaling are resolved from the Registry. Returns an error if the type is
-	// unregistered or marshaling/insert fails.
-	//
-	// opts override the registered route per call. This is how one Go payload
-	// type fans out to several CloudEvents types chosen at runtime: register the
-	// type once with a default route, then pass As(...) (and optionally
-	// OnTopic/WithRouteKey) to pick the concrete event for this publish.
-	Publish(ctx context.Context, event any, opts ...PublishOption) error
-}
-
-// PublishOption overrides the registered route for a single Publish. The Go
-// type still resolves marshaling and the route defaults from the Registry;
-// these options replace individual fields for this call only.
-type PublishOption func(*route)
-
-// As overrides the CloudEvents type for this publish. Use it when one payload
-// type maps to several event types selected by runtime conditions (e.g. a
-// promocode whose discount kind decides amount/percentage/category.created).
-func As(eventType string) PublishOption {
-	return func(r *route) {
-		if eventType != "" {
-			r.eventType = eventType
-		}
-	}
-}
-
-// OnTopic overrides the destination topic for this publish.
-func OnTopic(topic string) PublishOption {
-	return func(r *route) {
-		if topic != "" {
-			r.topic = topic
-		}
-	}
-}
-
-// WithRouteKey overrides the routing/ordering key for this publish.
-func WithRouteKey(key string) PublishOption {
-	return func(r *route) { r.key = key }
+	// Go type must be registered: the Registry resolves its event type and
+	// topic and encodes it with its Codec. Returns an error if the type is
+	// unregistered or encoding/insert fails.
+	Publish(ctx context.Context, event any) error
 }
 
 // txPublisher is the tx-bound Publisher returned by Bind.
@@ -80,7 +45,7 @@ func Bind(tx sqlx.ExtContext, store Store, reg *Registry) Publisher {
 }
 
 // Publish implements Publisher.
-func (p *txPublisher) Publish(ctx context.Context, event any, opts ...PublishOption) error {
+func (p *txPublisher) Publish(ctx context.Context, event any) error {
 	if p.reg == nil {
 		return errors.New("outbox: publish: no registry configured")
 	}
@@ -88,14 +53,12 @@ func (p *txPublisher) Publish(ctx context.Context, event any, opts ...PublishOpt
 	if err != nil {
 		return err
 	}
-	for _, opt := range opts {
-		opt(&rt)
-	}
-	payload, err := rt.marshal(event)
+	payload, err := p.reg.codec.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("outbox: publish %s: marshal: %w", rt.eventType, err)
 	}
-	ev, err := NewEvent(rt.eventType, rt.topic, rt.key, rt.contentType, payload, traceHeaders(ctx))
+	ct := p.reg.codec.ContentType()
+	ev, err := NewEvent(rt.eventType, rt.topic, ct, payload, traceHeaders(ctx))
 	if err != nil {
 		return fmt.Errorf("outbox: publish %s: %w", rt.eventType, err)
 	}

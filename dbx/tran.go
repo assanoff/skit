@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -106,6 +107,9 @@ func IsDeadlock(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == deadlockDetected
 }
+
+// errTxDone is returned by Rollback after a successful Commit; it is benign.
+var errTxDone = sql.ErrTxDone
 
 func withinTran(ctx context.Context, log *slog.Logger, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
 	if log != nil {

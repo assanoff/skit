@@ -19,31 +19,18 @@ import (
 // scope names the tracer of this package.
 const scope = "github.com/assanoff/skit/broker/rabbitmq"
 
-// TopicMapper maps a transport-neutral (topic, key) pair to the RabbitMQ
-// (exchange, routingKey) it should publish to. Override the default via
-// WithTopicMapper when your topic naming doesn't map 1:1 to exchanges.
-type TopicMapper func(topic, key string) (exchange, routingKey string)
-
-// defaultTopicMapper maps Topic -> exchange and Key -> routing key, falling
-// back to the topic as the routing key when no key is set (so a single-key
-// topic still routes). This makes the common case — one topic per exchange —
-// work with no configuration.
-func defaultTopicMapper(topic, key string) (exchange, routingKey string) {
-	if key == "" {
-		key = topic
-	}
-	return topic, key
-}
+// typeKey routes a message by its event type, the default routing key.
+func typeKey(m broker.Message) string { return m.Type }
 
 // Publisher publishes broker.Messages to RabbitMQ as CloudEvents v1.0
 // structured-mode JSON. It runs in confirm mode and waits for the broker's
 // publisher confirmation per publish, giving at-least-once delivery: Publish
 // returns nil only after the broker has durably accepted the message.
 type Publisher struct {
-	pub    *rmq.Publisher
-	source string
-	mapper TopicMapper
-	tracer trace.Tracer
+	pub        *rmq.Publisher
+	source     string
+	routingKey func(m broker.Message) string
+	tracer     trace.Tracer
 }
 
 // Compile-time check.
@@ -62,12 +49,13 @@ type PublisherConfig struct {
 // PublisherOption customizes a Publisher.
 type PublisherOption func(*Publisher)
 
-// WithTopicMapper sets how a Message's transport-neutral Topic/Key map to a
-// RabbitMQ exchange and routing key.
-func WithTopicMapper(m TopicMapper) PublisherOption {
+// WithRoutingKey sets how the routing key of a message is derived; the default
+// is its Type. The exchange is always the message's Topic. A key of "" fails
+// the publish.
+func WithRoutingKey(fn func(m broker.Message) string) PublisherOption {
 	return func(p *Publisher) {
-		if m != nil {
-			p.mapper = m
+		if fn != nil {
+			p.routingKey = fn
 		}
 	}
 }
@@ -86,10 +74,10 @@ func NewPublisher(conn *Conn, cfg PublisherConfig, opts ...PublisherOption) (*Pu
 		return nil, fmt.Errorf("rabbitmq: new publisher: %w", err)
 	}
 	pub := &Publisher{
-		pub:    p,
-		source: cfg.Source,
-		mapper: defaultTopicMapper,
-		tracer: otel.Tracer(cfg.TracerProvider, scope),
+		pub:        p,
+		source:     cfg.Source,
+		routingKey: typeKey,
+		tracer:     otel.Tracer(cfg.TracerProvider, scope),
 	}
 	for _, opt := range opts {
 		opt(pub)
@@ -97,7 +85,7 @@ func NewPublisher(conn *Conn, cfg PublisherConfig, opts ...PublisherOption) (*Pu
 	return pub, nil
 }
 
-// Publish maps m's Topic/Key to a RabbitMQ exchange/routing key, sends it as a
+// Publish sends m to the exchange m.Topic under its routing key as a
 // persistent CloudEvents message, then blocks on the broker's publisher
 // confirmation. The span "send <exchange>" covers the send and the
 // confirmation; without a trace context in m.Headers it is the creation
@@ -105,10 +93,6 @@ func NewPublisher(conn *Conn, cfg PublisherConfig, opts ...PublisherOption) (*Pu
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Topic == "" {
 		return errors.New("rabbitmq publish: topic is required")
-	}
-	exchange, routingKey := p.mapper(m.Topic, m.Key)
-	if exchange == "" || routingKey == "" {
-		return fmt.Errorf("rabbitmq publish: topic %q maps to empty exchange/routing key", m.Topic)
 	}
 
 	// Fill CloudEvents defaults the producer left blank.
@@ -121,21 +105,25 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Time.IsZero() {
 		m.Time = time.Now().UTC()
 	}
+	routingKey := p.routingKey(m)
+	if routingKey == "" {
+		return fmt.Errorf("rabbitmq publish: no routing key for %s on %s", m.Type, m.Topic)
+	}
 
-	ctx, span, headers := brokertrace.StartSend(ctx, p.tracer, exchange, m.Headers,
+	ctx, span, headers := brokertrace.StartSend(ctx, p.tracer, m.Topic, m.Headers,
 		semconv.MessagingSystemRabbitMQ,
 		semconv.MessagingMessageID(m.ID),
 		semconv.MessagingRabbitMQDestinationRoutingKey(routingKey),
 	)
 	m.Headers = headers
-	err := p.send(ctx, m, exchange, routingKey)
+	err := p.send(ctx, m, routingKey)
 	brokertrace.End(span, err)
 	return err
 }
 
-// send publishes m to exchange under routingKey and waits for the broker's
-// confirmation.
-func (p *Publisher) send(ctx context.Context, m broker.Message, exchange, routingKey string) error {
+// send publishes m to the exchange m.Topic under routingKey and waits for the
+// broker's confirmation.
+func (p *Publisher) send(ctx context.Context, m broker.Message, routingKey string) error {
 	body, err := broker.MarshalCloudEvent(m)
 	if err != nil {
 		return fmt.Errorf("rabbitmq publish: %w", err)
@@ -149,7 +137,7 @@ func (p *Publisher) send(ctx context.Context, m broker.Message, exchange, routin
 	confirms, err := p.pub.PublishWithDeferredConfirmWithContext(
 		ctx, body,
 		[]string{routingKey},
-		rmq.WithPublishOptionsExchange(exchange),
+		rmq.WithPublishOptionsExchange(m.Topic),
 		rmq.WithPublishOptionsContentType(broker.ContentTypeCloudEvents),
 		rmq.WithPublishOptionsPersistentDelivery,
 		rmq.WithPublishOptionsHeaders(headers),

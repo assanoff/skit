@@ -15,7 +15,7 @@
 //	d.Paginate(&buf) // appends the engine's pagination clause
 //
 //	// Bind :offset and :rows_per_page in the params passed to
-//	// dbx.NamedQuerySlice / NamedQueryStruct.
+//	// dbx.NamedQueryList.
 //	params := map[string]any{"offset": 0, "rows_per_page": 50}
 //
 // # Implementations

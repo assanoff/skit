@@ -184,7 +184,6 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 		return
 	}
 	m.Topic = msg.Topic
-	m.Key = string(msg.Key)
 	m.Headers = Headers(msg.Headers)
 
 	for attempt := 0; ; attempt++ {

@@ -27,7 +27,9 @@ type RelayConfig struct {
 	MaxPollInterval time.Duration
 	// BatchSize is the max events leased per tick (default 100).
 	BatchSize int
-	// PublishTimeout bounds each publish + its follow-up mark (default 5s).
+	// PublishTimeout bounds each publish + its follow-up mark (default 5s). A
+	// broker that is down costs one PublishTimeout per tick: the first failed
+	// publish stops the batch.
 	PublishTimeout time.Duration
 	// Metrics is the registry of the publish metrics
 	// (skit_outbox_relay_published_total, …_relay_publish_failures_total,
@@ -47,6 +49,13 @@ type RelayConfig struct {
 // process dies after a successful publish but before MarkSent, the sweeper
 // returns the row to pending and the relay republishes it. Consumers dedupe on
 // the CloudEvents id.
+//
+// A failed publish is retried with backoff (up to 5 minutes between attempts)
+// and no attempt limit, so a broker down for any time loses nothing; only an
+// error the publisher marks broker.Permanent moves the event to failed. The
+// first retryable failure stops the batch: the event is rescheduled, the rest
+// of the batch goes back to pending untouched, and the relay waits
+// PollInterval before the next try.
 func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConfig) *worker.Loop {
 	if cfg.Name == "" {
 		cfg.Name = "outbox-relay"
@@ -70,8 +79,10 @@ func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConf
 			Name:          cfg.Name,
 			BatchSize:     cfg.BatchSize,
 			HandleTimeout: cfg.PublishTimeout,
-			// Terminality is decided by the store (attempts vs max_attempts) in
-			// MarkFailed, not by the error, so the classifier is a no-op.
+			// A permanent error concerns its event only; any other means the
+			// broker is down, so the rest of the batch would fail the same way.
+			IsTerminal: broker.IsPermanent,
+			FailFast:   true,
 		},
 	)
 	return worker.NewPacedLoop(log, worker.LoopConfig{
@@ -100,30 +111,36 @@ type relayPublisher struct {
 func (p relayPublisher) Handle(ctx context.Context, ev Event) error {
 	start := time.Now()
 	err := p.pub.Publish(ctx, broker.Message{
-		ID:              ev.ID.String(),
-		Type:            ev.Type,
-		Time:            ev.CreatedAt,
-		DataContentType: ev.ContentType,
-		Data:            ev.Payload,
-		Topic:           ev.Topic,
-		Key:             ev.Key,
-		Headers:         decodeHeaders(ev.Headers),
+		ID:          ev.ID.String(),
+		Type:        ev.Type,
+		Time:        ev.CreatedAt,
+		ContentType: ev.ContentType,
+		Data:        ev.Payload,
+		Topic:       ev.Topic,
+		Headers:     decodeHeaders(ev.Headers),
 	})
 	p.m.observe(ctx, time.Since(start), err)
 	return err
 }
 
-// relaySink adapts Store mark methods to worker.Sink[Event]. The lease guard
-// uses the event's own lease id (set by LeasePending); terminal is ignored
-// because the store decides terminality from attempts vs max_attempts.
+// relaySink adapts Store mark methods to worker.Sink[Event] and Release to
+// worker.Releaser[Event]. The lease guard uses the event's own lease id (set by
+// LeasePending).
 type relaySink struct{ store Store }
 
 func (s relaySink) MarkDone(ctx context.Context, ev Event, now time.Time) error {
 	return s.store.MarkSent(ctx, ev, ev.LeaseID, now)
 }
 
-func (s relaySink) MarkFailed(ctx context.Context, ev Event, errMsg string, _ bool, now time.Time) error {
-	return s.store.MarkFailed(ctx, ev, ev.LeaseID, errMsg, now)
+func (s relaySink) MarkFailed(ctx context.Context, ev Event, errMsg string, terminal bool, now time.Time) error {
+	return s.store.MarkFailed(ctx, ev, ev.LeaseID, errMsg, terminal, now)
+}
+
+// Release returns the rest of a stopped batch to pending; the batch shares one
+// lease.
+func (s relaySink) Release(ctx context.Context, rest []Event) error {
+	_, err := s.store.Release(ctx, rest[0].LeaseID)
+	return err
 }
 
 // SweeperConfig configures the Sweeper worker.

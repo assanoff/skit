@@ -1,6 +1,6 @@
 // Package {{.Pkg}}db is the Postgres implementation of {{.Pkg}}core.Store. It maps
 // between the domain {{.Type}} and its database representation and uses the
-// skit dbx helpers for query logging and error translation, following the
+// skit dbx helpers for queries and error translation, following the
 // SDK pg-store convention (inline const queries, a model.go row type, a
 // map[string]any of named params + applyFilter for the dynamic WHERE).
 package {{.Pkg}}db
@@ -42,7 +42,7 @@ func (s *Store) Create(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
 	const q = `
 		INSERT INTO {{.Plural}} (id, name, description, created_at, updated_at)
 		VALUES (:id, :name, :description, :created_at, :updated_at)`
-	if err := dbx.NamedExecContext(ctx, s.log, s.db, q, toDB(v)); err != nil {
+	if err := dbx.NamedExec(ctx, s.db, q, toDB(v)); err != nil {
 		return fmt.Errorf("create: %w", err)
 	}
 	return nil
@@ -54,8 +54,12 @@ func (s *Store) Update(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
 		UPDATE {{.Plural}}
 		SET name = :name, description = :description, updated_at = :updated_at
 		WHERE id = :id`
-	if err := dbx.NamedExecContext(ctx, s.log, s.db, q, toDB(v)); err != nil {
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, toDB(v))
+	if err != nil {
 		return fmt.Errorf("update: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("update: %w", dbx.ErrDBNotFound)
 	}
 	return nil
 }
@@ -66,7 +70,7 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 	data := struct {
 		ID string `db:"id"`
 	}{ID: id.String()}
-	n, err := dbx.NamedExecContextRowsAffected(ctx, s.log, s.db, q, data)
+	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, data)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
@@ -83,8 +87,8 @@ func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) ({{.Pkg}}core.{{.Ty
 		ID string `db:"id"`
 	}{ID: id.String()}
 
-	var row db{{.Type}}
-	if err := dbx.NamedQueryStruct(ctx, s.log, s.db, q, data, &row); err != nil {
+	row, err := dbx.NamedQueryOne[db{{.Type}}](ctx, s.db, q, data)
+	if err != nil {
 		return {{.Pkg}}core.{{.Type}}{}, fmt.Errorf("querybyid: %w", err)
 	}
 	return toCore(row), nil
@@ -97,13 +101,11 @@ func (s *Store) Count(ctx context.Context, filter {{.Pkg}}core.QueryFilter) (int
 	buf := bytes.NewBufferString(`SELECT count(*) AS n FROM {{.Plural}}`)
 	s.applyFilter(filter, data, buf)
 
-	var row struct {
-		N int `db:"n"`
-	}
-	if err := dbx.NamedQueryStruct(ctx, s.log, s.db, buf.String(), data, &row); err != nil {
+	n, err := dbx.NamedQueryOne[int](ctx, s.db, buf.String(), data)
+	if err != nil {
 		return 0, fmt.Errorf("count: %w", err)
 	}
-	return row.N, nil
+	return n, nil
 }
 
 // Query implements {{.Pkg}}core.Store: one filtered, ordered page. The WHERE is built
@@ -125,8 +127,8 @@ func (s *Store) Query(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by o
 	buf.WriteString(clause)
 	buf.WriteString(" OFFSET :offset ROWS FETCH NEXT :rows_per_page ROWS ONLY")
 
-	var rows []db{{.Type}}
-	if err := dbx.NamedQuerySlice(ctx, s.log, s.db, buf.String(), data, &rows); err != nil {
+	rows, err := dbx.NamedQueryList[db{{.Type}}](ctx, s.db, buf.String(), data)
+	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	return toCoreSlice(rows), nil
@@ -151,9 +153,9 @@ func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}core.QueryFilt
 	// params, then hand it to applyFilter as an extra so it lands in the same WHERE.
 	var extra []string
 	if key != "" {
-		ts, id, err := decodeCursor(key)
-		if err != nil {
-			return nil, "", fmt.Errorf("querybycursor: %w", err)
+		ts, id, decodeErr := decodeCursor(key)
+		if decodeErr != nil {
+			return nil, "", fmt.Errorf("querybycursor: %w", decodeErr)
 		}
 		data["after_ts"] = ts
 		data["after_id"] = id
@@ -168,8 +170,8 @@ func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}core.QueryFilt
 	s.applyFilter(filter, data, buf, extra...)
 	buf.WriteString(` ORDER BY created_at DESC, id DESC LIMIT :limit`)
 
-	var rows []db{{.Type}}
-	if err := dbx.NamedQuerySlice(ctx, s.log, s.db, buf.String(), data, &rows); err != nil {
+	rows, err := dbx.NamedQueryList[db{{.Type}}](ctx, s.db, buf.String(), data)
+	if err != nil {
 		return nil, "", fmt.Errorf("querybycursor: %w", err)
 	}
 

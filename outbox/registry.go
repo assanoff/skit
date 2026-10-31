@@ -8,58 +8,67 @@ import (
 	"sync"
 )
 
-// Marshaler serializes a domain event value into the bytes stored as an event's
-// payload. The default is encoding/json.Marshal; override per type with
-// WithMarshaler (e.g. for protobuf).
-type Marshaler func(v any) ([]byte, error)
+// Codec encodes a published event into the payload stored in the outbox.
+// ContentType names the encoding: the relay sends it as the content type of
+// the message, and a consumer decodes the payload by it.
+type Codec interface {
+	ContentType() string
+	Marshal(v any) ([]byte, error)
+}
+
+// jsonCodec is the default Codec, encoding/json.
+type jsonCodec struct{}
+
+func (jsonCodec) ContentType() string { return "application/json" }
+
+func (jsonCodec) Marshal(v any) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("json codec: %w", err)
+	}
+	return b, nil
+}
 
 // route is the transport descriptor resolved for one registered event type.
 type route struct {
-	eventType   string
-	topic       string
-	key         string
-	contentType string
-	marshal     Marshaler
+	eventType string
+	topic     string
 }
 
-// Registry maps a domain event's Go type to its transport route (event type
-// name, topic, key, content type, and how to marshal it). It lets the domain
-// publish a plain typed value while the routing — which broker topic, which key
-// — stays a wiring concern: the domain never names a topic or exchange.
+// Registry maps a domain event's Go type to its event type name and topic, and
+// encodes every event with one Codec. It lets the domain publish a plain typed
+// value while the routing stays a wiring concern: the domain never names a
+// topic or exchange.
 //
 // Populate it once at startup with Register, then hand it to WithinTran / Bind.
 // Registry is safe for concurrent reads after setup.
 type Registry struct {
 	mu     sync.RWMutex
 	routes map[reflect.Type]route
+	codec  Codec
 }
 
-// NewRegistry returns an empty Registry.
-func NewRegistry() *Registry {
-	return &Registry{routes: make(map[reflect.Type]route)}
-}
+// RegistryOption customizes a Registry.
+type RegistryOption func(*Registry)
 
-// RouteOption customizes a registration.
-type RouteOption func(*route)
-
-// WithKey sets the routing/ordering key for the event type (RabbitMQ routing
-// key, Kafka partition key, ...). Optional; defaults to empty.
-func WithKey(key string) RouteOption {
-	return func(r *route) { r.key = key }
-}
-
-// WithContentType overrides the payload MIME type (default "application/json").
-func WithContentType(ct string) RouteOption {
-	return func(r *route) { r.contentType = ct }
-}
-
-// WithMarshaler overrides how the event value is serialized (default JSON).
-func WithMarshaler(m Marshaler) RouteOption {
-	return func(r *route) {
-		if m != nil {
-			r.marshal = m
+// WithCodec sets how events are encoded (default JSON). A service usually
+// writes its events in one format, such as protobuf.
+func WithCodec(c Codec) RegistryOption {
+	return func(r *Registry) {
+		if c != nil {
+			r.codec = c
 		}
 	}
+}
+
+// NewRegistry returns an empty Registry; events are JSON unless WithCodec sets
+// another codec.
+func NewRegistry(opts ...RegistryOption) *Registry {
+	r := &Registry{routes: make(map[reflect.Type]route), codec: jsonCodec{}}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Register maps the Go type T to a CloudEvents type name and a transport topic.
@@ -69,7 +78,7 @@ func WithMarshaler(m Marshaler) RouteOption {
 // It returns an error — it never panics — on a wiring mistake (empty name/topic
 // or a duplicate type), so the caller surfaces it at startup where the
 // registration is wired.
-func (r *Registry) Register[T any](eventType, topic string, opts ...RouteOption) error {
+func (r *Registry) Register[T any](eventType, topic string) error {
 	if eventType == "" {
 		return errors.New("outbox: register: event type name is required")
 	}
@@ -77,16 +86,7 @@ func (r *Registry) Register[T any](eventType, topic string, opts ...RouteOption)
 		return errors.New("outbox: register: topic is required")
 	}
 
-	rt := route{
-		eventType:   eventType,
-		topic:       topic,
-		contentType: "application/json",
-		marshal:     json.Marshal,
-	}
-	for _, opt := range opts {
-		opt(&rt)
-	}
-
+	rt := route{eventType: eventType, topic: topic}
 	key := normalize(reflect.TypeFor[T]())
 
 	r.mu.Lock()
