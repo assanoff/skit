@@ -14,7 +14,8 @@
 // so every path (REST, gRPC, workers, consumers) is covered by one wiring. Two
 // equivalent entry points, both converging on Core.Create:
 //
-//	// Direct (atomic with the business write via store.WithTx, or best-effort):
+//	// Direct (atomic with the business write on a Core over its transaction,
+//	// auditlog.NewCore(log, auditpg.NewStore(log, tx)), or best-effort):
 //	_, err := core.Create(ctx, auditlog.NewAuditLog{
 //	    ModelType: "widget", ModelID: id, CreatedBy: actor, Payload: snapshot,
 //	})
@@ -28,7 +29,8 @@
 // Transports/producers depend on the Recorder interface (best-effort Record), so
 // recording can be synchronous or asynchronous without changing call sites:
 //
-//   - *Core              — synchronous; the only option that can be atomic (WithTx).
+//   - *Core              — synchronous; the only option that can be atomic (a
+//     Core over the business transaction).
 //   - AsyncRecorder      — in-process workers, sharded by model (per-model order),
 //     non-blocking; lost on crash.
 //   - auditqueue.Recorder — durable queue + Worker; survives crashes, smooths spikes.

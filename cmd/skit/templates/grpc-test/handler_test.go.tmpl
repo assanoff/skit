@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/grpcserver"
 	"github.com/assanoff/skit/grpctest"
 
@@ -85,7 +84,7 @@ func TestGRPC_Get{{.Type}}_NotFound_Integration(t *testing.T) {
 
 	store := &mocks.StoreMock{
 		QueryByIDFunc: func(ctx context.Context, id uuid.UUID) ({{.Pkg}}core.{{.Type}}, error) {
-			return {{.Pkg}}core.{{.Type}}{}, dbx.ErrDBNotFound
+			return {{.Pkg}}core.{{.Type}}{}, {{.Pkg}}core.ErrNotFound
 		},
 	}
 	client := newTestClient(t, store)

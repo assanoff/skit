@@ -40,7 +40,7 @@ type route struct {
 // value while the routing stays a wiring concern: the domain never names a
 // topic or exchange.
 //
-// Populate it once at startup with Register, then hand it to WithinTran / Bind.
+// Populate it once at startup with Register, then hand it to Bind.
 // Registry is safe for concurrent reads after setup.
 type Registry struct {
 	mu     sync.RWMutex

@@ -173,20 +173,23 @@ service, running it, and generating REST/gRPC modules with the `skit` CLI.
 `broker` + `outbox` give reliable, exactly-the-domain-write event publishing
 with a domain layer that knows nothing about SQL or the transport:
 
-- The domain emits a **plain typed value** through a tx-bound `outbox.Publisher`:
+- The domain emits a **plain typed value** through the `Publisher` its store
+  hands it inside the transaction:
 
   ```go
-  err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
-      if err := repo.WithTx(tx).Create(ctx, w); err != nil { // domain write
+  err := c.store.WithinTranEvents(ctx, func(r widget.Repo, pub widget.Publisher) error {
+      if err := r.Create(ctx, w); err != nil { // domain write
           return err
       }
-      return pub.Publish(ctx, widget.Created{ID: w.ID.String()}) // domain event
+      return pub.Publish(ctx, widget.Created{ID: w.ID}) // domain event
   })
   ```
 
-  The event and the domain write commit in ONE transaction — an event is
-  persisted iff its domain write commits. The domain names no exchange, topic,
-  or routing key; it doesn't even hold a transaction.
+  The wiring binds that `Publisher` to the transaction with
+  `outbox.Bind(tx, ob, reg)`, or drops events with `outbox.Discard()` when the
+  broker is off. The event and the domain write commit in ONE transaction — an
+  event is persisted iff its domain write commits. The domain names no
+  exchange, topic, or routing key; it imports neither `outbox` nor `dbx`.
 
 - Routing is a **wiring concern**. A `Registry`, populated once at startup, maps
   each event's Go type to its event type and a transport-neutral `Topic`, and

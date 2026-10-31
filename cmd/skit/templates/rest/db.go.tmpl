@@ -1,115 +1,172 @@
 // Package {{.Pkg}}db is the Postgres implementation of {{.Pkg}}core.Store. It maps
 // between the domain {{.Type}} and its database representation and uses the
-// skit dbx helpers for queries and error translation, following the
-// SDK pg-store convention (inline const queries, a model.go row type, a
-// map[string]any of named params + applyFilter for the dynamic WHERE).
+// skit dbx helpers for queries, following the SDK pg-store convention (inline
+// const queries, a model.go row type, a map[string]any of named params +
+// applyFilter for the dynamic WHERE). It turns the dbx errors into the domain
+// sentinels, so the domain never imports dbx.
 package {{.Pkg}}db
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 	"uuid"
 
-	"github.com/assanoff/skit/order"
-	"github.com/assanoff/skit/page"
 	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/order"
+	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/page"
 
 	{{.Pkg}}core "{{.Module}}/core/{{.Pkg}}"
 )
 
-// Store implements {{.Pkg}}core.Store against Postgres.
-type Store struct {
+// repo is CRUD over the pool or a transaction.
+type repo struct {
 	log *slog.Logger
-	db  dbx.Querier
+	q   dbx.Querier // *dbx.DB or *dbx.Tx
 }
 
-// NewStore builds a Store over a pool.
-func NewStore(log *slog.Logger, db *dbx.DB) *Store {
-	return &Store{log: log, db: db}
+// withTx returns a copy of r bound to tx.
+func (r *repo) withTx(tx *dbx.Tx) *repo {
+	c := *r
+	c.q = tx
+	return &c
+}
+
+// Option configures a Store.
+type Option func(*Store)
+
+// WithEvents turns events on: WithinTranEvents hands fn the publisher fn(tx)
+// bound to the transaction. Without it the events are dropped.
+func WithEvents(fn func(tx *dbx.Tx) *outbox.Publisher) Option {
+	return func(s *Store) { s.events = fn }
+}
+
+// Store implements {{.Pkg}}core.Store against Postgres. Over a pool its
+// WithinTran opens a transaction, over a transaction it joins it.
+type Store struct {
+	*repo
+
+	events func(tx *dbx.Tx) *outbox.Publisher
+}
+
+// NewStore builds a Store over q: a pool (*dbx.DB) or a transaction
+// (*dbx.Tx). The same constructor binds the store to a transaction.
+func NewStore(log *slog.Logger, q dbx.Querier, opts ...Option) *Store {
+	s := &Store{repo: &repo{log: log, q: q}, events: discardEvents}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // Compile-time check that Store satisfies the domain contract.
 var _ {{.Pkg}}core.Store = (*Store)(nil)
 
-// Create implements {{.Pkg}}core.Store.
-func (s *Store) Create(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
+// WithinTran implements {{.Pkg}}core.Store.
+func (s *Store) WithinTran(ctx context.Context, fn func(r {{.Pkg}}core.Repo) error) error {
+	return dbx.WithinTran(ctx, s.log, s.q, func(tx *dbx.Tx) error {
+		return fn(s.withTx(tx))
+	})
+}
+
+// WithinTranEvents implements {{.Pkg}}core.Store.
+func (s *Store) WithinTranEvents(ctx context.Context, fn func(r {{.Pkg}}core.Repo, pub {{.Pkg}}core.Publisher) error) error {
+	return dbx.WithinTran(ctx, s.log, s.q, func(tx *dbx.Tx) error {
+		return fn(s.withTx(tx), s.events(tx))
+	})
+}
+
+// discardEvents is the store without events: the write goes through, the event
+// is dropped.
+func discardEvents(*dbx.Tx) *outbox.Publisher { return outbox.Discard() }
+
+// Create implements {{.Pkg}}core.Repo.
+func (r *repo) Create(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
 	const q = `
 		INSERT INTO {{.Plural}} (id, name, description, created_at, updated_at)
 		VALUES (:id, :name, :description, :created_at, :updated_at)`
-	if err := dbx.NamedExec(ctx, s.db, q, toDB(v)); err != nil {
+	err := dbx.NamedExec(ctx, r.q, q, toDB(v))
+	if errors.Is(err, dbx.ErrDBDuplicatedEntry) {
+		return fmt.Errorf("create: %w: %w", {{.Pkg}}core.ErrAlreadyExists, err)
+	}
+	if err != nil {
 		return fmt.Errorf("create: %w", err)
 	}
 	return nil
 }
 
-// Update implements {{.Pkg}}core.Store.
-func (s *Store) Update(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
+// Update implements {{.Pkg}}core.Repo.
+func (r *repo) Update(ctx context.Context, v {{.Pkg}}core.{{.Type}}) error {
 	const q = `
 		UPDATE {{.Plural}}
 		SET name = :name, description = :description, updated_at = :updated_at
 		WHERE id = :id`
-	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, toDB(v))
+	n, err := dbx.NamedExecRowsAffected(ctx, r.q, q, toDB(v))
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("update: %w", dbx.ErrDBNotFound)
+		return fmt.Errorf("update: %w", {{.Pkg}}core.ErrNotFound)
 	}
 	return nil
 }
 
-// Delete implements {{.Pkg}}core.Store.
-func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
+// Delete implements {{.Pkg}}core.Repo.
+func (r *repo) Delete(ctx context.Context, id uuid.UUID) error {
 	const q = `DELETE FROM {{.Plural}} WHERE id = :id`
 	data := struct {
 		ID string `db:"id"`
 	}{ID: id.String()}
-	n, err := dbx.NamedExecRowsAffected(ctx, s.db, q, data)
+	n, err := dbx.NamedExecRowsAffected(ctx, r.q, q, data)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("delete: %w", dbx.ErrDBNotFound)
+		return fmt.Errorf("delete: %w", {{.Pkg}}core.ErrNotFound)
 	}
 	return nil
 }
 
-// QueryByID implements {{.Pkg}}core.Store.
-func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) ({{.Pkg}}core.{{.Type}}, error) {
+// QueryByID implements {{.Pkg}}core.Repo.
+func (r *repo) QueryByID(ctx context.Context, id uuid.UUID) ({{.Pkg}}core.{{.Type}}, error) {
 	const q = `SELECT id, name, description, created_at, updated_at FROM {{.Plural}} WHERE id = :id`
 	data := struct {
 		ID string `db:"id"`
 	}{ID: id.String()}
 
-	row, err := dbx.NamedQueryOne[db{{.Type}}](ctx, s.db, q, data)
+	row, err := dbx.NamedQueryOne[db{{.Type}}](ctx, r.q, q, data)
+	if errors.Is(err, dbx.ErrDBNotFound) {
+		return {{.Pkg}}core.{{.Type}}{}, fmt.Errorf("querybyid: %w", {{.Pkg}}core.ErrNotFound)
+	}
 	if err != nil {
 		return {{.Pkg}}core.{{.Type}}{}, fmt.Errorf("querybyid: %w", err)
 	}
 	return toCore(row), nil
 }
 
-// Count implements {{.Pkg}}core.Store, honoring filter so a filtered total stays
+// Count implements {{.Pkg}}core.Repo, honoring filter so a filtered total stays
 // consistent with the filtered page.
-func (s *Store) Count(ctx context.Context, filter {{.Pkg}}core.QueryFilter) (int, error) {
+func (r *repo) Count(ctx context.Context, filter {{.Pkg}}core.QueryFilter) (int, error) {
 	data := map[string]any{}
 	buf := bytes.NewBufferString(`SELECT count(*) AS n FROM {{.Plural}}`)
-	s.applyFilter(filter, data, buf)
+	r.applyFilter(filter, data, buf)
 
-	n, err := dbx.NamedQueryOne[int](ctx, s.db, buf.String(), data)
+	n, err := dbx.NamedQueryOne[int](ctx, r.q, buf.String(), data)
 	if err != nil {
 		return 0, fmt.Errorf("count: %w", err)
 	}
 	return n, nil
 }
 
-// Query implements {{.Pkg}}core.Store: one filtered, ordered page. The WHERE is built
+// Query implements {{.Pkg}}core.Repo: one filtered, ordered page. The WHERE is built
 // by applyFilter, the ORDER BY by orderByClause (allowlisted), and the pagination
 // clause binds :offset and :rows_per_page below.
-func (s *Store) Query(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by order.By, pg page.Page) ([]{{.Pkg}}core.{{.Type}}, error) {
+func (r *repo) Query(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by order.By, pg page.Page) ([]{{.Pkg}}core.{{.Type}}, error) {
 	clause, err := orderByClause(by)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
@@ -121,23 +178,23 @@ func (s *Store) Query(ctx context.Context, filter {{.Pkg}}core.QueryFilter, by o
 	}
 
 	buf := bytes.NewBufferString(`SELECT id, name, description, created_at, updated_at FROM {{.Plural}}`)
-	s.applyFilter(filter, data, buf)
+	r.applyFilter(filter, data, buf)
 	buf.WriteString(clause)
 	buf.WriteString(" OFFSET :offset ROWS FETCH NEXT :rows_per_page ROWS ONLY")
 
-	rows, err := dbx.NamedQueryList[db{{.Type}}](ctx, s.db, buf.String(), data)
+	rows, err := dbx.NamedQueryList[db{{.Type}}](ctx, r.q, buf.String(), data)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	return toCoreSlice(rows), nil
 }
 
-// QueryByCursor implements {{.Pkg}}core.Store with keyset (cursor) pagination, honoring
+// QueryByCursor implements {{.Pkg}}core.Repo with keyset (cursor) pagination, honoring
 // filter. It combines filter's predicates with the keyset boundary in one WHERE,
 // fetches one extra row to detect a further page, trims it, and encodes the last
 // row's (created_at, id) into the next token. Back it with a composite index on
 // ({{.Plural}}) (created_at DESC, id DESC) so it stays O(limit) at any depth.
-func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}core.QueryFilter, cur page.Cursor) ([]{{.Pkg}}core.{{.Type}}, string, error) {
+func (r *repo) QueryByCursor(ctx context.Context, filter {{.Pkg}}core.QueryFilter, cur page.Cursor) ([]{{.Pkg}}core.{{.Type}}, string, error) {
 	key, err := cur.Key()
 	if err != nil {
 		return nil, "", fmt.Errorf("querybycursor: %w", err)
@@ -165,10 +222,10 @@ func (s *Store) QueryByCursor(ctx context.Context, filter {{.Pkg}}core.QueryFilt
 	}
 
 	buf := bytes.NewBufferString(`SELECT id, name, description, created_at, updated_at FROM {{.Plural}}`)
-	s.applyFilter(filter, data, buf, extra...)
+	r.applyFilter(filter, data, buf, extra...)
 	buf.WriteString(` ORDER BY created_at DESC, id DESC LIMIT :limit`)
 
-	rows, err := dbx.NamedQueryList[db{{.Type}}](ctx, s.db, buf.String(), data)
+	rows, err := dbx.NamedQueryList[db{{.Type}}](ctx, r.q, buf.String(), data)
 	if err != nil {
 		return nil, "", fmt.Errorf("querybycursor: %w", err)
 	}

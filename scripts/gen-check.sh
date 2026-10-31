@@ -38,8 +38,8 @@ add worker mailer --claim
 add cron report
 add cron digest --lock postgres
 add cron sync --lock redis
-add event widget-created --with-relay
-add event order-placed
+add event widget-created --core widget --with-relay
+add event order-placed --core order
 add http-client billing
 add http-client identity --oauth
 add migration add-index

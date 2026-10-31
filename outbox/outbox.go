@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"time"
 	"uuid"
-
-	"github.com/assanoff/skit/dbx"
 )
 
 // Event statuses stored in the status column.
@@ -61,7 +59,7 @@ type Event struct {
 // payload must already be serialized by the caller.
 //
 // Most producers don't call NewEvent directly — they Publish a typed value
-// through a tx-bound Publisher (see Bind / WithinTran), which resolves the
+// through a tx-bound Publisher (see Bind), which resolves the
 // route from a Registry. NewEvent is the low-level escape hatch for building a
 // row with a dynamic topic.
 func NewEvent(eventType, topic, contentType string, payload []byte, headers map[string]any) (Event, error) {
@@ -103,12 +101,8 @@ func NewEvent(eventType, topic, contentType string, payload []byte, headers map[
 // Store is the persistence port for the outbox table. The Postgres
 // implementation is *PG.
 type Store interface {
-	// WithTx returns a sibling Store whose queries run on tx. Used by WithinTran
-	// to insert events in the caller's domain transaction.
-	WithTx(tx dbx.Querier) Store
-
-	// Insert writes pending events. Bound to a transaction when the Store was
-	// derived via WithTx.
+	// Insert writes pending events on the pool, outside any domain
+	// transaction. A producer writes its events with Bind instead.
 	Insert(ctx context.Context, events ...Event) error
 
 	// LeasePending atomically claims up to limit pending events whose

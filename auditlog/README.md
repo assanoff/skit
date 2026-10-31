@@ -48,15 +48,15 @@ All paths converge on `Core.Create`. Pick the entry point per call site:
 
 | Way                       | How                                                           | Delivery |
 | ------------------------- | ------------------------------------------------------------ | -------- |
-| Direct                    | `core.Create(ctx, auditlog.NewAuditLog{...})`                | caller-controlled; atomic via `store.WithTx(tx)` |
+| Direct                    | `core.Create(ctx, auditlog.NewAuditLog{...})`                | caller-controlled; atomic on a Core over the transaction |
 | Internal bus (decoupled)  | `auditbus.Register(bus, rec)` + `auditbus.Publish(ctx, bus, ev)` | best-effort |
 | External bus              | decode a broker delivery → `auditbus.Record(ctx, core, ev)`  | caller-controlled (ack/nack) |
 
 ```go
 // Direct, atomic with the business change:
 err := dbx.WithinTran(ctx, log, db, func(tx *dbx.Tx) error {
-    if err := widgetStore.WithTx(tx).Update(ctx, w); err != nil { return err }
-    _, err := auditlog.NewCore(log, store.WithTx(tx)).Create(ctx, auditlog.NewAuditLog{
+    if err := widgetdb.NewStore(log, tx).Update(ctx, w); err != nil { return err }
+    _, err := auditlog.NewCore(log, auditpg.NewStore(log, tx)).Create(ctx, auditlog.NewAuditLog{
         ModelType: "widget", ModelID: w.ID, CreatedBy: actor(ctx), Payload: w,
     })
     return err

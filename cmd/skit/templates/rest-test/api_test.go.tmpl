@@ -14,7 +14,6 @@ import (
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/matryer/is"
 
-	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 	"github.com/assanoff/skit/rest"
@@ -68,7 +67,7 @@ func TestRest_Get{{.Type}}_404(t *testing.T) {
 
 	store := &mocks.StoreMock{
 		QueryByIDFunc: func(ctx context.Context, id uuid.UUID) ({{.Pkg}}core.{{.Type}}, error) {
-			return {{.Pkg}}core.{{.Type}}{}, dbx.ErrDBNotFound
+			return {{.Pkg}}core.{{.Type}}{}, {{.Pkg}}core.ErrNotFound
 		},
 	}
 	h := newTestHandler(store)
@@ -79,7 +78,7 @@ func TestRest_Get{{.Type}}_404(t *testing.T) {
 
 	rest.HandlerFunc(h.queryByID).ServeHTTP(w, req)
 
-	is.Equal(w.Code, http.StatusNotFound) // 404 mapped from dbx.ErrDBNotFound
+	is.Equal(w.Code, http.StatusNotFound) // 404 mapped from {{.Pkg}}core.ErrNotFound
 }
 
 func TestRest_Get{{.Type}}_BadID_400(t *testing.T) {

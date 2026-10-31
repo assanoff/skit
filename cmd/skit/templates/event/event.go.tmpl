@@ -1,15 +1,14 @@
-// Package {{.Pkg}} defines the {{.Type}} domain event and registers its outbox
-// route. A producer publishes {{.Type}} through an outbox.Publisher inside its
-// transaction (outbox.WithinTran); the relay then delivers it to the broker.
-// A consumer decodes the CloudEvents envelope on the other side (see
-// `skit add consumer`).
+// Package {{.Pkg}} registers the outbox route of the {{.Core}}.{{.Type}} event:
+// its CloudEvents type and topic. The event type lives in the domain
+// (core/{{.Core}}), which imports neither outbox nor this package; the relay
+// delivers the stored event to the broker, and a consumer decodes the
+// CloudEvents envelope on the other side (see `skit add consumer`).
 package {{.Pkg}}
 
 import (
-	"time"
-	"uuid"
-
 	"github.com/assanoff/skit/outbox"
+
+	"{{.Module}}/core/{{.Core}}"
 )
 
 // EventType is the CloudEvents `type` for this event — the stable name other
@@ -19,28 +18,13 @@ const EventType = "{{.Plural}}.created" // TODO: name the real event, e.g. "{{.P
 // Topic is the transport destination the relay publishes this event to.
 const Topic = "{{.Plural}}"
 
-// {{.Type}} is the event payload, serialized into the CloudEvents `data`. Treat
-// it as a published contract: additive changes only, no field reuse.
-type {{.Type}} struct {
-	ID uuid.UUID `json:"id"`
-	// TODO: add the fields consumers need (keep them minimal and stable).
-	OccurredAt time.Time `json:"occurred_at"`
-}
-
-// Register maps {{.Type}} to its CloudEvents type and topic on reg. Call it once
-// at startup, before the relay starts, so the outbox knows how to route the
-// event. The payload is JSON unless the registry has another codec
+// Register maps {{.Core}}.{{.Type}} to its CloudEvents type and topic on reg.
+// Call it once at startup, before the relay starts, so the outbox knows how to
+// route the event. The payload is JSON unless the registry has another codec
 // (outbox.WithCodec).
-//
-// Publish it transactionally from your core:
-//
-//	err := outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
-//	    // ... domain writes on tx ...
-//	    return pub.Publish(ctx, {{.Pkg}}.{{.Type}}{ID: id, OccurredAt: now})
-//	})
 //
 // The broker publisher derives any key from the message: Kafka keeps the
 // events of one aggregate in order with kafka.WithPartitionKey.
 func Register(reg *outbox.Registry) error {
-	return reg.Register[{{.Type}}](EventType, Topic)
+	return reg.Register[{{.Core}}.{{.Type}}](EventType, Topic)
 }

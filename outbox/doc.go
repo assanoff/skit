@@ -2,7 +2,7 @@
 // publishing domain events to a message broker.
 //
 // A domain write and the events it emits are inserted in ONE database
-// transaction (WithinTran); a background Relay then drains pending events to a
+// transaction (Bind); a background Relay then drains pending events to a
 // broker.Publisher with at-least-once delivery. So an event is never lost if
 // the broker is briefly down, and never published unless its domain write
 // commits.
@@ -26,9 +26,9 @@
 //   - Cleaner = worker.Loop deleting terminal rows past a retention window.
 //
 // Producer side: a Registry maps each event's Go type to its event type and
-// topic and encodes it with one Codec; Publisher (obtained from WithinTran or
-// Bind) records typed values into the outbox in the caller's transaction. A
-// key within the topic is the broker adapter's concern
+// topic and encodes it with one Codec; a Publisher from Bind records typed
+// values into the outbox in the caller's transaction, and one from Discard
+// drops them. A key within the topic is the broker adapter's concern
 // (rabbitmq.WithRoutingKey, kafka.WithPartitionKey).
 //
 // The Relay paces adaptively (worker.NewPacedLoop): a full batch means a backlog
@@ -112,16 +112,28 @@
 //
 // # Producing events
 //
-// Inside WithinTran the domain writes and publishes in the same transaction;
-// any error rolls back both. The closure receives tx (so an application can
-// bind its own store: store.WithTx(tx)) and a tx-bound Publisher:
+// The transaction belongs to the store of the domain (dbx.WithinTran). The
+// store hands the domain a Publisher bound to it: Bind writes the events on tx,
+// so they commit or roll back with the domain writes. The wiring decides once
+// where events go — into the outbox, or nowhere when the broker is off:
 //
-//	err := outbox.WithinTran(ctx, log, db, store, reg,
-//	    func(tx *dbx.Tx, pub outbox.Publisher) error {
-//	        if err := repo.WithTx(tx).Create(ctx, w); err != nil { // domain write
+//	events := func(tx *dbx.Tx) *outbox.Publisher {
+//	    if ob == nil { // the broker is off
+//	        return outbox.Discard()
+//	    }
+//	    return outbox.Bind(tx, ob, reg)
+//	}
+//	store := widgetdb.NewStore(log, db, widgetdb.WithEvents(events))
+//
+// The domain declares its own Publisher interface with the same method, so it
+// imports neither outbox nor dbx; *Publisher satisfies it without an adapter:
+//
+//	err := c.store.WithinTranEvents(ctx,
+//	    func(r widget.Repo, pub widget.Publisher) error {
+//	        if err := r.Create(ctx, w); err != nil { // domain write
 //	            return err
 //	        }
-//	        return pub.Publish(ctx, widget.Created{ID: w.ID.String()}) // domain event
+//	        return pub.Publish(ctx, widget.Created{ID: w.ID}) // domain event
 //	    })
 //
 // # One payload, many events
@@ -153,14 +165,6 @@
 //     PublishTimeout/Metrics), SweeperConfig (Interval/LeaseTimeout/BatchSize/
 //     Metrics), CleanerConfig (Interval/Retention/Metrics).
 //   - Backlog: NewBacklog(log, sr, metrics) (backlog gauges).
-//
-// # Escape hatch
-//
-// For a fully dynamic event built without the Registry, construct it with
-// NewEvent and insert it on the transaction directly:
-//
-//	ev, _ := outbox.NewEvent(eventType, topic, "application/json", payload, nil)
-//	err := store.WithTx(tx).Insert(ctx, ev)
 //
 // Publisher (this package) writes events into the outbox table; it is distinct
 // from broker.Publisher, which delivers an already-stored event to the wire.

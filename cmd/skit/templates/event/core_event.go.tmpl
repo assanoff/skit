@@ -1,0 +1,23 @@
+package {{.Core}}
+
+import (
+	"time"
+	"uuid"
+)
+
+// {{.Type}} is a domain event of {{.Core}}. The domain publishes it through its
+// Publisher inside a store transaction, so it commits with the domain write:
+//
+//	err := c.store.WithinTranEvents(ctx, func(r Repo, pub Publisher) error {
+//	    // ... domain writes through r ...
+//	    return pub.Publish(ctx, {{.Type}}{ID: id, OccurredAt: now})
+//	})
+//
+// It is serialized into the CloudEvents `data`: treat it as a published
+// contract — additive changes only, no field reuse. Its CloudEvents type and
+// topic are wiring, registered in internal/app/events/{{.Pkg}}.
+type {{.Type}} struct {
+	ID uuid.UUID `json:"id"`
+	// TODO: add the fields consumers need (keep them minimal and stable).
+	OccurredAt time.Time `json:"occurred_at"`
+}

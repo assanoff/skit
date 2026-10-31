@@ -11,6 +11,7 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbtest"
+	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/outbox"
 )
 
@@ -121,4 +122,42 @@ func TestPGFailAndRelease(t *testing.T) {
 	is.Equal(len(later), 1)
 	is.Equal(later[0].Type, "a")
 	is.Equal(later[0].Attempts, retried.Attempts+1) // still counted, never limiting
+}
+
+type bound struct {
+	ID string `json:"id"`
+}
+
+// TestBind checks that an event published through Bind lives and dies with
+// the transaction it is bound to.
+func TestBind(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+
+	is := is.New(t)
+	ctx := t.Context()
+	log := slog.New(slog.DiscardHandler)
+	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
+	store := outbox.NewPG(log, pg.DB, outbox.Options{})
+	is.NoErr(store.EnsureSchema(ctx))
+	reg := outbox.NewRegistry()
+	is.NoErr(reg.Register[bound]("widget.bound", "widgets"))
+
+	boom := errors.New("boom")
+	err := dbx.WithinTran(ctx, log, pg.DB, func(tx *dbx.Tx) error {
+		is.NoErr(outbox.Bind(tx, store, reg).Publish(ctx, bound{ID: "1"}))
+		return boom
+	})
+	is.True(errors.Is(err, boom))
+	err = dbx.WithinTran(ctx, log, pg.DB, func(tx *dbx.Tx) error {
+		return outbox.Bind(tx, store, reg).Publish(ctx, bound{ID: "2"})
+	})
+	is.NoErr(err)
+
+	leased, err := store.LeasePending(ctx, time.Now().UTC(), 10)
+	is.NoErr(err)
+	is.Equal(len(leased), 1) // the rolled-back event is gone
+	is.Equal(leased[0].Type, "widget.bound")
+	is.Equal(string(leased[0].Payload), `{"id":"2"}`)
 }

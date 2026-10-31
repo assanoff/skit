@@ -22,19 +22,15 @@ type Store struct {
 	db  dbx.Querier
 }
 
-// NewStore builds a Store. Pass a *dbx.DB for pool-backed use.
-func NewStore(log *slog.Logger, db *dbx.DB) *Store {
-	return &Store{log: log, db: db}
+// NewStore builds a Store over q: the pool (*dbx.DB), or a transaction
+// (*dbx.Tx) so an audit write commits atomically with the caller's business
+// change.
+func NewStore(log *slog.Logger, q dbx.Querier) *Store {
+	return &Store{log: log, db: q}
 }
 
 // Compile-time check that Store satisfies the domain contract.
 var _ auditlog.Store = (*Store)(nil)
-
-// WithTx returns a sibling Store whose queries run on tx, so an audit write can
-// commit atomically with the caller's business change.
-func (s *Store) WithTx(tx dbx.Querier) auditlog.Store {
-	return &Store{log: s.log, db: tx}
-}
 
 // schemaLockKey keys the transaction-level advisory lock that serializes
 // EnsureSchema across replicas booting at once.
@@ -43,8 +39,8 @@ var schemaLockKey = dbx.AdvisoryKey("skit.auditlog.schema")
 // EnsureSchema creates the audit_log table and indexes if absent. It is safe to
 // call at startup, including from several replicas at once: the DDL runs under a
 // transaction-scoped advisory lock that auto-releases on commit, so concurrent
-// boots serialize instead of racing on CREATE TABLE. A tx-bound store (via
-// WithTx) just runs the DDL — the caller owns the transaction and any locking.
+// boots serialize instead of racing on CREATE TABLE. A store over a transaction
+// just runs the DDL — the caller owns the transaction and any locking.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	db, ok := s.db.(*dbx.DB)
 	if !ok {

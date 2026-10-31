@@ -8,6 +8,8 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/outbox"
+
+	"{{.Module}}/core/{{.Core}}"
 )
 
 // TestRegister checks the event registers cleanly into a fresh outbox Registry.
@@ -21,11 +23,11 @@ func TestRegister(t *testing.T) {
 func TestPayloadRoundTrips(t *testing.T) {
 	is := is.New(t)
 
-	in := {{.Type}}{ID: uuid.New()}
+	in := {{.Core}}.{{.Type}}{ID: uuid.New()}
 	b, err := json.Marshal(in)
 	is.NoErr(err)
 
-	var out {{.Type}}
+	var out {{.Core}}.{{.Type}}
 	is.NoErr(json.Unmarshal(b, &out))
 	is.Equal(out.ID, in.ID) // id preserved across marshal/unmarshal
 }

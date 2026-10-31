@@ -17,12 +17,13 @@ import (
 // Store implements translation.Store against Postgres.
 type Store struct {
 	log *slog.Logger
-	db  *dbx.DB
+	db  dbx.Querier
 }
 
-// NewStore creates a Postgres-backed Store.
-func NewStore(log *slog.Logger, db *dbx.DB) *Store {
-	return &Store{log: log, db: db}
+// NewStore creates a Store over q: the pool (*dbx.DB), or a transaction
+// (*dbx.Tx) so translations commit with the caller's business change.
+func NewStore(log *slog.Logger, q dbx.Querier) *Store {
+	return &Store{log: log, db: q}
 }
 
 // Compile-time check that Store satisfies the domain contract.
@@ -52,9 +53,15 @@ CREATE INDEX IF NOT EXISTS idx_translation_lookup
 // EnsureSchema creates the translations table if absent. It is safe to call at
 // startup, including from several replicas at once: the DDL runs under a
 // transaction-scoped advisory lock that auto-releases on commit, so concurrent
-// boots serialize instead of racing on CREATE TABLE.
+// boots serialize instead of racing on CREATE TABLE. A store over a
+// transaction just runs the DDL — the caller owns the transaction and any
+// locking.
 func (s *Store) EnsureSchema(ctx context.Context) error {
-	return dbx.EnsureSchema(ctx, s.log, s.db, schemaLockKey, Schema())
+	db, ok := s.db.(*dbx.DB)
+	if !ok {
+		return dbx.Exec(ctx, s.db, Schema())
+	}
+	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
 }
 
 // SaveTranslation upserts every column of data in a single transaction. An empty

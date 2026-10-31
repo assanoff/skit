@@ -124,7 +124,9 @@ func TestRelaySendsInCreationTrace(t *testing.T) {
 	reg := NewRegistry()
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 	ctx, request := tel.TracerProvider().Tracer("api").Start(t.Context(), "request")
-	is.NoErr(Bind(nil, store, reg).Publish(ctx, widgetCreated{ID: "42"}))
+	ev, err := reg.event(ctx, widgetCreated{ID: "42"})
+	is.NoErr(err)
+	is.NoErr(store.Insert(ctx, ev))
 	request.End()
 
 	runRelay(t, tel, store)

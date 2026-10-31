@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"fmt"
 	"go/token"
 	"io"
@@ -153,6 +154,7 @@ type addRESTOpts struct {
 	Claim     bool   // worker: --claim (queue-backed) variant instead of periodic tick
 	Broker    string // consumer: transport for the generated wiring (rmq|kafka|nats)
 	WithRelay bool   // event: also scaffold the service-wide outbox relay bootstrap
+	Core      string // event: the domain (core/<core>) the event type lives in
 }
 
 // restData is the template payload shared by every generated REST file.
@@ -162,6 +164,7 @@ type restData struct {
 	Type       string // Widget      — exported Go type
 	Plural     string // widgets     — route path + table name
 	UpperSnake string // ORDER_LINE  — env-namespace fragment (consumer config)
+	Core       string // widget      — event: package of the domain event type
 }
 
 var nameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
@@ -876,7 +879,8 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 type addEventCommand struct {
 	Dir       string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
 	Module    string `long:"module" description:"module path (default: read from go.mod)"`
-	Plural    string `long:"plural" description:"event/topic plural (default: <name>+\"s\")"`
+	Plural    string `long:"plural" description:"event/topic plural (default: <core>+\"s\")"`
+	Core      string `long:"core" required:"yes" description:"domain the event type lives in (core/<core>), e.g. widget"`
 	WithRelay bool   `long:"with-relay" description:"also scaffold the service-wide outbox relay bootstrap (Store + Registry + Relay); created once, skipped if present"`
 	NoTests   bool   `long:"no-tests" description:"skip generating the event test"`
 	Args      struct {
@@ -892,16 +896,21 @@ func (c *addEventCommand) Execute([]string) error {
 		Name:      c.Args.Name,
 		NoTests:   c.NoTests,
 		WithRelay: c.WithRelay,
+		Core:      c.Core,
 	})
 }
 
-// addEvent generates a domain event into internal/app/events/<name>: a typed
-// payload + Register (its outbox route). With opts.WithRelay it also writes the
+// addEvent generates a domain event: its typed payload in the domain
+// (core/<core>/<name>.go, no outbox import) and Register, its outbox route, in
+// internal/app/events/<name>. With opts.WithRelay it also writes the
 // service-wide, event-agnostic relay bootstrap (internal/app/events/relay.go),
 // created once and skipped on re-run.
 func addEvent(out io.Writer, opts addRESTOpts) error {
 	if err := checkName(opts.Name, nil); err != nil {
 		return err
+	}
+	if err := checkName(opts.Core, entityNames); err != nil {
+		return fmt.Errorf("--core: %w", err)
 	}
 
 	dir := opts.Dir
@@ -919,21 +928,25 @@ func addEvent(out io.Writer, opts addRESTOpts) error {
 	}
 
 	words := splitWords(opts.Name)
-	pkg := strings.ToLower(strings.Join(words, ""))
-	plural := opts.Plural
-	if plural == "" {
-		plural = pkg + "s"
+	coreWords := splitWords(opts.Core)
+	typ, nameErr := eventTypeName(words, coreWords)
+	if nameErr != nil {
+		return nameErr
 	}
+	pkg := strings.ToLower(strings.Join(words, ""))
+	core := strings.ToLower(strings.Join(coreWords, ""))
 	data := restData{
 		Module: module,
 		Pkg:    pkg,
-		Type:   pascal(words),
-		Plural: plural,
+		Type:   typ,
+		Plural: cmp.Or(opts.Plural, core+"s"),
+		Core:   core,
 	}
 
 	eventsDir := filepath.Join(dir, "internal", "app", "events")
 	pkgDir := filepath.Join(eventsDir, pkg)
 	files := []struct{ dest, tmpl string }{
+		{filepath.Join(dir, "core", core, pkg+".go"), "templates/event/core_event.go.tmpl"},
 		{filepath.Join(pkgDir, pkg+".go"), "templates/event/event.go.tmpl"},
 	}
 	if !opts.NoTests {
@@ -955,67 +968,96 @@ func addEvent(out io.Writer, opts addRESTOpts) error {
 		}
 	}
 
-	printEventNextSteps(out, data, opts.WithRelay)
+	// The full bootstrap (internal/app/deps present) already builds the outbox,
+	// its registry and Events; the hints point there.
+	_, err := os.Stat(filepath.Join(dir, "internal", "app", "deps"))
+	printEventNextSteps(out, data, err == nil, opts.WithRelay)
 	return nil
 }
 
+// eventTypeName names the event type in its domain package: the event name
+// without the domain prefix, so widget-created in core/widget is
+// widget.Created, not the stuttering widget.WidgetCreated.
+func eventTypeName(words, core []string) (string, error) {
+	n := len(core)
+	if len(words) < n || !strings.EqualFold(strings.Join(words[:n], ""), strings.Join(core, "")) {
+		return pascal(words), nil
+	}
+	if len(words) == n {
+		name := strings.Join(words, "-")
+		return "", fmt.Errorf("event name %q names the domain, not the event (e.g. %s-created)", name, name)
+	}
+	return pascal(words[n:]), nil
+}
+
 // printEventNextSteps prints the outbox wiring a developer adds by hand:
-// register the route, run the relay, and publish transactionally.
-func printEventNextSteps(out io.Writer, d restData, withRelay bool) {
+// register the route, run the relay, and publish from the domain through its
+// store.
+func printEventNextSteps(out io.Writer, d restData, full, withRelay bool) {
+	// [1]=Pkg [2]=Module [3]=Type [4]=Core
 	fmt.Fprintf(out, `
-Scaffolded the %[1]q event (CloudEvents type %[1]s.EventType, topic %[1]s.Topic). Next:
+Scaffolded the %[1]q event: %[4]s.%[3]s (core/%[4]s) and its route
+%[1]s.EventType, topic %[1]s.Topic (internal/app/events/%[1]s). Next:
 
 1. go mod tidy   # test dep (matryer/is)
-`, d.Pkg)
+`, d.Pkg, d.Module, d.Type, d.Core)
 
-	if withRelay {
+	switch {
+	case full:
+		fmt.Fprintf(out, `
+2. Register the route in the Registry provider (internal/app/deps/broker.go);
+   the relay already runs when the broker is on (addOutboxWorkers):
+
+   if err := %[1]s.Register(reg); err != nil { return nil, err }
+   // import: "%[2]s/internal/app/events/%[1]s"
+
+3. Build the %[4]s store with events (internal/app/deps/%[4]s.go) — c.Events
+   binds them to the outbox when the broker is on and drops them when it is off:
+
+   %[4]sdb.NewStore(c.Logger, c.DB(ctx), %[4]sdb.WithEvents(c.Events(ctx)))
+`, d.Pkg, d.Module, d.Type, d.Core)
+	case withRelay:
 		fmt.Fprintf(out, `
 2. Register the route in internal/app/events/relay.go (NewRegistry):
 
    if err := %[1]s.Register(reg); err != nil { return nil, err }
-   // import: %[1]s "%[2]s/internal/app/events/%[1]s"
+   // import: "%[2]s/internal/app/events/%[1]s"
 
-3. Wire the outbox relay into initWorkers (internal/app/server/server.go),
-   passing your broker publisher:
+3. Run the relay with the workers and build the %[4]s store with events:
 
-   store, err := events.NewStore(ctx, a.d.Logger, a.d.DB(ctx))
-   reg, err  := events.NewRegistry()
-   a.workers = append(a.workers, events.NewRelay(a.d.Logger, store, pub, a.d.Metrics)) // pub = rabbitmq/kafka NewPublisher
-   // import: "%[2]s/internal/app/events"
+   ob, err  := events.NewStore(ctx, log, db)
+   reg, err := events.NewRegistry()
+   workers = append(workers, events.NewRelay(log, ob, pub, metrics)) // pub = rabbitmq/kafka NewPublisher
+   store := %[4]sdb.NewStore(log, db, %[4]sdb.WithEvents(func(tx *dbx.Tx) *outbox.Publisher {
+       return outbox.Bind(tx, ob, reg)
+   }))
+`, d.Pkg, d.Module, d.Type, d.Core)
+	default:
+		fmt.Fprintf(out, `
+2. Build the outbox once at startup (or generate it with --with-relay), run its
+   relay with the workers and build the %[4]s store with events:
 
-4. Publish transactionally from your core (atomic with the domain write):
+   ob := outbox.NewPG(log, db, outbox.Options{}); _ = ob.EnsureSchema(ctx)
+   reg := outbox.NewRegistry(); _ = %[1]s.Register(reg)
+   workers = append(workers, outbox.NewRelay(log, ob, pub, outbox.RelayConfig{Metrics: metrics})) // pub = broker publisher
+   store := %[4]sdb.NewStore(log, db, %[4]sdb.WithEvents(func(tx *dbx.Tx) *outbox.Publisher {
+       return outbox.Bind(tx, ob, reg)
+   }))
+`, d.Pkg, d.Module, d.Type, d.Core)
+	}
 
-   outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
-       // ... domain writes on tx ...
-       return pub.Publish(ctx, %[1]s.%[3]s{ID: id})
+	fmt.Fprintf(out, `
+4. Publish from the %[4]s core through its store, atomic with the domain write:
+
+   err := c.store.WithinTranEvents(ctx, func(r Repo, pub Publisher) error {
+       // ... domain writes through r ...
+       return pub.Publish(ctx, %[3]s{ID: id})
    })
    // Kafka keeps the events of one aggregate in order with kafka.WithPartitionKey
    // on the publisher; RabbitMQ routes by the event type.
 
 5. go test ./internal/app/events/%[1]s/...
-`, d.Pkg, d.Module, d.Type)
-		return
-	}
-
-	fmt.Fprintf(out, `
-2. Build the outbox once at startup (or generate it with --with-relay) and run
-   its relay with the workers — in initWorkers (internal/app/server/server.go):
-
-   store := outbox.NewPG(a.d.Logger, a.d.DB(ctx), outbox.Options{}); _ = store.EnsureSchema(ctx)
-   reg := outbox.NewRegistry(); _ = %[1]s.Register(reg)
-   a.workers = append(a.workers, outbox.NewRelay(a.d.Logger, store, pub, outbox.RelayConfig{Metrics: a.d.Metrics})) // pub = broker publisher
-
-3. Publish transactionally from your core (atomic with the domain write):
-
-   outbox.WithinTran(ctx, log, db, store, reg, func(tx *dbx.Tx, pub outbox.Publisher) error {
-       // ... domain writes on tx ...
-       return pub.Publish(ctx, %[1]s.%[3]s{ID: id})
-   })
-   // Kafka keeps the events of one aggregate in order with kafka.WithPartitionKey
-   // on the publisher; RabbitMQ routes by the event type.
-
-4. go test ./internal/app/events/%[1]s/...
-`, d.Pkg, d.Module, d.Type)
+`, d.Pkg, d.Module, d.Type, d.Core)
 }
 
 // addGRPCCommand scaffolds a gRPC module for one entity: a .proto contract plus
@@ -1186,7 +1228,8 @@ const grpcCoreSteps = `
 
       var init%[2]s = func(c *Deps) (dim.CleanupFunc, error) {
           c.%[2]sCore = dim.Once(func(ctx context.Context) (*%[1]s.Core, error) {
-              return %[1]s.NewCore(c.Logger, %[1]sdb.NewStore(c.Logger, c.DB(ctx))), nil
+              store := %[1]sdb.NewStore(c.Logger, c.DB(ctx), %[1]sdb.WithEvents(c.Events(ctx)))
+              return %[1]s.NewCore(c.Logger, store), nil
           })
           return nil, nil
       }
@@ -1432,7 +1475,8 @@ func printRESTWiring(out io.Writer, d restData, full bool) {
 
       var init%[2]s = func(c *Deps) (dim.CleanupFunc, error) {
           c.%[2]sCore = dim.Once(func(ctx context.Context) (*%[1]s.Core, error) {
-              return %[1]s.NewCore(c.Logger, %[1]sdb.NewStore(c.Logger, c.DB(ctx))), nil
+              store := %[1]sdb.NewStore(c.Logger, c.DB(ctx), %[1]sdb.WithEvents(c.Events(ctx)))
+              return %[1]s.NewCore(c.Logger, store), nil
           })
           c.%[2]sHandler = dim.Once(func(ctx context.Context) (*%[1]sapi.Handler, error) {
               return %[1]sapi.New(c.%[2]sCore(ctx)), nil

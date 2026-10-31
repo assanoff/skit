@@ -94,8 +94,15 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 		}
 	}
 	db := readFile(t, filepath.Join(dir, "core/widget/widgetdb/widgetdb.go"))
-	if !strings.Contains(db, "func (s *Store) QueryByCursor(") {
-		t.Errorf("store missing QueryByCursor:\n%s", db)
+	for _, want := range []string{
+		"func (r *repo) QueryByCursor(",
+		"func (s *Store) WithinTran(",
+		"func (s *Store) WithinTranEvents(",
+		"func NewStore(log *slog.Logger, q dbx.Querier, opts ...Option) *Store",
+	} {
+		if !strings.Contains(db, want) {
+			t.Errorf("store missing %q:\n%s", want, db)
+		}
 	}
 	// The store integration test lives in tests/ (not beside the code) and
 	// exercises the listing set against a dbtest Postgres container.
@@ -419,17 +426,33 @@ func TestAddEventGeneratesParsableEvent(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")
 
-	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "advert-created"}); err != nil {
+	opts := addRESTOpts{Dir: dir, Name: "advert-created", Core: "advert"}
+	if err := addEvent(&bytes.Buffer{}, opts); err != nil {
 		t.Fatalf("addEvent: %v", err)
+	}
+
+	// The type lives in the domain and does not import outbox.
+	typ := readFile(t, filepath.Join(dir, "core/advert/advertcreated.go"))
+	if _, err := parser.ParseFile(token.NewFileSet(), "advertcreated.go", typ, parser.AllErrors); err != nil {
+		t.Errorf("event type does not parse: %v", err)
+	}
+	if !strings.Contains(typ, "package advert") || !strings.Contains(typ, "type Created struct") {
+		t.Errorf("event type not in the domain package:\n%s", typ)
+	}
+	if strings.Contains(typ, "skit/outbox") {
+		t.Errorf("event type imports outbox:\n%s", typ)
 	}
 
 	src := readFile(t, filepath.Join(dir, "internal/app/events/advertcreated/advertcreated.go"))
 	if _, err := parser.ParseFile(token.NewFileSet(), "advertcreated.go", src, parser.AllErrors); err != nil {
-		t.Errorf("event does not parse: %v", err)
+		t.Errorf("event route does not parse: %v", err)
 	}
-	for _, want := range []string{"type AdvertCreated struct", "func Register(", "const EventType", "reg.Register[AdvertCreated](EventType, Topic)"} {
+	for _, want := range []string{
+		"func Register(", "const EventType", `const Topic = "adverts"`,
+		`"github.com/me/svc/core/advert"`, "reg.Register[advert.Created](EventType, Topic)",
+	} {
 		if !strings.Contains(src, want) {
-			t.Errorf("event missing %q:\n%s", want, src)
+			t.Errorf("event route missing %q:\n%s", want, src)
 		}
 	}
 	// Without --with-relay the relay bootstrap must not exist.
@@ -438,11 +461,33 @@ func TestAddEventGeneratesParsableEvent(t *testing.T) {
 	}
 }
 
+// The event type drops the domain prefix of the event name, so it reads as
+// widget.Created; a name that is only the domain names no event.
+func TestEventTypeName(t *testing.T) {
+	tests := []struct {
+		name, core, want string
+	}{
+		{"widget-created", "widget", "Created"},
+		{"order-line-paid", "order-line", "Paid"},
+		{"orderLinePaid", "order_line", "Paid"},
+		{"order-paid", "widget", "OrderPaid"},
+	}
+	for _, tc := range tests {
+		got, err := eventTypeName(splitWords(tc.name), splitWords(tc.core))
+		if err != nil || got != tc.want {
+			t.Errorf("eventTypeName(%q, %q) = %q, %v; want %q", tc.name, tc.core, got, err, tc.want)
+		}
+	}
+	if _, err := eventTypeName(splitWords("widget"), splitWords("widget")); err == nil {
+		t.Error("an event named like its domain must be rejected")
+	}
+}
+
 func TestAddEventWithRelayIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")
 
-	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "advert-created", WithRelay: true}); err != nil {
+	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "advert-created", Core: "advert", WithRelay: true}); err != nil {
 		t.Fatalf("first addEvent: %v", err)
 	}
 	relay := filepath.Join(dir, "internal/app/events/relay.go")
@@ -459,7 +504,7 @@ func TestAddEventWithRelayIsIdempotent(t *testing.T) {
 	if err := os.WriteFile(relay, []byte(src+"\n// edited by hand\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "order-paid", WithRelay: true}); err != nil {
+	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "order-paid", Core: "order", WithRelay: true}); err != nil {
 		t.Fatalf("second addEvent: %v", err)
 	}
 	if got := readFile(t, relay); !strings.Contains(got, "edited by hand") {

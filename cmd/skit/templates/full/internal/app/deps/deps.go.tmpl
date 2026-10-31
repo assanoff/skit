@@ -38,6 +38,7 @@ type Deps struct {
 	BrokerConn dim.Provider[*rabbitmq.Conn]
 	Publisher  dim.Provider[broker.Publisher]
 	Outbox     dim.Provider[*outbox.PG]
+	Registry   dim.Provider[*outbox.Registry]
 
 	// Domain providers go here, e.g.:
 	//   WalletCore    dim.Provider[*wallet.Core]

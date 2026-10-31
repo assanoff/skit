@@ -5,10 +5,8 @@ package mocks
 
 import (
 	"context"
-	"sync"
-
 	"github.com/assanoff/skit/auditlog"
-	"github.com/assanoff/skit/dbx"
+	"sync"
 )
 
 // Ensure, that StoreMock does implement auditlog.Store.
@@ -42,9 +40,6 @@ var _ auditlog.Store = &StoreMock{}
 //			VersionsFunc: func(ctx context.Context, modelType string, modelID string) ([]int, error) {
 //				panic("mock out the Versions method")
 //			},
-//			WithTxFunc: func(tx dbx.Querier) auditlog.Store {
-//				panic("mock out the WithTx method")
-//			},
 //		}
 //
 //		// use mockedStore in code that requires auditlog.Store
@@ -72,9 +67,6 @@ type StoreMock struct {
 
 	// VersionsFunc mocks the Versions method.
 	VersionsFunc func(ctx context.Context, modelType string, modelID string) ([]int, error)
-
-	// WithTxFunc mocks the WithTx method.
-	WithTxFunc func(tx dbx.Querier) auditlog.Store
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -143,11 +135,6 @@ type StoreMock struct {
 			// ModelID is the modelID argument value.
 			ModelID string
 		}
-		// WithTx holds details about calls to the WithTx method.
-		WithTx []struct {
-			// Tx is the tx argument value.
-			Tx dbx.Querier
-		}
 	}
 	lockDeleteVersions        sync.RWMutex
 	lockOverThreshold         sync.RWMutex
@@ -156,7 +143,6 @@ type StoreMock struct {
 	lockQueryModelByVersion   sync.RWMutex
 	lockSave                  sync.RWMutex
 	lockVersions              sync.RWMutex
-	lockWithTx                sync.RWMutex
 }
 
 // DeleteVersions calls DeleteVersionsFunc.
@@ -440,37 +426,5 @@ func (mock *StoreMock) VersionsCalls() []struct {
 	mock.lockVersions.RLock()
 	calls = mock.calls.Versions
 	mock.lockVersions.RUnlock()
-	return calls
-}
-
-// WithTx calls WithTxFunc.
-func (mock *StoreMock) WithTx(tx dbx.Querier) auditlog.Store {
-	if mock.WithTxFunc == nil {
-		panic("StoreMock.WithTxFunc: method is nil but Store.WithTx was just called")
-	}
-	callInfo := struct {
-		Tx dbx.Querier
-	}{
-		Tx: tx,
-	}
-	mock.lockWithTx.Lock()
-	mock.calls.WithTx = append(mock.calls.WithTx, callInfo)
-	mock.lockWithTx.Unlock()
-	return mock.WithTxFunc(tx)
-}
-
-// WithTxCalls gets all the calls that were made to WithTx.
-// Check the length with:
-//
-//	len(mockedStore.WithTxCalls())
-func (mock *StoreMock) WithTxCalls() []struct {
-	Tx dbx.Querier
-} {
-	var calls []struct {
-		Tx dbx.Querier
-	}
-	mock.lockWithTx.RLock()
-	calls = mock.calls.WithTx
-	mock.lockWithTx.RUnlock()
 	return calls
 }

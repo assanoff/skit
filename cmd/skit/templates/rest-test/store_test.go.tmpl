@@ -11,7 +11,6 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbtest"
-	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
 
@@ -144,7 +143,7 @@ func Test{{.Type}}StoreOffsetAndCount(t *testing.T) {
 }
 
 // Test{{.Type}}StoreNotFound pins what "nothing there" means: a get, update or
-// delete by a missing key is ErrDBNotFound, a list that matches nothing is
+// delete by a missing key is ErrNotFound, a list that matches nothing is
 // empty and no error.
 func Test{{.Type}}StoreNotFound(t *testing.T) {
 	if testing.Short() {
@@ -157,15 +156,52 @@ func Test{{.Type}}StoreNotFound(t *testing.T) {
 	missing := uuid.New()
 
 	_, err := s.QueryByID(ctx, missing)
-	is.True(errors.Is(err, dbx.ErrDBNotFound)) // get
+	is.True(errors.Is(err, {{.Pkg}}core.ErrNotFound)) // get
 	err = s.Update(ctx, {{.Pkg}}core.{{.Type}}{ID: missing, Name: "x"})
-	is.True(errors.Is(err, dbx.ErrDBNotFound)) // update changes no row
+	is.True(errors.Is(err, {{.Pkg}}core.ErrNotFound)) // update changes no row
 	err = s.Delete(ctx, missing)
-	is.True(errors.Is(err, dbx.ErrDBNotFound)) // delete changes no row
+	is.True(errors.Is(err, {{.Pkg}}core.ErrNotFound)) // delete changes no row
 
 	items, err := s.Query(ctx, {{.Pkg}}core.QueryFilter{}, {{.Pkg}}core.DefaultOrder, page.New(1, 10))
 	is.NoErr(err)          // an empty list is not an error
 	is.Equal(len(items), 0)
+}
+
+// Test{{.Type}}StoreWithinTran pins the transactions of the store: an error of
+// fn rolls its write back, a create of an existing id is ErrAlreadyExists, and
+// WithinTranEvents without events commits the write and drops the event.
+func Test{{.Type}}StoreWithinTran(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+	is := is.New(t)
+
+	ctx := context.Background()
+	s := new{{.Type}}Store(ctx, t)
+	at := time.Now().UTC()
+	item := {{.Pkg}}core.{{.Type}}{ID: uuid.New(), Name: "x", CreatedAt: at, UpdatedAt: at}
+
+	boom := errors.New("boom")
+	err := s.WithinTran(ctx, func(r {{.Pkg}}core.Repo) error {
+		is.NoErr(r.Create(ctx, item))
+		return boom
+	})
+	is.True(errors.Is(err, boom))
+	_, err = s.QueryByID(ctx, item.ID)
+	is.True(errors.Is(err, {{.Pkg}}core.ErrNotFound)) // rolled back
+
+	err = s.WithinTranEvents(ctx, func(r {{.Pkg}}core.Repo, pub {{.Pkg}}core.Publisher) error {
+		if err := r.Create(ctx, item); err != nil {
+			return err
+		}
+		return pub.Publish(ctx, struct{}{}) // no events wired: dropped
+	})
+	is.NoErr(err)
+	_, err = s.QueryByID(ctx, item.ID)
+	is.NoErr(err) // committed
+
+	err = s.Create(ctx, item)
+	is.True(errors.Is(err, {{.Pkg}}core.ErrAlreadyExists)) // same id
 }
 
 // Test{{.Type}}StoreFilter exercises QueryFilter: name and description are

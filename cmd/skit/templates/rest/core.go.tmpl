@@ -1,7 +1,8 @@
 // Package {{.Pkg}} is a business module scaffolded by `skit add rest`.
 // The Core holds business logic and depends only on the Store interface declared
 // here; the concrete SQL implementation lives in the nested {{.Pkg}}db package.
-// This keeps the domain testable and storage-agnostic.
+// This keeps the domain testable and storage-agnostic: it imports neither dbx
+// nor outbox, and the store returns the sentinels declared here.
 package {{.Pkg}}
 
 import (
@@ -14,15 +15,19 @@ import (
 	"github.com/assanoff/skit/errs"
 	"github.com/assanoff/skit/order"
 	"github.com/assanoff/skit/page"
-	"github.com/assanoff/skit/dbx"
 )
 
-//go:generate go tool moq -out mocks/store.go -pkg mocks . Store
+// Errors the store returns: a get, update or delete of a missing {{.Pkg}}, and
+// a create that collides with an existing one.
+var (
+	ErrNotFound      = errors.New("{{.Pkg}} not found")
+	ErrAlreadyExists = errors.New("{{.Pkg}} already exists")
+)
 
-// Store is the persistence contract for {{.Plural}}. The Core depends on this
-// interface; concrete implementations (e.g. {{.Pkg}}db) live elsewhere.
-// Run `make generate` (moq) to (re)generate mocks/StoreMock for tests.
-type Store interface {
+//go:generate go tool moq -out mocks/store.go -pkg mocks . Store Repo Publisher
+
+// Repo is CRUD over {{.Plural}}. The callback of a transaction gets it too.
+type Repo interface {
 	Create(ctx context.Context, item {{.Type}}) error
 	Update(ctx context.Context, item {{.Type}}) error
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -30,6 +35,31 @@ type Store interface {
 	Query(ctx context.Context, filter QueryFilter, by order.By, pg page.Page) ([]{{.Type}}, error)
 	QueryByCursor(ctx context.Context, filter QueryFilter, cur page.Cursor) (items []{{.Type}}, next string, err error)
 	Count(ctx context.Context, filter QueryFilter) (int, error)
+}
+
+// Publisher writes an event in the transaction of the callback. It is declared
+// here so the domain does not import outbox.
+type Publisher interface {
+	Publish(ctx context.Context, event any) error
+}
+
+// Store is the persistence contract for {{.Plural}}: CRUD and transactions. The
+// Core depends on this interface; the implementation ({{.Pkg}}db) lives
+// elsewhere. Run `make generate` (moq) to (re)generate the mocks for tests.
+//
+// fn may run more than once (a retry after a deadlock): inside it use only r
+// and pub, keep no state between runs and do not call the Store. A Store built
+// over another transaction joins it and does not commit.
+type Store interface {
+	Repo
+
+	// WithinTran runs fn in one transaction; r is bound to it.
+	WithinTran(ctx context.Context, fn func(r Repo) error) error
+
+	// WithinTranEvents is WithinTran plus pub, which writes events into the
+	// outbox in the same transaction. Without events wired into the store it
+	// drops them.
+	WithinTranEvents(ctx context.Context, fn func(r Repo, pub Publisher) error) error
 }
 
 // Core implements the {{.Pkg}} business logic.
@@ -54,7 +84,7 @@ func (c *Core) Create(ctx context.Context, n New{{.Type}}) ({{.Type}}, error) {
 		UpdatedAt:   now,
 	}
 	if err := c.store.Create(ctx, item); err != nil {
-		if errors.Is(err, dbx.ErrDBDuplicatedEntry) {
+		if errors.Is(err, ErrAlreadyExists) {
 			return {{.Type}}{}, errs.Newf(errs.AlreadyExists, "{{.Pkg}} %q already exists", n.Name)
 		}
 		return {{.Type}}{}, errs.New(errs.Internal, err)
@@ -66,7 +96,7 @@ func (c *Core) Create(ctx context.Context, n New{{.Type}}) ({{.Type}}, error) {
 func (c *Core) QueryByID(ctx context.Context, id uuid.UUID) ({{.Type}}, error) {
 	item, err := c.store.QueryByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, dbx.ErrDBNotFound) {
+		if errors.Is(err, ErrNotFound) {
 			return {{.Type}}{}, errs.Newf(errs.NotFound, "{{.Pkg}} %s not found", id)
 		}
 		return {{.Type}}{}, errs.New(errs.Internal, err)
@@ -119,7 +149,7 @@ func (c *Core) Update(ctx context.Context, id uuid.UUID, u Update{{.Type}}) ({{.
 	}
 	item.UpdatedAt = time.Now().UTC()
 	if err := c.store.Update(ctx, item); err != nil {
-		if errors.Is(err, dbx.ErrDBNotFound) {
+		if errors.Is(err, ErrNotFound) {
 			return {{.Type}}{}, errs.Newf(errs.NotFound, "{{.Pkg}} %s not found", id)
 		}
 		return {{.Type}}{}, errs.New(errs.Internal, err)
@@ -130,7 +160,7 @@ func (c *Core) Update(ctx context.Context, id uuid.UUID, u Update{{.Type}}) ({{.
 // Delete removes a {{.Pkg}}.
 func (c *Core) Delete(ctx context.Context, id uuid.UUID) error {
 	if err := c.store.Delete(ctx, id); err != nil {
-		if errors.Is(err, dbx.ErrDBNotFound) {
+		if errors.Is(err, ErrNotFound) {
 			return errs.Newf(errs.NotFound, "{{.Pkg}} %s not found", id)
 		}
 		return errs.New(errs.Internal, err)

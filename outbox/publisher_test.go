@@ -9,15 +9,11 @@ import (
 	"uuid"
 
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/assanoff/skit/dbx"
 )
 
-// fakeStore is a minimal Store that records inserted events; only WithTx and
-// Insert are exercised by the producer-side tests.
+// fakeStore is a minimal Store that records inserted events.
 type fakeStore struct{ inserted []Event }
 
-func (s *fakeStore) WithTx(dbx.Querier) Store { return s }
 func (s *fakeStore) Insert(_ context.Context, events ...Event) error {
 	s.inserted = append(s.inserted, events...)
 	return nil
@@ -65,16 +61,10 @@ func TestRegistryPublishResolvesRoute(t *testing.T) {
 	reg := NewRegistry()
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 
-	store := &fakeStore{}
-	pub := Bind(nil, store, reg)
-
-	if err := pub.Publish(context.Background(), widgetCreated{ID: "42", Name: "gadget"}); err != nil {
+	ev, err := reg.event(context.Background(), widgetCreated{ID: "42", Name: "gadget"})
+	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if len(store.inserted) != 1 {
-		t.Fatalf("expected 1 inserted event, got %d", len(store.inserted))
-	}
-	ev := store.inserted[0]
 	if ev.Type != "widget.created" || ev.Topic != "widgets" {
 		t.Errorf("route mismatch: type=%q topic=%q", ev.Type, ev.Topic)
 	}
@@ -93,8 +83,6 @@ func TestRegistryPublishResolvesRoute(t *testing.T) {
 func TestPublishInjectsTraceContext(t *testing.T) {
 	reg := NewRegistry()
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
-	store := &fakeStore{}
-	pub := Bind(nil, store, reg)
 
 	// A context carrying a valid (sampled) span context, as a request handler
 	// would have after the otel middleware ran.
@@ -108,11 +96,12 @@ func TestPublishInjectsTraceContext(t *testing.T) {
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), sc)
 
-	if err := pub.Publish(ctx, widgetCreated{ID: "1"}); err != nil {
+	ev, err := reg.event(ctx, widgetCreated{ID: "1"})
+	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	var headers map[string]string
-	if err := json.Unmarshal(store.inserted[0].Headers, &headers); err != nil {
+	if err := json.Unmarshal(ev.Headers, &headers); err != nil {
 		t.Fatalf("headers not JSON: %v", err)
 	}
 	tp, ok := headers["traceparent"]
@@ -127,13 +116,11 @@ func TestPublishInjectsTraceContext(t *testing.T) {
 func TestPublishWithoutTraceLeavesHeadersEmpty(t *testing.T) {
 	reg := NewRegistry()
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
-	store := &fakeStore{}
-	pub := Bind(nil, store, reg)
-
-	if err := pub.Publish(context.Background(), widgetCreated{ID: "1"}); err != nil {
+	ev, err := reg.event(context.Background(), widgetCreated{ID: "1"})
+	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if h := string(store.inserted[0].Headers); h != "{}" {
+	if h := string(ev.Headers); h != "{}" {
 		t.Errorf("headers = %q, want %q (no trace context to inject)", h, "{}")
 	}
 }
@@ -150,19 +137,15 @@ func TestTypesSharingAPayloadResolveTheirRoutes(t *testing.T) {
 	mustRegister[amountCreated](t, reg, "amount.promo.created", "push-gateway")
 	mustRegister[percentageCreated](t, reg, "percentage.promo.created", "other")
 
-	store := &fakeStore{}
-	pub := Bind(nil, store, reg)
-	if err := pub.Publish(context.Background(), amountCreated{ID: "1"}); err != nil {
+	e0, err := reg.event(context.Background(), amountCreated{ID: "1"})
+	if err != nil {
 		t.Fatalf("publish amount: %v", err)
 	}
-	if err := pub.Publish(context.Background(), percentageCreated{ID: "2"}); err != nil {
+	e1, err := reg.event(context.Background(), percentageCreated{ID: "2"})
+	if err != nil {
 		t.Fatalf("publish percentage: %v", err)
 	}
 
-	if len(store.inserted) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(store.inserted))
-	}
-	e0, e1 := store.inserted[0], store.inserted[1]
 	if e0.Type != "amount.promo.created" || e0.Topic != "push-gateway" {
 		t.Errorf("event 0: type=%q topic=%q", e0.Type, e0.Topic)
 	}
@@ -175,29 +158,22 @@ func TestRegistryPublishPointerResolvesSameRoute(t *testing.T) {
 	reg := NewRegistry()
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 
-	store := &fakeStore{}
-	pub := Bind(nil, store, reg)
-
 	// Emitting a pointer to the registered value type must resolve the same route.
-	if err := pub.Publish(context.Background(), &widgetCreated{ID: "7"}); err != nil {
+	ev, err := reg.event(context.Background(), &widgetCreated{ID: "7"})
+	if err != nil {
 		t.Fatalf("publish pointer: %v", err)
 	}
-	if len(store.inserted) != 1 || store.inserted[0].Topic != "widgets" {
-		t.Fatalf("pointer did not resolve to the registered route: %+v", store.inserted)
+	if ev.Topic != "widgets" {
+		t.Fatalf("pointer did not resolve to the registered route: %+v", ev)
 	}
 }
 
 func TestRegistryPublishUnregisteredFails(t *testing.T) {
 	reg := NewRegistry()
-	store := &fakeStore{}
-	pub := Bind(nil, store, reg)
 
-	err := pub.Publish(context.Background(), widgetCreated{})
+	_, err := reg.event(context.Background(), widgetCreated{})
 	if err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("expected not-registered error, got %v", err)
-	}
-	if len(store.inserted) != 0 {
-		t.Error("nothing should be inserted for an unregistered type")
 	}
 }
 
@@ -232,16 +208,22 @@ func TestWithCodec(t *testing.T) {
 	reg := NewRegistry(WithCodec(rawCodec{}))
 	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
 
-	store := &fakeStore{}
-	pub := Bind(nil, store, reg)
-	if err := pub.Publish(context.Background(), widgetCreated{}); err != nil {
+	ev, err := reg.event(context.Background(), widgetCreated{})
+	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	ev := store.inserted[0]
 	if ev.ContentType != "application/x-custom" {
 		t.Errorf("content type = %q", ev.ContentType)
 	}
 	if string(ev.Payload) != "RAW" {
 		t.Errorf("payload = %q, want RAW", ev.Payload)
+	}
+}
+
+// A Publisher from Discard drops every event, registered or not, and needs
+// neither a transaction nor a registry.
+func TestDiscard(t *testing.T) {
+	if err := Discard().Publish(context.Background(), widgetCreated{}); err != nil {
+		t.Fatalf("discard: %v", err)
 	}
 }

@@ -22,7 +22,7 @@ import (
 //   - text  → case-insensitive substring: data["x"]="%"+*f.X+"%"; "x ILIKE :x"
 //   - exact → equality (ids, enums, bools, numbers): data["x"]=*f.X; "x = :x"
 //   - range → data["x_min"]/"x_max"; "x >= :x_min" / "x <= :x_max"
-func (s *Store) applyFilter(filter {{.Pkg}}core.QueryFilter, data map[string]any, buf *bytes.Buffer, extra ...string) {
+func (r *repo) applyFilter(filter {{.Pkg}}core.QueryFilter, data map[string]any, buf *bytes.Buffer, extra ...string) {
 	var wc []string
 
 	if filter.Name != nil {

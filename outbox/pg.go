@@ -20,16 +20,15 @@ import (
 // truth.
 //
 // All statements go through the dbx named-query helpers for consistent
-// tracing and error wrapping. The Store holds its handle as a dbx.Querier, so
-// the same type works against either a *dbx.DB (pool-bound) or a *dbx.Tx
-// (transaction-bound, via WithTx) — that is how Insert joins the caller's
-// domain transaction in WithinTran.
+// tracing and error wrapping. PG runs on the pool: its leases, marks and
+// cleanup never join a business transaction. A producer writes its events in
+// its own transaction through Bind.
 //
 // PG is safe for concurrent use by multiple relay/sweeper replicas:
 // LeasePending and SweepExpiredLeases claim rows with FOR UPDATE SKIP LOCKED.
 type PG struct {
 	log     *slog.Logger
-	db      dbx.Querier
+	db      *dbx.DB
 	backoff retry.Backoff
 }
 
@@ -61,13 +60,6 @@ func NewPG(log *slog.Logger, db *dbx.DB, opts Options) *PG {
 	return &PG{log: log, db: db, backoff: bo}
 }
 
-// WithTx returns a sibling store whose queries run on tx.
-func (s *PG) WithTx(tx dbx.Querier) Store {
-	c := *s
-	c.db = tx
-	return &c
-}
-
 // schemaLockKey keys the transaction-level advisory lock that serializes
 // EnsureSchema across replicas booting at once.
 var schemaLockKey = dbx.AdvisoryKey("skit.outbox.schema")
@@ -75,20 +67,21 @@ var schemaLockKey = dbx.AdvisoryKey("skit.outbox.schema")
 // EnsureSchema creates the outbox table and indexes if absent. It is safe to
 // call at startup, including from several replicas at once: the DDL runs under a
 // transaction-scoped advisory lock, so concurrent boots serialize instead of
-// racing on CREATE TABLE. A tx-bound store (via WithTx) just runs the DDL — the
-// caller owns the transaction and any locking.
+// racing on CREATE TABLE.
 func (s *PG) EnsureSchema(ctx context.Context) error {
-	db, ok := s.db.(*dbx.DB)
-	if !ok {
-		return dbx.Exec(ctx, s.db, Schema())
-	}
-	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
+	return dbx.EnsureSchema(ctx, s.log, s.db, schemaLockKey, Schema())
 }
 
-// Insert writes pending events. Bound to the caller's transaction when the
-// store was derived via WithTx.
+// Insert writes pending events on the pool, outside any domain transaction.
+// A producer writes its events in its transaction through Bind.
 func (s *PG) Insert(ctx context.Context, events ...Event) error {
-	const q = `
+	return s.insert(ctx, s.db, events...)
+}
+
+// insert writes pending events on q: the pool for Insert, the transaction of
+// a producer for Bind.
+func (s *PG) insert(ctx context.Context, q dbx.Querier, events ...Event) error {
+	const query = `
 INSERT INTO outbox_events (
     id, type, content_type, topic, payload, headers,
     status, attempts, max_attempts, last_error, next_attempt_at, created_at
@@ -102,7 +95,7 @@ INSERT INTO outbox_events (
 		if len(events[i].Headers) == 0 || !json.Valid(events[i].Headers) {
 			return fmt.Errorf("outbox insert: invalid headers JSON for event %s", events[i].ID)
 		}
-		if err := dbx.NamedExec(ctx, s.db, q, toDBRow(events[i])); err != nil {
+		if err := dbx.NamedExec(ctx, q, query, toDBRow(events[i])); err != nil {
 			return fmt.Errorf("outbox insert: %w", err)
 		}
 	}

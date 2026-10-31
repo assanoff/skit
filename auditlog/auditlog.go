@@ -59,11 +59,10 @@ func WithAutoCompact(every int, opts CompactOptions) Option {
 
 //go:generate go run github.com/matryer/moq@latest -out internal/mocks/auditlogdb.go -pkg mocks . Store
 
-// Store is the persistence contract for audit log entries. WithTx returns a
-// sibling bound to a transaction, so callers that need the audit write to commit
-// atomically with their business change can run Create on a tx-bound Core.
+// Store is the persistence contract for audit log entries. A caller that needs
+// the audit write to commit atomically with its business change runs Create on
+// a Core over a store built on that transaction (auditpg.NewStore(log, tx)).
 type Store interface {
-	WithTx(tx dbx.Querier) Store
 	Save(ctx context.Context, al AuditLog) error
 	QueryLastByModelID(ctx context.Context, modelType, modelID string) (AuditLog, error)
 	QueryHistoryByModelID(ctx context.Context, modelType, modelID string) ([]AuditLog, error)
