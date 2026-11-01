@@ -1,14 +1,17 @@
 package rabbitmq
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	amqp "github.com/rabbitmq/amqp091-go"
 	rmq "github.com/wagslane/go-rabbitmq"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
 )
@@ -18,19 +21,23 @@ type ConsumerConfig struct {
 	// Queue is the queue to consume from (declared durable unless it already
 	// exists). Required.
 	Queue string
-	// Exchange to bind the queue to. When set, the exchange is declared
-	// (durable topic by default) and the queue is bound with RoutingKeys.
+	// Exchange to bind the queue to. When set, the exchange is declared as a
+	// durable topic exchange and the queue is bound with RoutingKeys.
 	Exchange string
-	// ExchangeKind defaults to "topic".
-	ExchangeKind string
 	// RoutingKeys bind the queue to the exchange (default ["#"] when Exchange
 	// is set but no keys are given).
 	RoutingKeys []string
 	// Concurrency is the number of handler goroutines (default 1).
 	Concurrency int
-	// Name identifies the consumer in the supervisor/logs and as the AMQP
-	// consumer tag (default "consumer").
+	// Name identifies the consumer in the supervisor, logs and metrics and as
+	// the AMQP consumer tag (default Queue).
 	Name string
+	// Metrics is the registry for the skit_broker_* consumer metrics; nil —
+	// metrics off.
+	Metrics prometheus.Registerer
+	// TracerProvider records the consumer span of every message; nil → the
+	// global provider.
+	TracerProvider trace.TracerProvider
 }
 
 // Consumer consumes CloudEvents messages from RabbitMQ and dispatches them to a
@@ -44,39 +51,18 @@ type Consumer struct {
 	once    sync.Once
 }
 
-// New builds a Consumer from a transport-neutral broker.Subscription, mapping it
-// onto RabbitMQ concepts (Topic → exchange, Group → queue, RoutingKeys →
-// bindings). It is the pluggable entry point every transport adapter shares
-// (kafka.New, nats.New would have the same shape), so wiring code can depend on
-// broker.Subscription instead of the RabbitMQ-specific ConsumerConfig. Use
-// NewConsumer directly only when you need RabbitMQ-only options (e.g.
-// ExchangeKind).
-func New(conn *Conn, log *slog.Logger, sub broker.Subscription, h broker.Handler) (*Consumer, error) {
-	return NewConsumer(conn, log, ConsumerConfig{
-		Queue:       sub.Group,
-		Exchange:    sub.Topic,
-		RoutingKeys: sub.Filters,
-		Concurrency: sub.Concurrency,
-		Name:        sub.Name,
-	}, h)
-}
-
-// NewConsumer builds a Consumer; Start declares its topology (exchange, queue,
-// bindings) and consumes. Until then a message published to the exchange has
-// no queue to land in. Register it on a worker.Group like any other Runnable.
-func NewConsumer(conn *Conn, log *slog.Logger, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
+// NewConsumer builds a Consumer of h. Every message h handles is a consumer
+// span in the trace the message was created in and, with cfg.Metrics, a
+// record in skit_broker_*; a panic of h requeues the message. Start declares
+// the topology (exchange, queue, bindings) and consumes; until then a message
+// published to the exchange has no queue to land in. Register it on a
+// worker.Group like any other Runnable.
+func NewConsumer(log *slog.Logger, conn *Conn, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
 	if cfg.Queue == "" {
 		return nil, errors.New("rabbitmq: new consumer: queue is required")
 	}
-	if cfg.Name == "" {
-		cfg.Name = "consumer"
-	}
-	if cfg.ExchangeKind == "" {
-		cfg.ExchangeKind = "topic"
-	}
-	if cfg.Concurrency <= 0 {
-		cfg.Concurrency = 1
-	}
+	cfg.Name = cmp.Or(cfg.Name, cfg.Queue)
+	cfg.Concurrency = max(cfg.Concurrency, 1)
 
 	opts := []func(*rmq.ConsumerOptions){
 		rmq.WithConsumerOptionsConsumerName(cfg.Name),
@@ -91,7 +77,7 @@ func NewConsumer(conn *Conn, log *slog.Logger, cfg ConsumerConfig, h broker.Hand
 		opts = append(
 			opts,
 			rmq.WithConsumerOptionsExchangeName(cfg.Exchange),
-			rmq.WithConsumerOptionsExchangeKind(cfg.ExchangeKind),
+			rmq.WithConsumerOptionsExchangeKind("topic"),
 			rmq.WithConsumerOptionsExchangeDeclare,
 			rmq.WithConsumerOptionsExchangeDurable,
 		)
@@ -104,6 +90,12 @@ func NewConsumer(conn *Conn, log *slog.Logger, cfg ConsumerConfig, h broker.Hand
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: new consumer: %w", err)
 	}
+	h = broker.Instrument(h, broker.InstrumentConfig{
+		Consumer:       cfg.Name,
+		System:         "rabbitmq",
+		Metrics:        cfg.Metrics,
+		TracerProvider: cfg.TracerProvider,
+	})
 	return &Consumer{log: log, cfg: cfg, handler: h, rc: rc}, nil
 }
 
@@ -148,9 +140,9 @@ func (c *Consumer) close() {
 	c.once.Do(func() { c.rc.Close() })
 }
 
-// dispatch decodes one delivery into a broker.Message and runs the handler
-// under panic recovery, mapping the broker.Action back to an rmq.Action. A
-// malformed envelope is discarded (nack without requeue): requeuing it would
+// dispatch decodes one delivery into a broker.Message and runs the
+// instrumented handler under panic recovery, mapping the broker.Action back to
+// an rmq.Action. A malformed envelope is discarded (nack without requeue): requeuing it would
 // loop forever, and a dead-letter exchange of the queue receives it.
 func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
 	action := broker.Process(ctx, c.log, c.cfg.Name, d.Body, func(m *broker.Message) {

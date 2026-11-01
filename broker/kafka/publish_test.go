@@ -56,9 +56,9 @@ func TestPublishConsume(t *testing.T) {
 	is.NoErr(pub.Publish(ctx, binary))
 
 	got := make(chan broker.Message, n+2)
-	cons, err := kafka.NewConsumer(kafka.ConsumerConfig{
-		Brokers: cfg.Brokers, Topic: "widgets", GroupID: "test",
-	}, slog.New(slog.DiscardHandler), func(_ context.Context, m broker.Message) broker.Action {
+	cons, err := kafka.NewConsumer(slog.New(slog.DiscardHandler), cfg, kafka.ConsumerConfig{
+		Topic: "widgets", Group: "test",
+	}, func(_ context.Context, m broker.Message) broker.Action {
 		got <- m
 		return broker.Ack
 	})

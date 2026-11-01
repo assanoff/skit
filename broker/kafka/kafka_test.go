@@ -4,12 +4,19 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/matryer/is"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	kgo "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/worker"
@@ -27,50 +34,61 @@ func noopHandler(context.Context, broker.Message) broker.Action {
 }
 
 func TestNewConsumerValidates(t *testing.T) {
-	cases := []struct {
-		name string
-		cfg  ConsumerConfig
+	is := is.New(t)
+	cfg := Config{Brokers: []string{"b"}}
+	for _, tc := range []struct {
+		cfg  Config
+		ccfg ConsumerConfig
 	}{
-		{"no brokers", ConsumerConfig{Topic: "t", GroupID: "g"}},
-		{"no topic", ConsumerConfig{Brokers: []string{"b"}, GroupID: "g"}},
-		{"no group", ConsumerConfig{Brokers: []string{"b"}, Topic: "t"}},
-	}
-	for _, tc := range cases {
-		if _, err := NewConsumer(tc.cfg, testLog(), noopHandler); err == nil {
-			t.Errorf("%s: expected a validation error", tc.name)
-		}
+		{Config{}, ConsumerConfig{Topic: "t", Group: "g"}},
+		{cfg, ConsumerConfig{Group: "g"}},
+		{cfg, ConsumerConfig{Topic: "t"}},
+	} {
+		_, err := NewConsumer(testLog(), tc.cfg, tc.ccfg, noopHandler)
+		is.True(err != nil) // brokers, topic and group are required
 	}
 }
 
-func TestNewMapsSubscriptionAndDefaults(t *testing.T) {
-	c, err := New(Config{Brokers: []string{"localhost:9092"}}, testLog(), broker.Subscription{
-		Name:        "orders",
-		Topic:       "orders.topic",
-		Group:       "svc",
-		Concurrency: 3,
+func TestNewConsumerDefaults(t *testing.T) {
+	is := is.New(t)
+	c, err := NewConsumer(testLog(), Config{Brokers: []string{"b"}},
+		ConsumerConfig{Topic: "orders", Group: "billing"}, noopHandler)
+	is.NoErr(err)
+	is.Equal(c.Name(), "billing") // the group names the consumer
+	is.Equal(c.cfg.Concurrency, 1)
+}
+
+const consumedWant = `
+# HELP skit_broker_consumed_total Messages handled, by consumer and action: ack, requeue, discard or panic.
+# TYPE skit_broker_consumed_total counter
+skit_broker_consumed_total{action="ack",consumer="billing"} 1
+skit_broker_consumed_total{action="discard",consumer="billing"} 0
+skit_broker_consumed_total{action="panic",consumer="billing"} 0
+skit_broker_consumed_total{action="requeue",consumer="billing"} 0
+`
+
+// The consumer instruments its handler: a record is a span "process <topic>"
+// of messaging.system kafka and a record in skit_broker_* under the name of
+// the consumer.
+func TestConsumerInstrumentsHandler(t *testing.T) {
+	is := is.New(t)
+	reg := prometheus.NewRegistry()
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	c, err := NewConsumer(testLog(), Config{Brokers: []string{"b"}}, ConsumerConfig{
+		Topic: "orders", Group: "billing", Metrics: reg, TracerProvider: tp,
 	}, noopHandler)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if c.cfg.Topic != "orders.topic" || c.cfg.GroupID != "svc" || c.cfg.Concurrency != 3 || c.cfg.Name != "orders" {
-		t.Fatalf("subscription not mapped: %+v", c.cfg)
-	}
-	if c.cfg.MaxRetries != DefaultMaxRetries || c.cfg.RetryBackoff != DefaultRetryBackoff {
-		t.Errorf("defaults not applied: %+v", c.cfg)
-	}
-}
+	is.NoErr(err)
 
-func TestNewAppliesDefaults(t *testing.T) {
-	c, err := New(Config{Brokers: []string{"b"}}, testLog(), broker.Subscription{Topic: "t", Group: "g"}, noopHandler)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if c.cfg.Concurrency != 1 {
-		t.Errorf("default concurrency = %d, want 1", c.cfg.Concurrency)
-	}
-	if c.cfg.Name != "consumer" {
-		t.Errorf("default name = %q, want consumer", c.cfg.Name)
-	}
+	is.Equal(c.dispatch(t.Context(), broker.Message{ID: "1", Topic: "orders"}), broker.Ack)
+
+	is.NoErr(testutil.GatherAndCompare(reg, strings.NewReader(consumedWant), "skit_broker_consumed_total"))
+	spans := rec.Ended()
+	is.Equal(len(spans), 1)
+	is.Equal(spans[0].Name(), "process orders")
+	attrs := attribute.NewSet(spans[0].Attributes()...)
+	system, _ := attrs.Value(semconv.MessagingSystemKey)
+	is.Equal(system.AsString(), "kafka")
 }
 
 func TestNewPublisherValidates(t *testing.T) {
@@ -110,7 +128,8 @@ func (h countHandler) Handle(context.Context, slog.Record) error {
 func TestConsumeReturnsWhenReaderClosed(t *testing.T) {
 	var logged atomic.Int64
 	log := slog.New(countHandler{Handler: slog.DiscardHandler, n: &logged})
-	c, err := NewConsumer(ConsumerConfig{Brokers: []string{"127.0.0.1:1"}, Topic: "t", GroupID: "g"}, log, noopHandler)
+	c, err := NewConsumer(log, Config{Brokers: []string{"127.0.0.1:1"}},
+		ConsumerConfig{Topic: "t", Group: "g"}, noopHandler)
 	if err != nil {
 		t.Fatalf("NewConsumer: %v", err)
 	}

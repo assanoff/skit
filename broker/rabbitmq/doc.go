@@ -5,7 +5,8 @@
 // on top of amqp091). It provides a connection manager (Conn via Dial), a
 // confirm-mode Publisher (broker.Publisher) that sends the CloudEvents body with
 // persistent delivery, and a Consumer (worker.Runnable) that decodes deliveries
-// back into broker.Messages and dispatches them to a broker.Handler.
+// back into broker.Messages and dispatches them to a broker.Handler, recording
+// each as a span and in the metrics.
 //
 // A single Conn transparently reconnects and is shared by every publisher and
 // consumer in the process.
@@ -33,15 +34,16 @@
 //	    Topic:       "widgets", // → exchange
 //	})
 //
-//	h := broker.Instrument(func(ctx context.Context, m broker.Message) broker.Action {
+//	cons, err := rabbitmq.NewConsumer(log, conn, rabbitmq.ConsumerConfig{
+//	    Queue:          "widgets.worker",
+//	    Exchange:       "widgets",
+//	    RoutingKeys:    []string{"widget.created"},
+//	    Metrics:        reg,
+//	    TracerProvider: tp,
+//	}, func(ctx context.Context, m broker.Message) broker.Action {
 //	    // ... process m ...
 //	    return broker.Ack
-//	}, broker.InstrumentConfig{Consumer: "widgets", System: "rabbitmq", TracerProvider: tp})
-//	cons, err := rabbitmq.NewConsumer(conn, log, rabbitmq.ConsumerConfig{
-//	    Queue:       "widgets.worker",
-//	    Exchange:    "widgets",
-//	    RoutingKeys: []string{"widget.created"},
-//	}, h)
+//	})
 //	if err != nil { /* ... */ }
 //	group.Add(cons) // a worker.Runnable; Start blocks until ctx is canceled
 //
@@ -69,8 +71,9 @@
 // the routing key. A message without a trace context in its headers gets the
 // PRODUCER span as its creation context, written into the AMQP headers; a
 // message that carries one — outbox.Handler sends the context the event was
-// created in — is sent under a CLIENT child of it. The consumer span comes
-// from broker.Instrument around the handler.
+// created in — is sent under a CLIENT child of it. The consumer records every
+// message as a CONSUMER span "process <exchange>" in the trace the message was
+// created in (see broker).
 //
 // # Config
 //
@@ -80,10 +83,12 @@
 //     confirm mode for at-least-once delivery. PublisherConfig fields: Source
 //     (required; the CloudEvents source stamped on messages that carry none),
 //     TracerProvider (nil → the global provider). Option: WithRoutingKey.
-//   - Consumer: NewConsumer(conn, log, ConsumerConfig, handler). ConsumerConfig
-//     fields: Queue (required), Exchange, ExchangeKind (default "topic"),
-//     RoutingKeys (default ["#"] when Exchange is set), Concurrency (default 1),
-//     Name (default "consumer"). A malformed envelope is discarded (nack
-//     without requeue, so a dead-letter exchange of the queue receives it); a
-//     panicking handler is recovered and the delivery is requeued.
+//   - Consumer: NewConsumer(log, conn, ConsumerConfig, handler). ConsumerConfig
+//     fields: Queue (required), Exchange (declared as a durable topic
+//     exchange), RoutingKeys (default ["#"] when Exchange is set), Concurrency
+//     (default 1), Name (default Queue), Metrics (the skit_broker_* registry;
+//     nil — off), TracerProvider (nil → the global provider). A malformed
+//     envelope is discarded (nack without requeue, so a dead-letter exchange of
+//     the queue receives it); a panicking handler is recovered and the delivery
+//     is requeued.
 package rabbitmq

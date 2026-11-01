@@ -6,8 +6,9 @@ package config
 //	{{.Type}}Consumer ConsumerOpts `group:"{{.Pkg}}-consumer" namespace:"consumer-{{.Pkg}}" env-namespace:"CONSUMER_{{.UpperSnake}}"`
 //
 // which yields CONSUMER_{{.UpperSnake}}_TOPIC, CONSUMER_{{.UpperSnake}}_GROUP, etc.
-// The wiring maps it onto a broker.Subscription, so switching the underlying
-// transport (RabbitMQ/Kafka/NATS) needs no config change.
+// The transport file of the consumer maps it onto the ConsumerConfig of its
+// adapter, so switching the underlying transport (RabbitMQ/Kafka/NATS) needs
+// no config change.
 type ConsumerOpts struct {
 	Topic       string   `long:"topic"       env:"TOPIC"       description:"logical source: RabbitMQ exchange, Kafka/NATS topic"`
 	Group       string   `long:"group"       env:"GROUP"       description:"durable subscription shared by replicas: RabbitMQ queue, Kafka/NATS consumer/queue group"`

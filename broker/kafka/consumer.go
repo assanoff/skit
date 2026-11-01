@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -8,37 +9,40 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	kgo "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
 )
 
-// DefaultMaxRetries bounds how many times a broker.Requeue verdict retries the
-// same record in place before it is committed (dropped) to unblock the
-// partition. Add a dead-letter topic for real poison-message handling.
-const DefaultMaxRetries = 5
+// maxRetries bounds how many times a broker.Requeue verdict retries the same
+// record in place before it is committed (dropped) to unblock the partition.
+// Add a dead-letter topic for real poison-message handling.
+const maxRetries = 5
 
-// DefaultRetryBackoff is the wait between in-place retries of a Requeue'd record.
-const DefaultRetryBackoff = time.Second
+// retryBackoff is the wait between in-place retries of a requeued record.
+const retryBackoff = time.Second
 
 // ConsumerConfig configures a Consumer.
 type ConsumerConfig struct {
-	// Brokers is the bootstrap broker list. Required.
-	Brokers []string
 	// Topic to consume. Required.
 	Topic string
-	// GroupID is the consumer group; replicas sharing it split the partitions.
-	// Required for at-least-once group consumption.
-	GroupID string
+	// Group is the consumer group; replicas sharing it split the partitions.
+	// Required.
+	Group string
 	// Concurrency is the number of reader goroutines in the group (default 1).
 	// Each reader is assigned a disjoint set of partitions.
 	Concurrency int
-	// Name identifies the consumer in the supervisor and logs (default "consumer").
+	// Name identifies the consumer in the supervisor, logs and metrics
+	// (default Group).
 	Name string
-	// MaxRetries bounds in-place retries of a Requeue'd record (default
-	// DefaultMaxRetries). RetryBackoff is the wait between them.
-	MaxRetries   int
-	RetryBackoff time.Duration
+	// Metrics is the registry for the skit_broker_* consumer metrics; nil —
+	// metrics off.
+	Metrics prometheus.Registerer
+	// TracerProvider records the consumer span of every message; nil → the
+	// global provider.
+	TracerProvider trace.TracerProvider
 }
 
 // Consumer consumes CloudEvents from Kafka and dispatches them to a
@@ -46,6 +50,7 @@ type ConsumerConfig struct {
 // is canceled (or Stop is called), then drains its readers.
 type Consumer struct {
 	log     *slog.Logger
+	brokers []string
 	cfg     ConsumerConfig
 	handler broker.Handler
 
@@ -54,44 +59,28 @@ type Consumer struct {
 	closed  bool
 }
 
-// New builds a Consumer from a transport-neutral broker.Subscription, mapping it
-// onto Kafka concepts (Topic → topic, Group → consumer group; Filters have no
-// Kafka equivalent and are ignored). It is the pluggable entry point the
-// rabbitmq adapter also offers, so wiring depends on broker.Subscription.
-func New(cfg Config, log *slog.Logger, sub broker.Subscription, h broker.Handler) (*Consumer, error) {
-	return NewConsumer(ConsumerConfig{
-		Brokers:     cfg.Brokers,
-		Topic:       sub.Topic,
-		GroupID:     sub.Group,
-		Concurrency: sub.Concurrency,
-		Name:        sub.Name,
-	}, log, h)
-}
-
-// NewConsumer builds a Consumer from the Kafka-specific config.
-func NewConsumer(cfg ConsumerConfig, log *slog.Logger, h broker.Handler) (*Consumer, error) {
+// NewConsumer builds a Consumer of h on the brokers of cfg. Every attempt of h
+// at a record is a consumer span in the trace the message was created in and,
+// with ccfg.Metrics, a record in skit_broker_*; a panic of h retries the record.
+func NewConsumer(log *slog.Logger, cfg Config, ccfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
 	if len(cfg.Brokers) == 0 {
 		return nil, errors.New("kafka: new consumer: brokers are required")
 	}
-	if cfg.Topic == "" {
+	if ccfg.Topic == "" {
 		return nil, errors.New("kafka: new consumer: topic is required")
 	}
-	if cfg.GroupID == "" {
-		return nil, errors.New("kafka: new consumer: group id is required")
+	if ccfg.Group == "" {
+		return nil, errors.New("kafka: new consumer: group is required")
 	}
-	if cfg.Name == "" {
-		cfg.Name = "consumer"
-	}
-	if cfg.Concurrency <= 0 {
-		cfg.Concurrency = 1
-	}
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = DefaultMaxRetries
-	}
-	if cfg.RetryBackoff <= 0 {
-		cfg.RetryBackoff = DefaultRetryBackoff
-	}
-	return &Consumer{log: log, cfg: cfg, handler: h}, nil
+	ccfg.Name = cmp.Or(ccfg.Name, ccfg.Group)
+	ccfg.Concurrency = max(ccfg.Concurrency, 1)
+	h = broker.Instrument(h, broker.InstrumentConfig{
+		Consumer:       ccfg.Name,
+		System:         "kafka",
+		Metrics:        ccfg.Metrics,
+		TracerProvider: ccfg.TracerProvider,
+	})
+	return &Consumer{log: log, brokers: cfg.Brokers, cfg: ccfg, handler: h}, nil
 }
 
 // Name identifies the consumer in the supervisor and logs.
@@ -103,8 +92,8 @@ func (c *Consumer) Start(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for range c.cfg.Concurrency {
 		r := kgo.NewReader(kgo.ReaderConfig{
-			Brokers: c.cfg.Brokers,
-			GroupID: c.cfg.GroupID,
+			Brokers: c.brokers,
+			GroupID: c.cfg.Group,
 			Topic:   c.cfg.Topic,
 		})
 		c.mu.Lock()
@@ -126,7 +115,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 	}
 
 	c.log.InfoContext(ctx, "kafka consumer started",
-		"topic", c.cfg.Topic, "group", c.cfg.GroupID, "consumer", c.cfg.Name, "readers", c.cfg.Concurrency)
+		"topic", c.cfg.Topic, "group", c.cfg.Group, "consumer", c.cfg.Name, "readers", c.cfg.Concurrency)
 
 	<-ctx.Done()
 	c.close()
@@ -189,7 +178,7 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	for attempt := 0; ; attempt++ {
 		switch c.dispatch(ctx, m) {
 		case broker.Requeue:
-			if attempt >= c.cfg.MaxRetries {
+			if attempt >= maxRetries {
 				c.log.ErrorContext(ctx, "kafka consumer: retries exhausted, dropping (add a dead-letter topic)",
 					"consumer", c.cfg.Name, "message_id", m.ID, "offset", msg.Offset)
 				c.commit(ctx, r, msg)
@@ -198,7 +187,7 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 			select {
 			case <-ctx.Done():
 				return // shutdown: leave uncommitted so it is redelivered
-			case <-time.After(c.cfg.RetryBackoff):
+			case <-time.After(retryBackoff):
 			}
 		default: // Ack or Discard: terminal
 			c.commit(ctx, r, msg)
@@ -207,8 +196,9 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	}
 }
 
-// dispatch runs the handler under panic recovery (via broker.Guard), defaulting
-// to Requeue on panic so the record is retried rather than silently dropped.
+// dispatch runs the instrumented handler under panic recovery (via
+// broker.Guard), defaulting to Requeue on panic so the record is retried rather
+// than silently dropped.
 func (c *Consumer) dispatch(ctx context.Context, m broker.Message) broker.Action {
 	return broker.Guard(ctx, c.log, c.cfg.Name, m, c.handler)
 }

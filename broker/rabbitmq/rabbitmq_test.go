@@ -7,7 +7,13 @@ import (
 	"time"
 
 	"github.com/matryer/is"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	rmq "github.com/wagslane/go-rabbitmq"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
@@ -22,9 +28,9 @@ func TestToAction(t *testing.T) {
 }
 
 // TestPublishConsume sends JSON and binary data through a real RabbitMQ: the
-// consumer gets every message it binds with its data, type and topic. The
-// routing key is the type, or what WithRoutingKey derives; a message no
-// binding matches is dropped.
+// consumer gets every message it binds with its data, type and topic, and
+// records it as a span and in the metrics. The routing key is the type, or
+// what WithRoutingKey derives; a message no binding matches is dropped.
 func TestPublishConsume(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test requires docker")
@@ -37,16 +43,22 @@ func TestPublishConsume(t *testing.T) {
 	is.NoErr(err)
 	t.Cleanup(func() { _ = conn.Close() })
 
+	reg := prometheus.NewRegistry()
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
 	got := make(chan broker.Message, 64)
-	cons, err := rabbitmq.NewConsumer(conn, slog.New(slog.DiscardHandler), rabbitmq.ConsumerConfig{
-		Queue:       "widgets.test",
-		Exchange:    "widgets",
-		RoutingKeys: []string{"ping", "widget.created", "custom"},
+	cons, err := rabbitmq.NewConsumer(slog.New(slog.DiscardHandler), conn, rabbitmq.ConsumerConfig{
+		Queue:          "widgets.test",
+		Exchange:       "widgets",
+		RoutingKeys:    []string{"ping", "widget.created", "custom"},
+		Metrics:        reg,
+		TracerProvider: tp,
 	}, func(_ context.Context, m broker.Message) broker.Action {
 		got <- m
 		return broker.Ack
 	})
 	is.NoErr(err)
+	is.Equal(cons.Name(), "widgets.test") // the queue names the consumer
 	done := make(chan error, 1)
 	go func() { done <- cons.Start(ctx) }()
 	t.Cleanup(func() { <-done })
@@ -83,6 +95,11 @@ func TestPublishConsume(t *testing.T) {
 		is.Equal(m.Data, want.Data) // binary data survives as data_base64
 		is.Equal(m.Topic, want.Topic)
 	}
+	// One handler at a time: the first message is done when the second comes.
+	is.True(processed(rec, created.ID))
+	n, err := testutil.GatherAndCount(reg, "skit_broker_consumed_total")
+	is.NoErr(err)
+	is.Equal(n, 4) // a series per action of the consumer
 
 	emptyKey := func(broker.Message) string { return "" }
 	empty, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "test"},
@@ -110,6 +127,20 @@ func waitBound(t *testing.T, pub *rabbitmq.Publisher, got <-chan broker.Message)
 		}
 	}
 	t.Fatal("consumer not bound")
+}
+
+// processed reports whether rec holds the RabbitMQ consumer span of the
+// message id.
+func processed(rec *tracetest.SpanRecorder, id string) bool {
+	for _, span := range rec.Ended() {
+		attrs := attribute.NewSet(span.Attributes()...)
+		system, _ := attrs.Value(semconv.MessagingSystemKey)
+		msg, _ := attrs.Value(semconv.MessagingMessageIDKey)
+		if span.Name() == "process widgets" && system.AsString() == "rabbitmq" && msg.AsString() == id {
+			return true
+		}
+	}
+	return false
 }
 
 // receive returns the next message that is not a ping.

@@ -50,7 +50,7 @@ func TestBrokerDown(t *testing.T) {
 	t.Cleanup(func() { _ = pub.Close() })
 
 	got := newDeliveries()
-	cons, err := rabbitmq.NewConsumer(conn, log, rabbitmq.ConsumerConfig{
+	cons, err := rabbitmq.NewConsumer(log, conn, rabbitmq.ConsumerConfig{
 		Queue:    "widgets.events",
 		Exchange: "widgets",
 	}, got.handle)

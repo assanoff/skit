@@ -87,7 +87,7 @@ func New(log *slog.Logger, cfg Config) (*Deps, error) {
 // addConsumers регистрирует consumer'ов входящих событий.
 func addConsumers(log *slog.Logger, g *worker.Group, d *deps.Deps,
 	app *orderapp.App) error {
-	cons, err := rabbitmq.NewConsumer(d.Conn, log, rabbitmq.ConsumerConfig{
+	cons, err := rabbitmq.NewConsumer(log, d.Conn, rabbitmq.ConsumerConfig{
 		Queue:    "orders.payments",
 		Exchange: "payments",
 	}, app.HandlePaid) // broker.Handler
@@ -120,7 +120,8 @@ if err := addConsumers(log, g, d, app); err != nil {
 
 ```go
 pub, err := kafka.NewPublisher(kafka.Config{Brokers: cfg.Brokers}, kafka.PublisherConfig{Source: "orders"})
-cons, err := kafka.NewConsumer(kafka.ConsumerConfig{ /* … */ }, log, app.HandlePaid)
+cons, err := kafka.NewConsumer(log, kafka.Config{Brokers: cfg.Brokers},
+	kafka.ConsumerConfig{Topic: "payments", Group: "orders"}, app.HandlePaid)
 ```
 
 Домен не меняется — контракт (`broker.Publisher`, `broker.Handler`) живёт в `broker`.

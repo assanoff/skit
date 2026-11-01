@@ -49,25 +49,28 @@
 // in a sub-package. broker/rabbitmq is the reference adapter: its Publisher
 // sends to the exchange Message.Topic under the routing key Message.Type and
 // publishes the CloudEvents body with publisher confirms; its Consumer decodes
-// deliveries back into Messages and dispatches them to a broker.Handler.
+// deliveries back into Messages and dispatches them, instrumented, to a
+// broker.Handler.
 // Application and domain code depend only on broker.Publisher /
 // broker.Handler, never on the adapter.
 //
 // # Metrics
 //
-// Instrument wraps a Handler and records skit_broker_consumed_total by consumer
+// The consumers of the adapters record skit_broker_consumed_total by consumer
 // and action (ack, requeue, discard, panic) and
-// skit_broker_handle_duration_seconds by consumer on the registry of its
-// config. Wrap the handler before passing it to an adapter or to Process, so
-// the same metrics come from every transport:
+// skit_broker_handle_duration_seconds by consumer on the registry of their
+// config, under the name of the consumer:
 //
-//	h := broker.Instrument(app.HandlePaid, broker.InstrumentConfig{
-//	    Consumer:       "orders",
-//	    System:         "rabbitmq",
+//	cons, err := rabbitmq.NewConsumer(log, conn, rabbitmq.ConsumerConfig{
+//	    Queue:          "orders.payments",
+//	    Exchange:       "payments",
 //	    Metrics:        reg,
 //	    TracerProvider: tp,
-//	})
-//	cons, err := rabbitmq.NewConsumer(conn, log, cfg, h)
+//	}, app.HandlePaid)
+//
+// A consume loop of your own, like the generated consumers, wraps its handler
+// in Instrument before passing it to Process, so the same metrics come from
+// every transport.
 //
 // Publishing is measured by the queue of events (skit_queue_* by kind).
 //
@@ -79,7 +82,8 @@
 // outbox.Handler sends the context the event was created in — is sent under a
 // CLIENT child of it.
 //
-// Instrument records the handling of every message as a CONSUMER span
+// The consumers of the adapters, and Instrument in a consume loop of your own,
+// record the handling of every message as a CONSUMER span
 // "process <topic>". The creation context from the headers is both the parent
 // and the link of that span. The OpenTelemetry messaging conventions ask for
 // the link and allow the parent for a single message, as this package

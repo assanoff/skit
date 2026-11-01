@@ -591,9 +591,9 @@ the transport lives in %[1]s_kafka.go. Next:
 	fmt.Fprintf(out, `
 Scaffolded the %[1]q consumer handler (broker-agnostic). NOTE: skit has no %[5]s
 adapter yet — use rmq or kafka. The handler (%[1]s.go) and config are ready; wire
-the transport by hand once the adapter lands (mirror the rmq/kafka case: build a
-broker.Subscription from config and bind it to %[1]s.New(d.Logger).Handle wrapped
-in broker.Instrument).
+the transport by hand once the adapter lands (mirror the rmq/kafka case: map
+ConsumerOpts onto the ConsumerConfig of the adapter and hand it
+%[1]s.New(d.Logger).Handle).
 
 1. go mod tidy
 

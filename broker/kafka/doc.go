@@ -2,14 +2,14 @@
 // implements broker.Publisher and a worker.Runnable consumer over
 // github.com/segmentio/kafka-go, exchanging CloudEvents v1.0 structured-mode
 // JSON (broker.Marshal/UnmarshalCloudEvent) exactly like the rabbitmq adapter,
-// so application code depends only on broker.Message / Handler / Subscription
+// so application code depends only on broker.Message / Handler / Publisher
 // and never on the concrete transport.
 //
 // Semantics differ from AMQP where Kafka differs: delivery is at-least-once
 // (manual offset commit after a successful handler); there is no per-message
-// requeue, so a broker.Requeue verdict retries the same message in place with a
-// bounded backoff before it is committed (dropped) — add a dead-letter topic for
-// poison messages. Subscription.Filters has no Kafka equivalent and is ignored.
+// requeue, so a broker.Requeue verdict retries the same message in place, up to
+// 5 times a second apart, before it is committed (dropped) — add a dead-letter
+// topic for poison messages.
 //
 // # Partition key
 //
@@ -43,6 +43,10 @@
 // PRODUCER span as its creation context, one that carries it is sent under a
 // CLIENT child of it. NewPublisher takes the brokers in Config, the
 // CloudEvents source and the TracerProvider in PublisherConfig, and the
-// option WithPartitionKey. The consumer span comes from broker.Instrument
-// around the handler.
+// option WithPartitionKey.
+//
+// NewConsumer takes the brokers in Config and the Topic, Group, Concurrency,
+// Name (default Group), Metrics and TracerProvider in ConsumerConfig. It records
+// every attempt at a record as a CONSUMER span "process <topic>" in the trace
+// the message was created in and in skit_broker_* (see broker).
 package kafka
