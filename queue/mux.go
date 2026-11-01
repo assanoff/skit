@@ -84,6 +84,14 @@ func (m *Mux) lookup(kind string) JobFunc {
 	return m.fallback
 }
 
+// has reports whether kind has a handler of its own, the fallback aside.
+func (m *Mux) has(kind string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.routes[kind]
+	return ok
+}
+
 // unknownKind fails a task whose kind has no handler, for good.
 func unknownKind(_ context.Context, t Task) error {
 	return Permanent(fmt.Errorf("%w: %q", ErrUnknownKind, t.Kind))

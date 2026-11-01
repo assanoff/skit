@@ -14,6 +14,8 @@ registered for its kind.
 - Replica-safe claiming via `FOR UPDATE SKIP LOCKED`, a batch in `run_at` order.
 - Queues isolated by name: their own workers, lease, backoff and metrics.
 - `Key` for idempotent enqueue within a queue; `Delay` to postpone a task.
+- Scheduling in the transaction of a domain change: a `Registry` routes a typed
+  value to its queue and kind, so the domain never names a queue.
 - Outcomes by the error of the handler: done, retry with backoff, `Permanent`
   (dead letter), `Halt` (stop the batch).
 - A panic in a handler is recovered per task and retried, or decided by
@@ -49,6 +51,46 @@ inserted, err := q.Schedule(ctx, queue.Params{
 While a task with the same `Key` is in the queue — waiting, leased or dead —
 `Schedule` inserts nothing and returns `inserted == false`. An empty `Key`
 always inserts.
+
+## Scheduling in a transaction
+
+A task that follows a domain change is scheduled in the transaction of that
+change: it never runs for a change that rolled back, and is never lost for one
+that committed. A `Registry` routes the Go type of a value to the queue and kind
+of its task; `Bind` binds it to the transaction:
+
+```go
+reg := queue.NewRegistry()
+if err := reg.Register[WelcomeEmail]("email", "email.welcome"); err != nil {
+    return err
+}
+if err := reg.Check("email", mux); err != nil { // every kind has a handler
+    return err
+}
+
+// In the store, within the transaction of the domain change:
+err := queue.Bind(tx, q, reg).Schedule(ctx, WelcomeEmail{UserID: 42})
+```
+
+The domain declares its own interface and names neither the queue nor the
+transaction:
+
+```go
+type Scheduler interface {
+    Schedule(ctx context.Context, v any) error
+}
+```
+
+- `T` and `*T` resolve the same route; an unregistered type is an error.
+- The value goes into the `Payload` as JSON; `WithEncoder` sets another
+  `Encoder`.
+- `Drop()` turns a route off: `Schedule` writes nothing and returns nil, so the
+  domain does not branch when an integration is off.
+- `Check`, called at startup with the `Mux` of each queue, reports the kinds the
+  `Registry` sends there with no handler of their own — the fallback does not
+  count — whose tasks would go to the dead letters.
+
+`Key` and `Delay` are for `PG.Schedule` on the pool.
 
 ## Consuming work
 

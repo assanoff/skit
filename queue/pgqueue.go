@@ -51,8 +51,15 @@ func (q *PG) EnsureSchema(ctx context.Context) error {
 }
 
 // Schedule enqueues a task on the pool and reports whether it was inserted:
-// false when a task with the same Key is already in the queue.
+// false when a task with the same Key is already in the queue. A producer
+// schedules in its transaction through Bind.
 func (q *PG) Schedule(ctx context.Context, p Params) (bool, error) {
+	return q.insert(ctx, q.db, p)
+}
+
+// insert writes the task of p on db — the pool for Schedule, the transaction
+// of a producer for a Scheduler — and reports whether it was inserted.
+func (q *PG) insert(ctx context.Context, db dbx.Querier, p Params) (bool, error) {
 	switch {
 	case p.Queue == "":
 		return false, errors.New("queue schedule: queue is required")
@@ -77,7 +84,7 @@ ON CONFLICT (queue, key) WHERE key IS NOT NULL DO NOTHING`
 		RunAt:   time.Now().UTC().Add(p.Delay),
 	}
 
-	n, err := dbx.NamedExecRowsAffected(ctx, q.db, query, args)
+	n, err := dbx.NamedExecRowsAffected(ctx, db, query, args)
 	if err != nil {
 		return false, fmt.Errorf("queue schedule: %w", err)
 	}

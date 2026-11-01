@@ -36,6 +36,33 @@
 //	    group.Add(w) // a worker.Group
 //	}
 //
+// # Scheduling in a transaction
+//
+// A task that follows a domain change is scheduled in the transaction of that
+// change: it never runs for a change that rolled back, and is never lost for
+// one that committed. A Registry routes the Go type of a value to the queue
+// and kind of its task, and Bind binds it to the transaction:
+//
+//	reg := queue.NewRegistry()
+//	if err := reg.Register[WelcomeEmail]("email", "email.welcome"); err != nil {
+//	    return err
+//	}
+//	if err := reg.Check("email", mux); err != nil { // every kind has a handler
+//	    return err
+//	}
+//
+//	// In the store, within the transaction of the domain change:
+//	err := queue.Bind(tx, q, reg).Schedule(ctx, WelcomeEmail{UserID: 42})
+//
+// The domain declares its own interface with Schedule(ctx, v any) error and
+// names neither the queue nor the transaction. The value goes into the Payload
+// as JSON unless WithEncoder sets another Encoder. Drop turns a route off:
+// Schedule writes nothing and returns nil, so the domain does not branch when
+// an integration is off. Check, called at startup with the Mux of each queue,
+// reports the kinds the Registry sends there with no handler of their own —
+// the fallback does not count — whose tasks would go to the dead letters. Key
+// and Delay are for PG.Schedule on the pool.
+//
 // # Outcomes
 //
 // The error of the handler decides the outcome of a task:
@@ -87,6 +114,8 @@
 //   - WithOnPanic(fn): the outcome of a task whose handler panicked.
 //   - WithMetrics(reg): the registry of the metrics.
 //   - WithFallback(fn): the Mux handler of a kind with no registered handler.
+//   - Registry.Register options: WithEncoder(e) (how the value is written into
+//     the Payload, default JSON), Drop() (Schedule writes nothing).
 //   - Params: Queue and Kind (required), Key (dedup within the queue while
 //     the task is in it — waiting, leased or dead), Payload, Delay.
 package queue
