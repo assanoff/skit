@@ -38,7 +38,7 @@ add worker mailer --claim
 add cron report
 add cron digest --lock postgres
 add cron sync --lock redis
-add event widget-created --core widget --with-relay
+add event widget-created --core widget
 add event order-placed --core order
 add http-client billing
 add http-client identity --oauth

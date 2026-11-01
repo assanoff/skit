@@ -169,7 +169,7 @@ func Test{{.Type}}StoreNotFound(t *testing.T) {
 
 // Test{{.Type}}StoreWithinTran pins the transactions of the store: an error of
 // fn rolls its write back, a create of an existing id is ErrAlreadyExists, and
-// WithinTranEvents without events commits the write and drops the event.
+// WithinTranTasks without tasks fails Schedule.
 func Test{{.Type}}StoreWithinTran(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test requires docker")
@@ -190,15 +190,19 @@ func Test{{.Type}}StoreWithinTran(t *testing.T) {
 	_, err = s.QueryByID(ctx, item.ID)
 	is.True(errors.Is(err, {{.Pkg}}core.ErrNotFound)) // rolled back
 
-	err = s.WithinTranEvents(ctx, func(r {{.Pkg}}core.Repo, pub {{.Pkg}}core.Publisher) error {
+	err = s.WithinTranTasks(ctx, func(r {{.Pkg}}core.Repo, ts {{.Pkg}}core.Scheduler) error {
 		if err := r.Create(ctx, item); err != nil {
 			return err
 		}
-		return pub.Publish(ctx, struct{}{}) // no events wired: dropped
+		return ts.Schedule(ctx, struct{}{}) // no tasks wired: fails
 	})
-	is.NoErr(err)
+	is.True(err != nil)
 	_, err = s.QueryByID(ctx, item.ID)
-	is.NoErr(err) // committed
+	is.True(errors.Is(err, {{.Pkg}}core.ErrNotFound)) // rolled back with it
+
+	is.NoErr(s.WithinTran(ctx, func(r {{.Pkg}}core.Repo) error {
+		return r.Create(ctx, item)
+	}))
 
 	err = s.Create(ctx, item)
 	is.True(errors.Is(err, {{.Pkg}}core.ErrAlreadyExists)) // same id

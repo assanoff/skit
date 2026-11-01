@@ -17,7 +17,7 @@ type PanicHandler func(worker, phase string)
 // invokes onPanic (if non-nil). Use it as a deferred call at the top of a tick:
 //
 //	func (w *W) tick(ctx context.Context) {
-//	    defer safetick.RecoverTick(ctx, w.log, "outbox-relay", w.onPanic)
+//	    defer safetick.RecoverTick(ctx, w.log, "report-poller", w.onPanic)
 //	    // ... work that must not crash the loop ...
 //	}
 func RecoverTick(ctx context.Context, log *slog.Logger, worker string, onPanic PanicHandler) {

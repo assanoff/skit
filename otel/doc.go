@@ -13,8 +13,8 @@
 //		TracerProvider trace.TracerProvider // nil → global
 //	}
 //
-//	func New(cfg Config) *Relay {
-//		return &Relay{tracer: otel.Tracer(cfg.TracerProvider, "github.com/assanoff/skit/outbox")}
+//	func New(cfg Config) *Publisher {
+//		return &Publisher{tracer: otel.Tracer(cfg.TracerProvider, "github.com/assanoff/skit/broker/rabbitmq")}
 //	}
 //
 // Spans are opened with tracer.Start. Neither the tracer nor the provider
@@ -37,13 +37,13 @@
 //
 // # Suppressing background traces
 //
-// Background tick loops — pollers, outbox relays, sweepers, cleaners — run every
+// Background tick loops — pollers, queue workers, cleaners — run every
 // few seconds with no request behind them, so each poll query would export its
 // own single-span trace and bury the traces that describe real traffic. Wrap the
 // tick context in Suppress and the sampler drops those spans outright:
 //
-//	ctx = otel.Suppress(ctx)             // once per tick
-//	rows, err := store.LeasePending(ctx) // no span exported
+//	ctx = otel.Suppress(ctx)       // once per tick
+//	rows, err := store.Claim(ctx) // no span exported
 //
 // Suppression is inherited by every derived context. When the tick finds work
 // worth tracing, lift it for that work and continue the item's own trace:
@@ -54,7 +54,7 @@
 // # Propagation
 //
 // Propagator is W3C TraceContext only: baggage never leaves the process. For
-// out-of-band transports (e.g. an outbox event's headers), Carrier serializes
+// out-of-band transports (e.g. the envelope of an outbox event), Carrier serializes
 // the trace context to a string map and ExtractFromCarrier restores it:
 //
 //	headers := otel.Carrier(ctx)                // store on a message

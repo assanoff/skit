@@ -22,7 +22,7 @@ The same binary runs as one process or as several, depending on the command:
 |---|---|---|
 | `serve` | API + workers + consumers | 1 (local dev, single pod) |
 | `http` | API only | N |
-| `worker` | background loops + outbox workers | 1 |
+| `worker` | background loops + event workers | 1 |
 | `consumer` | queue consumers only | N |
 
 A command is a list of options (`internal/app/server/options.go`), e.g. `worker`:

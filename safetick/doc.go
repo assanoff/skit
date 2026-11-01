@@ -12,7 +12,7 @@
 // Defer RecoverTick at the start of any tick that must not bring down its loop:
 //
 //	func (w *W) tick(ctx context.Context) {
-//	    defer safetick.RecoverTick(ctx, w.log, "outbox-relay", w.onPanic)
+//	    defer safetick.RecoverTick(ctx, w.log, "report-poller", w.onPanic)
 //	    // ... work that must not crash the loop ...
 //	}
 //

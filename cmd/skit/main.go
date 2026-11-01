@@ -57,7 +57,7 @@ Then add modules to the service:
   skit add consumer <name>      # broker-agnostic message consumer
   skit add worker <name>        # background worker (--claim for queue-backed)
   skit add migration <name>     # next numbered goose migration (NNNN_<name>.sql)
-  skit add event <name> --core <entity>  # domain event + outbox route (--with-relay for the relay)
+  skit add event <name> --core <entity>  # domain event + its route and handler in the queue of events
   skit add cron <name>          # scheduled job (--schedule, --lock postgres|redis)
   skit add grpc-test <name>     # unit + bufconn tests for a gRPC module
   skit add http-client <name>   # typed upstream client (--oauth for OAuth2)
@@ -133,7 +133,7 @@ func main() {
 		os.Exit(1)
 	}
 	if _, err := add.AddCommand("event", "scaffold a domain event",
-		"Generate a typed event payload + its outbox route (--with-relay adds the outbox relay bootstrap).", &addEventCommand{}); err != nil {
+		"Generate a typed event payload + its route and publishing handler in the queue of events.", &addEventCommand{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

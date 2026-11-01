@@ -1,29 +1,37 @@
-// Package {{.Pkg}} registers the outbox route of the {{.Core}}.{{.Type}} event:
-// its CloudEvents type and topic. The event type lives in the domain
-// (core/{{.Core}}), which imports neither outbox nor this package; the relay
-// delivers the stored event to the broker, and a consumer decodes the
-// CloudEvents envelope on the other side (see `skit add consumer`).
+// Package {{.Pkg}} routes the {{.Core}}.{{.Type}} event: its CloudEvents type,
+// its topic, its route into the queue of events and the handler that publishes
+// it. The event type lives in the domain (core/{{.Core}}), which imports
+// neither queue nor this package; a consumer decodes the CloudEvents envelope
+// on the other side (see `skit add consumer`).
 package {{.Pkg}}
 
 import (
+	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/queue"
 
 	"{{.Module}}/core/{{.Core}}"
 )
 
 // EventType is the CloudEvents `type` for this event — the stable name other
-// services filter and route on. Namespaced by the aggregate.
+// services filter and route on, and the kind of its task in the queue of
+// events. Namespaced by the aggregate.
 const EventType = "{{.Plural}}.created" // TODO: name the real event, e.g. "{{.Plural}}.updated"
 
-// Topic is the transport destination the relay publishes this event to.
+// Topic is the transport destination the event is published to.
 const Topic = "{{.Plural}}"
 
-// Register maps {{.Core}}.{{.Type}} to its CloudEvents type and topic on reg.
-// Call it once at startup, before the relay starts, so the outbox knows how to
-// route the event. The payload is JSON.
-//
-// The broker publisher derives any key from the message: Kafka keeps the
-// events of one aggregate in order with kafka.WithPartitionKey.
-func Register(reg *outbox.Registry) error {
-	return reg.Register[{{.Core}}.{{.Type}}](EventType, Topic)
+// Route sends {{.Core}}.{{.Type}} into the queue of events q on reg as the kind
+// EventType. opt writes the event: queue.WithEncoder(outbox.Envelope()) while
+// the broker is on, queue.Drop() while it is off. Call it once at startup.
+func Route(reg *queue.Registry, q string, opt queue.RouteOption) error {
+	return reg.Register[{{.Core}}.{{.Type}}](q, EventType, opt)
+}
+
+// Handle registers on mux, the Mux of the queue of events, the handler that
+// publishes the event to Topic through pub. The broker publisher derives any
+// key from the message: Kafka keeps the events of one aggregate in order with
+// kafka.WithPartitionKey.
+func Handle(mux *queue.Mux, pub broker.Publisher) error {
+	return mux.Register(EventType, outbox.Handler(pub, Topic))
 }

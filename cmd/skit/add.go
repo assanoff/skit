@@ -146,15 +146,14 @@ func nextMigrationSeq(dir string) (int, error) {
 }
 
 type addRESTOpts struct {
-	Dir       string // service root (holds go.mod)
-	Module    string // module path; resolved from go.mod when empty
-	Plural    string // override for routes/table; defaults to Pkg+"s"
-	Name      string // raw entity name
-	NoTests   bool   // skip generating tests
-	Claim     bool   // worker: --claim (queue-backed) variant instead of periodic tick
-	Broker    string // consumer: transport for the generated wiring (rmq|kafka|nats)
-	WithRelay bool   // event: also scaffold the service-wide outbox relay bootstrap
-	Core      string // event: the domain (core/<core>) the event type lives in
+	Dir     string // service root (holds go.mod)
+	Module  string // module path; resolved from go.mod when empty
+	Plural  string // override for routes/table; defaults to Pkg+"s"
+	Name    string // raw entity name
+	NoTests bool   // skip generating tests
+	Claim   bool   // worker: --claim (queue-backed) variant instead of periodic tick
+	Broker  string // consumer: transport for the generated wiring (rmq|kafka|nats)
+	Core    string // event: the domain (core/<core>) the event type lives in
 }
 
 // restData is the template payload shared by every generated REST file.
@@ -694,12 +693,12 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
 
 1. go mod tidy   # test dep (matryer/is)
 
-2. Provision the queue table at startup and expose a *queue.PG in deps if
-   absent:
+2. The full bootstrap provides the queue table as a.d.Queue(ctx)
+   (internal/app/deps/store.go); elsewhere provision it at startup:
 
-   q := queue.NewPG(d.Logger, d.DB(ctx))
+   q := queue.NewPG(log, db)
    if err := q.EnsureSchema(ctx); err != nil {
-       return nil, err
+       return err
    }
 
 3. Wire the workers of the queue into initWorkers
@@ -710,7 +709,7 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
        if err := mux.Register(%[1]s.Kind, %[1]s.New(a.d.Logger).Handle); err != nil {
            return err
        }
-       ws, err := queue.Workers(a.d.Logger, q, queue.Config{Queue: %[1]s.Queue},
+       ws, err := queue.Workers(a.d.Logger, a.d.Queue(ctx), queue.Config{Queue: %[1]s.Queue},
            mux.Handle, queue.WithMetrics(a.d.Metrics))
        if err != nil {
            return err
@@ -720,7 +719,7 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
    // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue"
 
 4. Enqueue work:
-   q.Schedule(ctx, queue.Params{Queue: %[1]s.Queue, Kind: %[1]s.Kind, Payload: ...})
+   a.d.Queue(ctx).Schedule(ctx, queue.Params{Queue: %[1]s.Queue, Kind: %[1]s.Kind, Payload: ...})
 
 5. go test ./internal/app/workers/%[1]s/...
 `, d.Pkg, d.Module)
@@ -879,37 +878,35 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
 	}
 }
 
-// addEventCommand scaffolds a domain event: a typed payload plus its outbox
-// route registration — the producing side that complements `add consumer`.
+// addEventCommand scaffolds a domain event: a typed payload plus its route
+// into the queue of events and its publishing handler — the producing side
+// that complements `add consumer`.
 type addEventCommand struct {
-	Dir       string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
-	Module    string `long:"module" description:"module path (default: read from go.mod)"`
-	Plural    string `long:"plural" description:"event/topic plural (default: <core>+\"s\")"`
-	Core      string `long:"core" required:"yes" description:"domain the event type lives in (core/<core>), e.g. widget"`
-	WithRelay bool   `long:"with-relay" description:"also scaffold the service-wide outbox relay bootstrap (Store + Registry + Relay); created once, skipped if present"`
-	NoTests   bool   `long:"no-tests" description:"skip generating the event test"`
-	Args      struct {
+	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
+	Module  string `long:"module" description:"module path (default: read from go.mod)"`
+	Plural  string `long:"plural" description:"event/topic plural (default: <core>+\"s\")"`
+	Core    string `long:"core" required:"yes" description:"domain the event type lives in (core/<core>), e.g. widget"`
+	NoTests bool   `long:"no-tests" description:"skip generating the event test"`
+	Args    struct {
 		Name string `positional-arg-name:"name" description:"event name, e.g. advert-created or order-paid"`
 	} `positional-args:"yes" required:"yes"`
 }
 
 func (c *addEventCommand) Execute([]string) error {
 	return addEvent(os.Stdout, addRESTOpts{
-		Dir:       c.Dir,
-		Module:    c.Module,
-		Plural:    c.Plural,
-		Name:      c.Args.Name,
-		NoTests:   c.NoTests,
-		WithRelay: c.WithRelay,
-		Core:      c.Core,
+		Dir:     c.Dir,
+		Module:  c.Module,
+		Plural:  c.Plural,
+		Name:    c.Args.Name,
+		NoTests: c.NoTests,
+		Core:    c.Core,
 	})
 }
 
 // addEvent generates a domain event: its typed payload in the domain
-// (core/<core>/<name>.go, no outbox import) and Register, its outbox route, in
-// internal/app/events/<name>. With opts.WithRelay it also writes the
-// service-wide, event-agnostic relay bootstrap (internal/app/events/relay.go),
-// created once and skipped on re-run.
+// (core/<core>/<name>.go, no queue import) and, in internal/app/events/<name>,
+// Route, its route into the queue of events, and Handle, its publishing
+// handler.
 func addEvent(out io.Writer, opts addRESTOpts) error {
 	if err := checkName(opts.Name, nil); err != nil {
 		return err
@@ -959,24 +956,17 @@ func addEvent(out io.Writer, opts addRESTOpts) error {
 			filepath.Join(pkgDir, pkg+"_test.go"), "templates/event/event_test.go.tmpl",
 		})
 	}
-	if opts.WithRelay {
-		// Service-wide, event-agnostic: one relay per service. writeIfAbsent keeps
-		// it idempotent — created on the first --with-relay, skipped thereafter.
-		files = append(files, struct{ dest, tmpl string }{
-			filepath.Join(eventsDir, "relay.go"), "templates/event/relay.go.tmpl",
-		})
-	}
-
 	for _, f := range files {
 		if err := writeIfAbsent(out, f.dest, f.tmpl, data); err != nil {
 			return err
 		}
 	}
 
-	// The full bootstrap (internal/app/deps present) already builds the outbox,
-	// its registry and Events; the hints point there.
+	// The full bootstrap (internal/app/deps present) already builds the queue,
+	// its registry, the Mux of the events and their workers; the hints point
+	// there.
 	_, err := os.Stat(filepath.Join(dir, "internal", "app", "deps"))
-	printEventNextSteps(out, data, err == nil, opts.WithRelay)
+	printEventNextSteps(out, data, err == nil)
 	return nil
 }
 
@@ -995,68 +985,59 @@ func eventTypeName(words, core []string) (string, error) {
 	return pascal(words[n:]), nil
 }
 
-// printEventNextSteps prints the outbox wiring a developer adds by hand:
-// register the route, run the relay, and publish from the domain through its
-// store.
-func printEventNextSteps(out io.Writer, d restData, full, withRelay bool) {
+// printEventNextSteps prints the event wiring a developer adds by hand: route
+// the event, publish it, run the workers of the queue of events, and schedule
+// it from the domain through its store.
+func printEventNextSteps(out io.Writer, d restData, full bool) {
 	// [1]=Pkg [2]=Module [3]=Type [4]=Core
 	fmt.Fprintf(out, `
-Scaffolded the %[1]q event: %[4]s.%[3]s (core/%[4]s) and its route
-%[1]s.EventType, topic %[1]s.Topic (internal/app/events/%[1]s). Next:
+Scaffolded the %[1]q event: %[4]s.%[3]s (core/%[4]s), its route and handler
+%[1]s.Route and %[1]s.Handle, type %[1]s.EventType, topic %[1]s.Topic
+(internal/app/events/%[1]s). Next:
 
 1. go mod tidy   # test dep (matryer/is)
 `, d.Pkg, d.Module, d.Type, d.Core)
 
-	switch {
-	case full:
+	if full {
 		fmt.Fprintf(out, `
-2. Register the route in the Registry provider (internal/app/deps/broker.go);
-   the relay already runs when the broker is on (addOutboxWorkers):
+2. Route the event in the Registry provider (internal/app/deps/store.go) and
+   publish it in the Events provider (internal/app/deps/broker.go); the workers
+   of the queue of events run when the broker is on (addEventWorkers):
 
-   if err := %[1]s.Register(reg); err != nil { return nil, err }
+   if err := %[1]s.Route(reg, EventsQueue, c.EventRoute()); err != nil { return nil, err }
+   if err := %[1]s.Handle(mux, pub); err != nil { return nil, err }
    // import: "%[2]s/internal/app/events/%[1]s"
 
-3. Build the %[4]s store with events (internal/app/deps/%[4]s.go) — c.Events
-   binds them to the outbox when the broker is on and drops them when it is off:
+3. Build the %[4]s store with tasks (internal/app/deps/%[4]s.go) — c.Tasks
+   binds them to the transaction:
 
-   %[4]sdb.NewStore(c.Logger, c.DB(ctx), %[4]sdb.WithEvents(c.Events(ctx)))
+   %[4]sdb.NewStore(c.Logger, c.DB(ctx), %[4]sdb.WithTasks(c.Tasks(ctx)))
 `, d.Pkg, d.Module, d.Type, d.Core)
-	case withRelay:
+	}
+	if !full {
 		fmt.Fprintf(out, `
-2. Register the route in internal/app/events/relay.go (NewRegistry):
+2. Route and publish the event at startup, run the workers of the queue of
+   events and build the %[4]s store with tasks (pub = rabbitmq/kafka NewPublisher):
 
-   if err := %[1]s.Register(reg); err != nil { return nil, err }
-   // import: "%[2]s/internal/app/events/%[1]s"
-
-3. Run the relay with the workers and build the %[4]s store with events:
-
-   ob, err  := events.NewStore(ctx, log, db)
-   reg, err := events.NewRegistry()
-   workers = append(workers, events.NewRelay(log, ob, pub, metrics)) // pub = rabbitmq/kafka NewPublisher
-   store := %[4]sdb.NewStore(log, db, %[4]sdb.WithEvents(func(tx *dbx.Tx) *outbox.Publisher {
-       return outbox.Bind(tx, ob, reg)
-   }))
-`, d.Pkg, d.Module, d.Type, d.Core)
-	default:
-		fmt.Fprintf(out, `
-2. Build the outbox once at startup (or generate it with --with-relay), run its
-   relay with the workers and build the %[4]s store with events:
-
-   ob := outbox.NewPG(log, db, outbox.Options{}); _ = ob.EnsureSchema(ctx)
-   reg := outbox.NewRegistry(); _ = %[1]s.Register(reg)
-   workers = append(workers, outbox.NewRelay(log, ob, pub, outbox.RelayConfig{Metrics: metrics})) // pub = broker publisher
-   store := %[4]sdb.NewStore(log, db, %[4]sdb.WithEvents(func(tx *dbx.Tx) *outbox.Publisher {
-       return outbox.Bind(tx, ob, reg)
+   q := queue.NewPG(log, db); _ = q.EnsureSchema(ctx)
+   reg, mux := queue.NewRegistry(), queue.NewMux()
+   _ = %[1]s.Route(reg, "events", queue.WithEncoder(outbox.Envelope())) // queue.Drop() with no broker
+   _ = %[1]s.Handle(mux, pub)
+   _ = reg.Check("events", mux)
+   events, _ := queue.Workers(log, q, outbox.Config("events"), mux.Handle, queue.WithMetrics(metrics))
+   workers = append(workers, events...)
+   store := %[4]sdb.NewStore(log, db, %[4]sdb.WithTasks(func(tx *dbx.Tx) *queue.Scheduler {
+       return queue.Bind(tx, q, reg)
    }))
 `, d.Pkg, d.Module, d.Type, d.Core)
 	}
 
 	fmt.Fprintf(out, `
-4. Publish from the %[4]s core through its store, atomic with the domain write:
+4. Schedule from the %[4]s core through its store, atomic with the domain write:
 
-   err := c.store.WithinTranEvents(ctx, func(r Repo, pub Publisher) error {
+   err := c.store.WithinTranTasks(ctx, func(r Repo, s Scheduler) error {
        // ... domain writes through r ...
-       return pub.Publish(ctx, %[3]s{ID: id})
+       return s.Schedule(ctx, %[3]s{ID: id})
    })
    // Kafka keeps the events of one aggregate in order with kafka.WithPartitionKey
    // on the publisher; RabbitMQ routes by the event type.
@@ -1233,7 +1214,7 @@ const grpcCoreSteps = `
 
       var init%[2]s = func(c *Deps) (dim.CleanupFunc, error) {
           c.%[2]sCore = dim.Once(func(ctx context.Context) (*%[1]s.Core, error) {
-              store := %[1]sdb.NewStore(c.Logger, c.DB(ctx), %[1]sdb.WithEvents(c.Events(ctx)))
+              store := %[1]sdb.NewStore(c.Logger, c.DB(ctx), %[1]sdb.WithTasks(c.Tasks(ctx)))
               return %[1]s.NewCore(c.Logger, store), nil
           })
           return nil, nil
@@ -1480,7 +1461,7 @@ func printRESTWiring(out io.Writer, d restData, full bool) {
 
       var init%[2]s = func(c *Deps) (dim.CleanupFunc, error) {
           c.%[2]sCore = dim.Once(func(ctx context.Context) (*%[1]s.Core, error) {
-              store := %[1]sdb.NewStore(c.Logger, c.DB(ctx), %[1]sdb.WithEvents(c.Events(ctx)))
+              store := %[1]sdb.NewStore(c.Logger, c.DB(ctx), %[1]sdb.WithTasks(c.Tasks(ctx)))
               return %[1]s.NewCore(c.Logger, store), nil
           })
           c.%[2]sHandler = dim.Once(func(ctx context.Context) (*%[1]sapi.Handler, error) {

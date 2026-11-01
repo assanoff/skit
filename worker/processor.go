@@ -130,10 +130,10 @@ func retryPanic(_ context.Context, _ any, p *safetick.PanicError) error {
 // markTimeout bounds each mark and each release of a Processor.
 const markTimeout = 5 * time.Second
 
-// Processor is the reliable batch-processing FSM shared by the outbox relay,
-// push pipelines, and pgqueue consumers: each tick leases a batch from the
-// Source, runs the Handler on each item, then records the outcome via the Sink
-// (done on success, failed/terminal-or-retryable on error). A panic in the
+// Processor is the reliable batch-processing FSM shared by the queue workers
+// and push pipelines: each tick leases a batch from the Source, runs the
+// Handler on each item, then records the outcome via the Sink (done on
+// success, failed/terminal-or-retryable on error). A panic in the
 // Handler is recovered per item and becomes its outcome through OnPanic.
 //
 // A Processor is not itself a Runnable; call Tick to get a TickFunc and wrap it
@@ -230,8 +230,7 @@ func (p *Processor[T]) release(ctx context.Context, rest []T) {
 // handleOne processes a single item, records its outcome and returns it: the
 // error of Handle, or of OnPanic when Handle panicked. Mark failures are
 // logged but not propagated — the surrounding tick has no caller to surface
-// them to, and the next tick (or the sweeper) will reclaim an unacknowledged
-// item.
+// them to, and a later claim reclaims an unacknowledged item after its lease.
 func (p *Processor[T]) handleOne(ctx context.Context, item T) error {
 	now := p.cfg.Now()
 

@@ -58,7 +58,7 @@
 //	    }))
 //
 // A key of "" fails the publish with an error that is not broker.Permanent: the
-// function is wrong, not the message, so the outbox relay retries the event
+// function is wrong, not the message, so the queue of events retries the event
 // until a fixed function ships. Publishes are not mandatory: the broker drops a
 // message that no binding matches without an error, so the event types are
 // part of the contract of the bindings.
@@ -68,7 +68,7 @@
 // Every publish is a span "send <exchange>" with messaging.system rabbitmq and
 // the routing key. A message without a trace context in its headers gets the
 // PRODUCER span as its creation context, written into the AMQP headers; a
-// message that carries one — the outbox relay sends the context the event was
+// message that carries one — outbox.Handler sends the context the event was
 // created in — is sent under a CLIENT child of it. The consumer span comes
 // from broker.Instrument around the handler.
 //

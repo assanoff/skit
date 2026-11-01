@@ -5,9 +5,9 @@ import (
 	"{{.Module}}/internal/app/server"
 )
 
-// WorkerCommand runs the background work only: domain loops and the
-// transactional-outbox workers, plus the technical routes on DEBUG_ADDR. No API,
-// no consumers.
+// WorkerCommand runs the background work only: domain loops and the workers of
+// the queue of events, plus the technical routes on DEBUG_ADDR. No API, no
+// consumers.
 //
 // Run it as a single replica — see initWorkers (internal/app/server/server.go).
 type WorkerCommand struct {

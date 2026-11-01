@@ -22,7 +22,6 @@ import (
 	"github.com/assanoff/skit/httpclient"
 	"github.com/assanoff/skit/metrics"
 	"github.com/assanoff/skit/otel/setup"
-	"github.com/assanoff/skit/outbox"
 	"github.com/assanoff/skit/queue"
 	"github.com/assanoff/skit/rest/mid"
 )
@@ -44,10 +43,6 @@ func presets(t *testing.T) *metrics.Metrics {
 		t.Fatalf("pg: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	outbox.NewRelay(log, nil, nil, outbox.RelayConfig{Metrics: m})
-	outbox.NewSweeper(log, nil, outbox.SweeperConfig{Metrics: m})
-	outbox.NewCleaner(log, nil, outbox.CleanerConfig{Metrics: m})
-	outbox.NewBacklog(log, nil, m)
 	ignore := func(context.Context, queue.Task) error { return nil }
 	if _, err := queue.Workers(log, &queue.PG{}, queue.Config{Queue: "q"}, ignore, queue.WithMetrics(m)); err != nil {
 		t.Fatalf("queue: %v", err)
@@ -151,8 +146,8 @@ func TestDashboardNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 6 {
-		t.Fatalf("dashboards: %d files, want 6", len(paths))
+	if len(paths) != 5 {
+		t.Fatalf("dashboards: %d files, want 5", len(paths))
 	}
 	for _, path := range paths {
 		used := map[string]bool{}

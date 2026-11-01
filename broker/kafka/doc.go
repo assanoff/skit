@@ -27,13 +27,13 @@
 //	        return v.ID, nil
 //	    }))
 //
-// An error of the function fails the publish as it is: the outbox relay
-// retries the event, as it does for a broker that is down, and fails it at
-// once only for a broker.Permanent error. Wrap the error when the message
+// An error of the function fails the publish as it is: the queue of events
+// retries the event, as it does for a broker that is down, and dead-letters it
+// at once only for a broker.Permanent error. Wrap the error when the message
 // itself has no key and never will; leave it as it is when the function may
 // be wrong, so the events wait for a fixed one instead of failing.
 //
-// The order is best effort: the relay retries a failed event later, and the
+// The order is best effort: the queue retries a failed event later, and the
 // next events of its aggregate go ahead of it meanwhile.
 //
 // # Tracing

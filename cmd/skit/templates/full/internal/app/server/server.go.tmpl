@@ -17,6 +17,7 @@ import (
 	"github.com/assanoff/skit/health"
 	"github.com/assanoff/skit/metrics"
 	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/queue"
 	"github.com/assanoff/skit/worker"
 
 	"{{.Module}}/internal/app/config"
@@ -88,7 +89,7 @@ func (a *App) Components() Components {
 }
 
 // initWorkers registers the background work: the domain loops and — when the
-// broker is enabled — the transactional-outbox workers. Each part sits behind
+// broker is enabled — the workers of the queue of events. Each part sits behind
 // its own switch, so a worker added here starts whatever the broker setting.
 //
 // Run it as a single replica: these loops poll the same rows, so extra replicas
@@ -104,26 +105,33 @@ func initWorkers(ctx context.Context, a *App) error {
 	//   	a.workers = append(a.workers, a.d.SomeLoop(ctx))
 	//   }
 	if a.d.Opts.Broker.Enabled() {
-		addOutboxWorkers(ctx, a)
+		return addEventWorkers(ctx, a)
 	}
 	return nil
 }
 
-// addOutboxWorkers adds the outbox workers (relay, sweeper, cleaner) that
-// deliver the domain events written into the outbox inside a business
-// transaction, and the worker of the backlog gauges.
-func addOutboxWorkers(ctx context.Context, a *App) {
-	ob := a.d.Outbox(ctx)
-	a.workers = append(a.workers,
-		outbox.NewRelay(a.d.Logger, ob, a.d.Publisher(ctx), outbox.RelayConfig{Metrics: a.d.Metrics}),
-		outbox.NewSweeper(a.d.Logger, ob, outbox.SweeperConfig{Metrics: a.d.Metrics}),
-		outbox.NewCleaner(a.d.Logger, ob, outbox.CleanerConfig{Metrics: a.d.Metrics}),
-		outbox.NewBacklog(a.d.Logger, ob, a.d.Metrics),
-	)
+// addEventWorkers adds the workers of the queue of events, which publish the
+// domain events scheduled inside a business transaction, the cleaner of its
+// dead letters and the worker of its backlog gauges. It first checks that
+// every event routed to the queue has a handler: one without would go to the
+// dead letters.
+func addEventWorkers(ctx context.Context, a *App) error {
+	events := a.d.Events(ctx)
+	if err := a.d.Registry(ctx).Check(deps.EventsQueue, events); err != nil {
+		return err
+	}
+	workers, err := queue.Workers(a.d.Logger, a.d.Queue(ctx), outbox.Config(deps.EventsQueue),
+		events.Handle, queue.WithMetrics(a.d.Metrics))
+	if err != nil {
+		return err
+	}
+	a.workers = append(a.workers, workers...)
+	return nil
 }
 
 // initConsumers registers the queue consumers — the receiving half of the
-// pipeline whose sending half (the outbox workers) belongs to initWorkers.
+// pipeline whose sending half (the workers of the queue of events) belongs to
+// initWorkers.
 // Competing consumers, so more than one replica is safe.
 func initConsumers(ctx context.Context, a *App) error { //nolint:revive // ctx is for the consumers wired here
 	// Wire queue consumers here; a RabbitMQ one goes behind Broker.Enabled(), e.g.:

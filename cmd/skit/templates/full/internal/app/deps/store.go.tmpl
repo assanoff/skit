@@ -1,13 +1,23 @@
 package deps
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/dbx/pg"
 	"github.com/assanoff/skit/dim"
+	"github.com/assanoff/skit/outbox"
 	"github.com/assanoff/skit/provider/postgres"
+	"github.com/assanoff/skit/queue"
 )
 
-// initStore initializes the Postgres connection pool and assigns it to the
-// container through the ready Postgres factory of provider/postgres.
+// EventsQueue is the queue the domain events go through to the broker.
+const EventsQueue = "events"
+
+// initStore initializes the Postgres connection pool, the queues on it and the
+// registry of their routes, and assigns them to the container. The pool comes
+// from the ready Postgres factory of provider/postgres.
 var initStore = func(c *Deps) (cleanup dim.CleanupFunc, err error) {
 	c.DB, cleanup = dim.NewResource("Store", postgres.Resource(pg.Config{
 		User:           c.Opts.DB.User,
@@ -21,5 +31,39 @@ var initStore = func(c *Deps) (cleanup dim.CleanupFunc, err error) {
 		Metrics:        c.Metrics,
 		TracerProvider: c.TracerProvider,
 	}))
+	c.Queue = dim.OnceWithName("Queue", func(ctx context.Context) (*queue.PG, error) {
+		q := queue.NewPG(c.Logger, c.DB(ctx))
+		if err := q.EnsureSchema(ctx); err != nil {
+			return nil, fmt.Errorf("ensure queue schema: %w", err)
+		}
+		return q, nil
+	})
+	c.Registry = dim.OnceWithName("Registry", func(context.Context) (*queue.Registry, error) {
+		reg := queue.NewRegistry()
+		// Route each task and event here (`skit add event` prints the line), e.g.:
+		//   if err := widgetcreated.Route(reg, EventsQueue, c.EventRoute()); err != nil {
+		//       return nil, err
+		//   }
+		return reg, nil
+	})
 	return cleanup, nil
+}
+
+// EventRoute is the route option of the events: their outbox envelope while
+// the broker is on, Drop while it is off — the domain write goes through, the
+// event goes nowhere, and the domain does not branch.
+func (c *Deps) EventRoute() queue.RouteOption {
+	if !c.Opts.Broker.Enabled() {
+		return queue.Drop()
+	}
+	return queue.WithEncoder(outbox.Envelope())
+}
+
+// Tasks is what a store binds its tasks with (WithTasks): a Scheduler on the
+// transaction, which routes each value by the Registry.
+func (c *Deps) Tasks(ctx context.Context) func(tx *dbx.Tx) *queue.Scheduler {
+	q, reg := c.Queue(ctx), c.Registry(ctx)
+	return func(tx *dbx.Tx) *queue.Scheduler {
+		return queue.Bind(tx, q, reg)
+	}
 }

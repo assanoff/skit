@@ -2,7 +2,7 @@
 // The Core holds business logic and depends only on the Store interface declared
 // here; the concrete SQL implementation lives in the nested {{.Pkg}}db package.
 // This keeps the domain testable and storage-agnostic: it imports neither dbx
-// nor outbox, and the store returns the sentinels declared here.
+// nor queue, and the store returns the sentinels declared here.
 package {{.Pkg}}
 
 import (
@@ -24,7 +24,7 @@ var (
 	ErrAlreadyExists = errors.New("{{.Pkg}} already exists")
 )
 
-//go:generate go tool moq -out mocks/store.go -pkg mocks . Store Repo Publisher
+//go:generate go tool moq -out mocks/store.go -pkg mocks . Store Repo Scheduler
 
 // Repo is CRUD over {{.Plural}}. The callback of a transaction gets it too.
 type Repo interface {
@@ -37,10 +37,11 @@ type Repo interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 }
 
-// Publisher writes an event in the transaction of the callback. It is declared
-// here so the domain does not import outbox.
-type Publisher interface {
-	Publish(ctx context.Context, event any) error
+// Scheduler schedules a task — an event, any work after the commit — in the
+// transaction of the callback. It is declared here so the domain does not
+// import queue.
+type Scheduler interface {
+	Schedule(ctx context.Context, v any) error
 }
 
 // Store is the persistence contract for {{.Plural}}: CRUD and transactions. The
@@ -48,7 +49,7 @@ type Publisher interface {
 // elsewhere. Run `make generate` (moq) to (re)generate the mocks for tests.
 //
 // fn may run more than once (a retry after a deadlock): inside it use only r
-// and pub, keep no state between runs and do not call the Store. A Store built
+// and s, keep no state between runs and do not call the Store. A Store built
 // over another transaction joins it and does not commit.
 type Store interface {
 	Repo
@@ -56,10 +57,9 @@ type Store interface {
 	// WithinTran runs fn in one transaction; r is bound to it.
 	WithinTran(ctx context.Context, fn func(r Repo) error) error
 
-	// WithinTranEvents is WithinTran plus pub, which writes events into the
-	// outbox in the same transaction. Without events wired into the store it
-	// drops them.
-	WithinTranEvents(ctx context.Context, fn func(r Repo, pub Publisher) error) error
+	// WithinTranTasks is WithinTran plus s, which schedules tasks in the same
+	// transaction. Without tasks wired into the store Schedule fails.
+	WithinTranTasks(ctx context.Context, fn func(r Repo, s Scheduler) error) error
 }
 
 // Core implements the {{.Pkg}} business logic.

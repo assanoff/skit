@@ -27,8 +27,8 @@
 //
 // # Processors
 //
-// A Processor[T] is the reliable batch-processing FSM behind the outbox relay
-// and pgqueue-style consumers. Each tick it leases a batch from a Source
+// A Processor[T] is the reliable batch-processing FSM behind the queue workers
+// and other claim-based consumers. Each tick it leases a batch from a Source
 // (canonically SELECT ... FOR UPDATE SKIP LOCKED, so replicas can run
 // concurrently), runs the Handler on each item, then records the outcome via
 // the Sink (MarkDone on success, MarkFailed on error with terminal/retryable
@@ -100,7 +100,7 @@
 // A tick has no request behind it, so by default a Loop runs it under
 // otel.Suppress: the queries of an idle poll export no traces. A Processor
 // lifts the mark for each item's handler, which then sets the item's trace —
-// the outbox relay continues the trace that created the event — while the
+// the queue of events continues the trace that created the event — while the
 // claim and the marks stay suppressed. With LoopConfig.Trace a Loop records
 // every tick as the root span of its own trace, named after the Loop, and
 // everything the tick does nests under it; a failed tick sets the span's

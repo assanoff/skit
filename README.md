@@ -45,10 +45,10 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `order`, `page` | Listing primitives shared by the domain and both transports: allowlisted sort (`order`), validated offset/cursor paging input (`page`) |
 | `grpcserver` | gRPC server as a `worker.Runnable`: server span per RPC (otelgrpc), recovery/logging/metrics interceptors, `errs`→status mapping, health, reflection, transport tuning knobs |
 | `worker` | Unified worker abstraction: `Runnable`, `Group`, `Loop` (fixed) / `NewPacedLoop` (adaptive: drain-when-busy, idle-backoff), `Pool`, `Processor[T]`, `Backoff` |
-| `queue` | Durable work queue (`Schedule`/`Claim`/`MarkDone`/`MarkFailed`): Postgres (`FOR UPDATE SKIP LOCKED`) + in-memory, plugs into `worker.Processor` as a `Source`/`Sink` |
+| `queue` | Durable named queues on Postgres (`FOR UPDATE SKIP LOCKED`): `Schedule` on the pool or `Bind(tx).Schedule` in a transaction through a `Registry`, `Workers` per queue, outcomes by the error of the handler (`Permanent`, `Halt`, backoff) |
 | `poller` | Typed cache of a periodically-refreshed value (`Poller[T]`), a `worker.Runnable` |
 | `broker` | Transport-agnostic `Publisher`/`Consumer` abstraction; CloudEvents v1.0 envelope; `broker/rabbitmq` implementation (confirm-mode publisher, `worker.Runnable` consumer) |
-| `outbox` | Transactional outbox: the domain emits a typed event through a tx-bound `Publisher` (route resolved from a `Registry`, transport-neutral `Topic`/`Key`) inside `WithinTran` — atomic domain-write + event, no SQL/transport leaking into the domain. `Relay`/`Sweeper`/`Cleaner` workers (built on `worker.Processor`/`Loop`) deliver via any `broker.Publisher` |
+| `outbox` | Transactional outbox on `queue`: an event is a task scheduled in the transaction of its domain write (`queue.Bind`), written by `Envelope` and published by `Handler` through any `broker.Publisher`; `Config` sets up the queue of events |
 | `eventbus` | In-process synchronous event bus (`Bus`) for decoupling domains without import cycles: `Call` (abort on first error) / `Publish` (run all, join errors). For atomic/durable events use `outbox` instead |
 | `i18n` | go-i18n wrapper: catalogs from `fs.FS`, Accept-Language matching + middleware, localizes `*errs.Error` by `MessageID`/`Code` with `Args` |
 | `auth` | `Principal` in context, credential extraction, pluggable `Verifier`, built-in JWT (HMAC/RSA/EC + JWKS via Keyfunc), `Authenticate`/`Optional`/`RequireRole` middleware |
@@ -170,63 +170,71 @@ service, running it, and generating REST/gRPC modules with the `skit` CLI.
 
 ## Messaging & transactional outbox
 
-`broker` + `outbox` give reliable, exactly-the-domain-write event publishing
-with a domain layer that knows nothing about SQL or the transport:
+`queue`, `outbox` and `broker` give reliable, exactly-the-domain-write event
+publishing with a domain layer that knows nothing about SQL or the transport.
+Any work after a commit is a task of a `queue`; an event is a task whose
+handler publishes it to the broker.
 
-- The domain emits a **plain typed value** through the `Publisher` its store
-  hands it inside the transaction:
+- The domain schedules a **plain typed value** through the `Scheduler` its
+  store hands it inside the transaction:
 
   ```go
-  err := c.store.WithinTranEvents(ctx, func(r widget.Repo, pub widget.Publisher) error {
+  err := c.store.WithinTranTasks(ctx, func(r widget.Repo, s widget.Scheduler) error {
       if err := r.Create(ctx, w); err != nil { // domain write
           return err
       }
-      return pub.Publish(ctx, widget.Created{ID: w.ID}) // domain event
+      return s.Schedule(ctx, widget.Created{ID: w.ID}) // domain event
   })
   ```
 
-  The wiring binds that `Publisher` to the transaction with
-  `outbox.Bind(tx, ob, reg)`, or drops events with `outbox.Discard()` when the
-  broker is off. The event and the domain write commit in ONE transaction — an
-  event is persisted iff its domain write commits. The domain names no
-  exchange, topic, or routing key; it imports neither `outbox` nor `dbx`.
+  The wiring binds that `Scheduler` to the transaction with
+  `queue.Bind(tx, q, reg)`. The task and the domain write commit in ONE
+  transaction — an event is persisted iff its domain write commits. The domain
+  names no queue, exchange, topic, or routing key; it imports neither `queue`
+  nor `dbx`.
 
-- Routing is a **wiring concern**. A `Registry`, populated once at startup, maps
-  each event's Go type to its event type and a transport-neutral `Topic`, and
-  encodes events as JSON:
+- Routing is a **wiring concern**. A `queue.Registry`, populated once at
+  startup, maps each value's Go type to its queue and kind; an event goes into
+  the queue of events in an `outbox.Envelope`, and the `Mux` of that queue
+  publishes each kind to its topic with `outbox.Handler`. With the broker off
+  the route is `queue.Drop()`: the domain write goes through, the event goes
+  nowhere, and the domain does not branch.
 
   ```go
-  reg := outbox.NewRegistry()
-  reg.Register[widget.Created]("widget.created", "widgets")
+  reg := queue.NewRegistry()
+  reg.Register[widget.Created]("events", "widget.created", queue.WithEncoder(outbox.Envelope()))
+
+  mux := queue.NewMux()
+  mux.Register("widget.created", outbox.Handler(pub, "widgets"))
+  if err := reg.Check("events", mux); err != nil { // every event has a handler
+      return err
+  }
+  workers, err := queue.Workers(log, q, outbox.Config("events"), mux.Handle,
+      queue.WithMetrics(d.Metrics))
   ```
 
-- `outbox.Relay` (a `worker.Processor`) drains pending events to any
-  `broker.Publisher` with at-least-once delivery; `Sweeper` reclaims leases from
-  crashed relays and `Cleaner` prunes terminal rows. The relay paces adaptively
-  (`worker.NewPacedLoop`): a full batch drains again immediately, an empty one
-  idles for `PollInterval` (optionally backing off to `MaxPollInterval`).
-- Metrics are opt-in and registered on the process registry: the `Metrics`
-  field of `RelayConfig`/`SweeperConfig`/`CleanerConfig` (relay/sweeper/cleaner
-  throughput) and the `outbox.NewBacklog` worker (pending/in-flight/failed depth
-  and oldest-pending age). SDK and business metrics never collide — distinct
-  name prefixes on one registry (see `metrics`).
+- The workers of the queue publish with at-least-once delivery: a broker that
+  is down costs one failed publish per poll and loses nothing, only
+  `broker.Permanent` sends an event to the dead letters. Metrics are the
+  queue's: `skit_queue_*{queue="events"}` by kind, the event type.
 - Each transport maps `Topic` to its own concept and derives a key from the
   message (RabbitMQ: exchange, routing key = event type or
   `rabbitmq.WithRoutingKey`; Kafka: topic, no key or `kafka.WithPartitionKey`),
-  so the same event row can ship over any broker. `broker/rabbitmq`
-  publishes CloudEvents v1.0 with publisher confirms and consumes them via a
-  supervised `worker.Runnable`.
+  so the same event can ship over any broker. `broker/rabbitmq` publishes
+  CloudEvents v1.0 with publisher confirms and consumes them via a supervised
+  `worker.Runnable`.
 
-- Tracing flows end-to-end: `Publish` captures the W3C trace context into the
-  event headers (`otel.Carrier`), the relay carries it onto the broker message,
-  and the consumer restores it with `otel.ExtractFromCarrier` + opens a child
-  span — so producing a widget and recording its audit row are one trace.
+- Tracing flows end-to-end: the envelope captures the W3C trace context the
+  event is created in (`otel.Carrier`), the handler carries it onto the broker
+  message, and the consumer restores it with `otel.ExtractFromCarrier` + opens
+  a child span — so producing a widget and recording its audit row are one
+  trace.
 
-The `skit-x` showcase wires it end-to-end: creating a widget emits
-`widget.Created` through the outbox, the relay publishes it to RabbitMQ, and the
-`widgetaudit` consumer records it while continuing the producer's trace (see
-`core/widget`, `widgetaudit`, and the e2e test there, which asserts the consumer
-span is a child of the producer span).
+The `skit-x` showcase wires it end-to-end: creating a widget schedules
+`widget.Created` into the queue of events, its workers publish it to RabbitMQ,
+and the `widgetaudit` consumer records it while continuing the producer's trace
+(see `core/widget`, `widgetaudit`, and the e2e test there, which asserts the
+consumer span is a child of the producer span).
 
 ## Reliable background processing
 
@@ -235,9 +243,10 @@ span is a child of the producer span).
 - `worker.Pool` — bounded-concurrency fan-out of one-shot jobs.
 - `worker.Processor[T]` — a `Source` (claim) → `Handler` (process) → `Sink`
   (ack/retry) loop, run on a schedule via `worker.Loop`.
-- `queue.PG` — a Postgres queue that hands each ready task to exactly one
-  consumer via `FOR UPDATE SKIP LOCKED`, so N replicas drain it safely; it
-  satisfies `worker.Source[Task]`/`Sink[Task]` directly.
+- `queue` — Postgres queues in one table: `queue.Workers` claims the ready
+  tasks of one queue via `FOR UPDATE SKIP LOCKED`, so N replicas drain it
+  safely, and the error of the handler decides the outcome (`Permanent`,
+  `Halt`, retry with backoff).
 
 The showcase wires this end-to-end: `POST /widgets/import` enqueues a batch, and a
 supervised import worker bulk-inserts it (idempotently, via `dbx.BulkInsert` +

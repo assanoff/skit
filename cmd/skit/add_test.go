@@ -97,7 +97,7 @@ func TestAddRESTGeneratesParsableModule(t *testing.T) {
 	for _, want := range []string{
 		"func (r *repo) QueryByCursor(",
 		"func (s *Store) WithinTran(",
-		"func (s *Store) WithinTranEvents(",
+		"func (s *Store) WithinTranTasks(",
 		"func NewStore(log *slog.Logger, q dbx.Querier, opts ...Option) *Store",
 	} {
 		if !strings.Contains(db, want) {
@@ -431,7 +431,7 @@ func TestAddEventGeneratesParsableEvent(t *testing.T) {
 		t.Fatalf("addEvent: %v", err)
 	}
 
-	// The type lives in the domain and does not import outbox.
+	// The type lives in the domain and imports neither outbox nor queue.
 	typ := readFile(t, filepath.Join(dir, "core/advert/advertcreated.go"))
 	if _, err := parser.ParseFile(token.NewFileSet(), "advertcreated.go", typ, parser.AllErrors); err != nil {
 		t.Errorf("event type does not parse: %v", err)
@@ -439,8 +439,8 @@ func TestAddEventGeneratesParsableEvent(t *testing.T) {
 	if !strings.Contains(typ, "package advert") || !strings.Contains(typ, "type Created struct") {
 		t.Errorf("event type not in the domain package:\n%s", typ)
 	}
-	if strings.Contains(typ, "skit/outbox") {
-		t.Errorf("event type imports outbox:\n%s", typ)
+	if strings.Contains(typ, "skit/outbox") || strings.Contains(typ, "skit/queue") {
+		t.Errorf("event type imports outbox or queue:\n%s", typ)
 	}
 
 	src := readFile(t, filepath.Join(dir, "internal/app/events/advertcreated/advertcreated.go"))
@@ -448,16 +448,13 @@ func TestAddEventGeneratesParsableEvent(t *testing.T) {
 		t.Errorf("event route does not parse: %v", err)
 	}
 	for _, want := range []string{
-		"func Register(", "const EventType", `const Topic = "adverts"`,
-		`"github.com/me/svc/core/advert"`, "reg.Register[advert.Created](EventType, Topic)",
+		"func Route(", "func Handle(", "const EventType", `const Topic = "adverts"`,
+		`"github.com/me/svc/core/advert"`, "reg.Register[advert.Created](q, EventType, opt)",
+		"outbox.Handler(pub, Topic)",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("event route missing %q:\n%s", want, src)
 		}
-	}
-	// Without --with-relay the relay bootstrap must not exist.
-	if _, err := os.Stat(filepath.Join(dir, "internal/app/events/relay.go")); !os.IsNotExist(err) {
-		t.Errorf("relay.go should not be generated without --with-relay, stat err = %v", err)
 	}
 }
 
@@ -483,32 +480,30 @@ func TestEventTypeName(t *testing.T) {
 	}
 }
 
-func TestAddEventWithRelayIsIdempotent(t *testing.T) {
+// A re-run keeps the files of an event as they are, and a second event gets a
+// package of its own.
+func TestAddEventIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "github.com/me/svc")
 
-	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "advert-created", Core: "advert", WithRelay: true}); err != nil {
+	opts := addRESTOpts{Dir: dir, Name: "advert-created", Core: "advert"}
+	if err := addEvent(&bytes.Buffer{}, opts); err != nil {
 		t.Fatalf("first addEvent: %v", err)
 	}
-	relay := filepath.Join(dir, "internal/app/events/relay.go")
-	src := readFile(t, relay)
-	if _, err := parser.ParseFile(token.NewFileSet(), "relay.go", src, parser.AllErrors); err != nil {
-		t.Errorf("relay.go does not parse: %v", err)
-	}
-	if !strings.Contains(src, "func NewRelay(") || !strings.Contains(src, "package events") {
-		t.Errorf("relay.go missing expected wiring:\n%s", src)
-	}
-
-	// Mark the shared relay file, then add a SECOND event with --with-relay: the
-	// relay is a singleton and must be skipped (not overwritten).
-	if err := os.WriteFile(relay, []byte(src+"\n// edited by hand\n"), 0o644); err != nil {
+	route := filepath.Join(dir, "internal/app/events/advertcreated/advertcreated.go")
+	src := readFile(t, route)
+	if err := os.WriteFile(route, []byte(src+"\n// edited by hand\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := addEvent(&bytes.Buffer{}, addRESTOpts{Dir: dir, Name: "order-paid", Core: "order", WithRelay: true}); err != nil {
-		t.Fatalf("second addEvent: %v", err)
+	if err := addEvent(&bytes.Buffer{}, opts); err != nil {
+		t.Fatalf("re-run addEvent: %v", err)
 	}
-	if got := readFile(t, relay); !strings.Contains(got, "edited by hand") {
-		t.Errorf("re-run overwrote the shared relay.go:\n%s", got)
+	if got := readFile(t, route); !strings.Contains(got, "edited by hand") {
+		t.Errorf("re-run overwrote the route of the event:\n%s", got)
+	}
+	second := addRESTOpts{Dir: dir, Name: "order-paid", Core: "order"}
+	if err := addEvent(&bytes.Buffer{}, second); err != nil {
+		t.Fatalf("second addEvent: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "internal/app/events/orderpaid/orderpaid.go")); err != nil {
 		t.Errorf("second event package not created: %v", err)

@@ -1,33 +1,48 @@
 package {{.Pkg}}
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"uuid"
 
 	"github.com/matryer/is"
 
+	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/queue"
 
 	"{{.Module}}/core/{{.Core}}"
 )
 
-// TestRegister checks the event registers cleanly into a fresh outbox Registry.
-func TestRegister(t *testing.T) {
-	is := is.New(t)
-	is.NoErr(Register(outbox.NewRegistry())) // route registered without error
+// recorder records the message it is asked to publish.
+type recorder struct{ m broker.Message }
+
+func (r *recorder) Publish(_ context.Context, m broker.Message) error {
+	r.m = m
+	return nil
 }
 
-// TestPayloadRoundTrips checks the payload survives a JSON round-trip — the
-// shape the relay marshals into the CloudEvents `data`.
-func TestPayloadRoundTrips(t *testing.T) {
+// TestPublish checks the event routes into the queue of events, has its
+// handler there and reaches the broker with its type, its topic and its
+// payload in the CloudEvents `data`.
+func TestPublish(t *testing.T) {
 	is := is.New(t)
+	ctx := context.Background()
+	reg, mux, pub := queue.NewRegistry(), queue.NewMux(), &recorder{}
+	enc := outbox.Envelope()
+	is.NoErr(Route(reg, "events", queue.WithEncoder(enc)))
+	is.NoErr(Handle(mux, pub))
+	is.NoErr(reg.Check("events", mux)) // the event has its handler
 
 	in := {{.Core}}.{{.Type}}{ID: uuid.New()}
-	b, err := json.Marshal(in)
+	payload, err := enc.Encode(ctx, in)
 	is.NoErr(err)
+	is.NoErr(mux.Handle(ctx, queue.Task{Kind: EventType, Payload: payload}))
 
+	is.Equal(pub.m.Type, EventType)
+	is.Equal(pub.m.Topic, Topic)
 	var out {{.Core}}.{{.Type}}
-	is.NoErr(json.Unmarshal(b, &out))
-	is.Equal(out.ID, in.ID) // id preserved across marshal/unmarshal
+	is.NoErr(json.Unmarshal(pub.m.Data, &out))
+	is.Equal(out.ID, in.ID) // the payload survives the envelope
 }

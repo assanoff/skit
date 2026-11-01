@@ -15,7 +15,7 @@ import (
 // StartSend opens the span "send <destination>" of one message and returns
 // the headers to send it with. When headers carry no trace context, the span
 // is a PRODUCER: it is the creation context of the message, and the returned
-// headers carry it. When they carry one — the outbox relay sends the context
+// headers carry it. When they carry one — outbox.Handler sends the context
 // the event was created in — the span is a CLIENT child of that context and
 // the headers go out as they are. attrs describe the system, the message id
 // and what the transport adds.

@@ -11,8 +11,8 @@ func (e permanentError) Unwrap() error { return e.err }
 
 // Permanent marks err as one no retry fixes: the message itself cannot be
 // delivered, such as an envelope that does not encode or a message over the
-// size limit of the broker. The outbox relay moves such an event to failed
-// and retries any other error. A misconfiguration (a missing exchange or
+// size limit of the broker. outbox.Handler sends such an event to the dead
+// letters of its queue and retries any other error. A misconfiguration (a missing exchange or
 // topic, no rights) is not permanent: once it is fixed, the message goes out.
 // A Publisher of your own marks its errors the same way. Permanent(nil) is
 // nil.

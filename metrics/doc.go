@@ -12,7 +12,7 @@
 //	d := &deps.Deps{Opts: opts, Logger: log, Metrics: metrics.New()}
 //
 //	r.Handle("GET /metrics", d.Metrics.Handler())
-//	outbox.NewRelay(log, ob, pub, outbox.RelayConfig{Metrics: d.Metrics})
+//	queue.Workers(log, q, cfg, mux.Handle, queue.WithMetrics(d.Metrics))
 //
 // New registers the base preset: go_*, process_* and go_build_info (the module
 // path, version and checksum of the main module from the go build stamp).
@@ -40,12 +40,10 @@
 //     — Config.Name and Config.Metrics.
 //   - rest/mid: skit_rest_outcomes_total by code — Config.Metrics.
 //   - dbx: go_sql_* by db_name and host — Config.Metrics.
-//   - outbox: skit_outbox_relay_*, skit_outbox_sweeper_reclaimed_total,
-//     skit_outbox_cleaner_deleted_total — the configs of the workers; the
-//     backlog gauges — NewBacklog.
 //   - queue: skit_queue_handled_total by queue, kind and result,
 //     skit_queue_handle_duration_seconds by queue and kind and the backlog
-//     gauges by queue — the WithMetrics option of Workers.
+//     gauges by queue — the WithMetrics option of Workers. The events of
+//     outbox are the tasks of their queue: by kind, the event type.
 //   - broker: skit_broker_consumed_total by consumer and action,
 //     skit_broker_handle_duration_seconds by consumer — Instrument.
 //   - worker: skit_worker_ticks_total by worker and result,
@@ -109,10 +107,10 @@
 //
 // # Dashboards
 //
-// The dashboards directory holds six Grafana dashboards of the presets:
+// The dashboards directory holds five Grafana dashboards of the presets:
 // service (HTTP and gRPC servers, HTTP clients, REST outcomes, the Go runtime,
-// the build and the health of the telemetry), dbx, outbox, queue, broker, and
-// worker with cron. Their variables are datasource, namespace, job and pod and
+// the build and the health of the telemetry), dbx, queue (the events of outbox
+// included), broker, and worker with cron. Their variables are datasource, namespace, job and pod and
 // no service name is written in them, so one import serves every service. A
 // test builds every preset on one registry and fails when a dashboard queries
 // a metric that does not exist.

@@ -10,8 +10,7 @@ type suppressKey struct{}
 // otel/setup installs: they are neither recorded nor exported, so the cost is
 // one context value and one non-recording span per call.
 //
-// Intended for background tick loops (pollers, outbox relays, sweepers,
-// cleaners). Their poll/lease/cleanup queries fire every few seconds, carry no
+// Intended for background tick loops (pollers, queue workers, cleaners). Their poll/lease/cleanup queries fire every few seconds, carry no
 // parent span, and would each surface in the trace UI as a separate single-span
 // trace — thousands a day of "SELECT … FOR UPDATE SKIP LOCKED returned nothing",
 // crowding out the traces that describe real traffic.

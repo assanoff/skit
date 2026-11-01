@@ -92,9 +92,10 @@ type Worker struct {
 	Interval time.Duration `long:"interval" env:"INTERVAL" default:"1s" description:"worker poll interval"`
 }
 
-// Broker holds RabbitMQ + transactional-outbox settings. The broker is on iff
-// Host is non-empty, so an empty BROKER_HOST turns it off without a separate
-// flag. When off no relay/consumer runs and the outbox providers stay nil.
+// Broker holds the RabbitMQ settings of the events. The broker is on iff Host
+// is non-empty, so an empty BROKER_HOST turns it off without a separate flag.
+// When off no event worker or consumer runs, the broker providers stay nil and
+// the events are dropped.
 type Broker struct {
 	User     string `long:"user"     env:"USER"     default:"guest"             description:"rabbitmq user"     json:"-"`
 	Password string `long:"password" env:"PASSWORD" default:"guest"             description:"rabbitmq password" json:"-"`

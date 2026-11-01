@@ -69,15 +69,15 @@
 //	})
 //	cons, err := rabbitmq.NewConsumer(conn, log, cfg, h)
 //
-// Publishing is measured by the outbox relay.
+// Publishing is measured by the queue of events (skit_queue_* by kind).
 //
 // # Tracing
 //
 // The adapters' publishers record every send as a span "send <destination>".
 // A message without a trace context in its headers gets the PRODUCER span as
 // its creation context, written into its headers; a message that carries one —
-// the outbox relay sends the context the event was created in — is sent under
-// a CLIENT child of it.
+// outbox.Handler sends the context the event was created in — is sent under a
+// CLIENT child of it.
 //
 // Instrument records the handling of every message as a CONSUMER span
 // "process <topic>". The creation context from the headers is both the parent

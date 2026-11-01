@@ -1,9 +1,8 @@
-# outbox + dbx + RabbitMQ: транзакции и события в сервисе
+# queue + outbox + dbx + RabbitMQ: транзакции и события в сервисе
 
-> Пример к `research-mods.md` §6. Показано **целевое** состояние после ломающего релиза
-> (`research-mods.md` §3): транзакцию открывает store (§6.2), ключ события выводит транспорт
-> (§6.5), доставку собирает `outbox.Workers` (§6.6), метрики — реестр `metrics.New()` в `Deps`
-> (§7). Транспорт — как в [rabbitmq.md](rabbitmq.md).
+> Пример к `research-mods.md` §6. Транзакцию открывает store (§6.2), ключ события выводит
+> транспорт (§6.5), событие — задача очереди событий, её публикует `outbox.Handler` (§6.6),
+> метрики — реестр `metrics.New()` в `Deps` (§7). Транспорт — как в [rabbitmq.md](rabbitmq.md).
 
 ## 1. Импорты
 
@@ -13,18 +12,19 @@ import (
 	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/metrics"
 	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/queue"
 	"github.com/assanoff/skit/worker"
 )
 ```
 
-`outbox` и `broker/rabbitmq` друг о друге не знают: relay принимает `broker.Publisher`.
-Встречаются они только в сборке сервиса.
+`outbox` и `broker/rabbitmq` друг о друге не знают: `outbox.Handler` принимает
+`broker.Publisher`. Встречаются они только в сборке сервиса.
 
 ## 2. Контракт домена: транзакция — забота store
 
-Домен не видит ни `dbx`, ни `tx`, ни `outbox`: транзакцию открывает store и отдаёт в callback
-**репозиторий, привязанный к ней**. Методов два — с событиями и без, чтобы домену, которому
-событие не нужно, не приходилось принимать и игнорировать `pub`. Через `ctx` не идёт ничего: ни
+Домен не видит ни `dbx`, ни `tx`, ни `queue`: транзакцию открывает store и отдаёт в callback
+**репозиторий, привязанный к ней**. Методов два — с задачами и без, чтобы домену, которому
+задача не нужна, не приходилось принимать и игнорировать `s`. Через `ctx` не идёт ничего: ни
 транзакция, ни соединение, ни метка транзакции.
 
 ```go
@@ -40,14 +40,14 @@ type Repo interface {
 	QueryByID(ctx context.Context, id string) (Order, error)
 }
 
-// Publisher пишет событие в той же транзакции. Свой в домене — outbox домен
-// не импортирует.
-type Publisher interface {
-	Publish(ctx context.Context, event any) error
+// Scheduler ставит задачу — событие, любую работу после коммита — в той же
+// транзакции. Свой в домене — queue домен не импортирует.
+type Scheduler interface {
+	Schedule(ctx context.Context, v any) error
 }
 
 // Store — CRUD и транзакции. fn может выполниться повторно (повтор при
-// deadlock): внутри — только r и pub, без состояния между запусками и без
+// deadlock): внутри — только r и s, без состояния между запусками и без
 // вызовов Store. Store, собранный над чужой транзакцией, входит в неё и не
 // коммитит.
 type Store interface {
@@ -56,15 +56,15 @@ type Store interface {
 	// WithinTran выполняет fn в одной транзакции; r привязан к ней.
 	WithinTran(ctx context.Context, fn func(r Repo) error) error
 
-	// WithinTranEvents — то же, плюс pub пишет события в outbox в этой же
-	// транзакции: запись и события фиксируются или откатываются вместе.
-	WithinTranEvents(ctx context.Context,
-		fn func(r Repo, pub Publisher) error) error
+	// WithinTranTasks — то же, плюс s ставит задачи в этой же транзакции:
+	// запись и задачи фиксируются или откатываются вместе.
+	WithinTranTasks(ctx context.Context,
+		fn func(r Repo, s Scheduler) error) error
 }
 ```
 
 Вложенность закрыта типами: у `Repo` нет `WithinTran*`, поэтому callback получает только `r` и
-`pub`; у `*dbx.Tx` нет `Begin`, `Commit` и `Rollback`, поэтому собранное над транзакцией свою
+`s`; у `*dbx.Tx` нет `Begin`, `Commit` и `Rollback`, поэтому собранное над транзакцией свою
 не откроет — `WithinTran` на нём входит в транзакцию вызывающего. Callback без `ctx`: внутри fn
 используется `ctx` метода.
 
@@ -78,18 +78,18 @@ type OrderCreated struct {
 }
 
 type Core struct {
-	store Store // единственная зависимость: ни db, ни outbox, ни registry
+	store Store // единственная зависимость: ни db, ни queue, ни registry
 }
 
 func New(store Store) *Core { return &Core{store: store} }
 
 // Create — запись + событие в одной транзакции.
 func (c *Core) Create(ctx context.Context, o Order) error {
-	return c.store.WithinTranEvents(ctx, func(r Repo, pub Publisher) error {
+	return c.store.WithinTranTasks(ctx, func(r Repo, s Scheduler) error {
 		if err := r.Create(ctx, o); err != nil {
 			return err // откатит и запись, и событие
 		}
-		return pub.Publish(ctx, OrderCreated{ID: o.ID})
+		return s.Schedule(ctx, OrderCreated{ID: o.ID})
 	})
 }
 
@@ -109,15 +109,16 @@ func (c *Core) Get(ctx context.Context, id string) (Order, error) {
 }
 ```
 
-Домен не знает ни топика, ни ключа, ни транспорта: топик `OrderCreated` задан в `Registry`
-при сборке, событие выбирается Go-типом, ключ выводит транспорт. `Publisher` пишет событие в
-таблицу `outbox_events`; доставку в брокер делает relay — это разные Publisher'ы.
+Домен не знает ни очереди, ни топика, ни ключа, ни транспорта: очередь и вид `OrderCreated`
+заданы в `queue.Registry` при сборке, значение выбирается Go-типом, ключ выводит транспорт.
+`Scheduler` пишет задачу в таблицу `queue_tasks`; публикацию в брокер делают рабочие очереди
+событий.
 
-Тип события (`OrderCreated`) живёт в домене и ничего не импортирует; CloudEvents-тип, топик и
-регистрация — в сборке (§4).
+Тип события (`OrderCreated`) живёт в домене и ничего не импортирует; CloudEvents-тип (вид
+задачи), очередь, топик и регистрация — в сборке (§4).
 
 В тестах домена моки (moq) `Store` и `Repo`: `return fn(repoMock)` /
-`return fn(repoMock, pubMock)` — без БД и outbox; `pubMock` просто собирает события.
+`return fn(repoMock, schedMock)` — без БД и очереди; `schedMock` просто собирает значения.
 
 ## 3.1. Реализация store поверх `dbx`
 
@@ -126,10 +127,11 @@ package orderdb
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/assanoff/skit/dbx"
-	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/queue"
 )
 
 // repo — CRUD поверх пула или tx.
@@ -148,21 +150,21 @@ func (r *repo) withTx(tx *dbx.Tx) *repo {
 // Option настраивает Store.
 type Option func(*Store)
 
-// WithEvents включает события: WithinTranEvents отдаёт публикатор fn(tx),
-// привязанный к транзакции. Без опции события отбрасываются.
-func WithEvents(fn func(tx *dbx.Tx) *outbox.Publisher) Option {
-	return func(s *Store) { s.events = fn }
+// WithTasks включает задачи: WithinTranTasks отдаёт планировщик fn(tx),
+// привязанный к транзакции. Без опции Schedule возвращает ошибку.
+func WithTasks(fn func(tx *dbx.Tx) *queue.Scheduler) Option {
+	return func(s *Store) { s.tasks = fn }
 }
 
 // Store над пулом открывает транзакции, над транзакцией — входит в неё.
 type Store struct {
-	*repo  // CRUD на q
-	events func(tx *dbx.Tx) *outbox.Publisher
+	*repo // CRUD на q
+	tasks func(tx *dbx.Tx) *queue.Scheduler
 }
 
 // NewStore — store над q: пулом (*dbx.DB) или транзакцией (*dbx.Tx).
 func NewStore(log *slog.Logger, q dbx.Querier, opts ...Option) *Store {
-	s := &Store{repo: &repo{log: log, q: q}, events: discardEvents}
+	s := &Store{repo: &repo{log: log, q: q}}
 	for _, o := range opts {
 		o(s)
 	}
@@ -178,15 +180,27 @@ func (s *Store) WithinTran(ctx context.Context,
 	})
 }
 
-func (s *Store) WithinTranEvents(ctx context.Context,
-	fn func(r orderapp.Repo, pub orderapp.Publisher) error) error {
+func (s *Store) WithinTranTasks(ctx context.Context,
+	fn func(r orderapp.Repo, ts orderapp.Scheduler) error) error {
 	return dbx.WithinTran(ctx, s.log, s.q, func(tx *dbx.Tx) error {
-		return fn(s.repo.withTx(tx), s.events(tx))
+		return fn(s.repo.withTx(tx), s.scheduler(tx))
 	})
 }
 
-// discardEvents — сборка без событий: запись проходит, событие отбрасывается.
-func discardEvents(*dbx.Tx) *outbox.Publisher { return outbox.Discard() }
+// scheduler — планировщик tx; без WithTasks — noTasks.
+func (s *Store) scheduler(tx *dbx.Tx) orderapp.Scheduler {
+	if s.tasks == nil {
+		return noTasks{}
+	}
+	return s.tasks(tx)
+}
+
+// noTasks — store без задач: Schedule возвращает ошибку, задачу молча не теряют.
+type noTasks struct{}
+
+func (noTasks) Schedule(context.Context, any) error {
+	return errors.New("orderdb: the store has no tasks (WithTasks)")
+}
 
 func (r *repo) Create(ctx context.Context, o orderapp.Order) error {
 	const q = `INSERT INTO orders (id, total) VALUES (:id, :total)`
@@ -197,13 +211,13 @@ func (r *repo) Create(ctx context.Context, o orderapp.Order) error {
 // (ErrDBNotFound) store переводит в доменные (orderapp.ErrNotFound).
 ```
 
-`*outbox.Publisher` присваивается доменному `Publisher` без адаптера, поэтому одна функция
-`events` подходит store всех доменов (§4).
+`*queue.Scheduler` присваивается доменному `Scheduler` без адаптера, поэтому одна функция
+`tasks` подходит store всех доменов (§4).
 
 Ограничения (`research-mods.md` §6.4):
 
 * **Вызов `c.*` внутри callback типами не закрыт:** `c.store` в fn открывает вторую транзакцию
-  на пуле, она ждёт блокировку внешней до дедлайна ctx. Внутри callback — только `r` и `pub`;
+  на пуле, она ждёт блокировку внешней до дедлайна ctx. Внутри callback — только `r` и `s`;
   логика внутри транзакции — неэкспортируемая функция над ними, публичный метод — обёртка.
 * **fn может выполниться повторно** — при deadlock и ошибке сериализации: без состояния между
   запусками, результат из замыкания присваивать, а не дописывать.
@@ -226,7 +240,7 @@ type Stock interface {
 // Unit — то, что видно внутри одной транзакции.
 type Unit struct {
 	Repo  Repo
-	Pub   Publisher
+	Tasks Scheduler
 	Stock Stock // бизнес-логика склада над той же транзакцией
 }
 
@@ -243,21 +257,21 @@ type Tran interface {
 ```go
 tran := dbx.NewTran(log, db, func(tx *dbx.Tx) orderapp.Unit {
 	return orderapp.Unit{
-		Repo:  orderdb.NewStore(log, tx, orderdb.WithEvents(events)),
-		Pub:   events(tx),
-		Stock: stockapp.New(stockdb.NewStore(log, tx, stockdb.WithEvents(events))),
+		Repo:  orderdb.NewStore(log, tx, orderdb.WithTasks(tasks)),
+		Tasks: tasks(tx),
+		Stock: stockapp.New(stockdb.NewStore(log, tx, stockdb.WithTasks(tasks))),
 	}
 })
 ```
 
-`Reserve` склада вызывает свой `WithinTranEvents`; store над `tx` входит в транзакцию заказа:
-правила склада, его событие и откат — общие, код склада не меняется.
+`Reserve` склада вызывает свой `WithinTranTasks`; store над `tx` входит в транзакцию заказа:
+правила склада, его задачи и откат — общие, код склада не меняется.
 
 ## 4. Сборка
 
 Сборка разделена, как в шаблонах `skit new` (`server.New` + `initWorkers` /
-`addOutboxWorkers`): `deps.New` только создаёт и возвращает зависимости, ничего не
-запуская; воркеры outbox регистрирует отдельная функция с говорящим именем.
+`addEventWorkers`): `deps.New` только создаёт и возвращает зависимости, ничего не
+запуская; рабочие очереди событий регистрирует отдельная функция с говорящим именем.
 
 ```go
 package deps
@@ -272,15 +286,19 @@ import (
 	"github.com/assanoff/skit/dbx/pg"
 	"github.com/assanoff/skit/metrics"
 	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/queue"
 )
+
+// EventsQueue — очередь, через которую события идут в брокер.
+const EventsQueue = "events"
 
 // Deps — собранные зависимости, без запуска чего-либо.
 type Deps struct {
 	Metrics   *metrics.Metrics // реестр процесса, один на сервис
 	DB        *dbx.DB
-	Registry  *outbox.Registry
+	Queue     *queue.PG       // все очереди сервиса, очередь событий тоже
+	Registry  *queue.Registry // Go-тип → очередь и вид
 	Publisher broker.Publisher // *rabbitmq.Publisher за интерфейсом broker
-	Outbox    *outbox.PG
 }
 
 func New(ctx context.Context, log *slog.Logger, cfg Config) (*Deps, error) {
@@ -292,15 +310,18 @@ func New(ctx context.Context, log *slog.Logger, cfg Config) (*Deps, error) {
 		return nil, err
 	}
 
-	// Таблица outbox_events — под advisory lock пакета outbox, безопасно для
+	// Таблица queue_tasks — под advisory lock пакета queue, безопасно для
 	// нескольких реплик.
-	ob := outbox.NewPG(log, db)
-	if err := ob.EnsureSchema(ctx); err != nil {
+	q := queue.NewPG(log, db)
+	if err := q.EnsureSchema(ctx); err != nil {
 		return nil, err
 	}
 
-	reg := outbox.NewRegistry()
-	err = reg.Register[orderapp.OrderCreated]("order.created", "orders")
+	// Событие пишется в очередь событий в конверте outbox: id, время, данные и
+	// трасса запроса, который его создал.
+	reg := queue.NewRegistry()
+	enc := queue.WithEncoder(outbox.Envelope())
+	err = reg.Register[orderapp.OrderCreated](EventsQueue, "order.created", enc)
 	if err != nil {
 		return nil, err
 	}
@@ -319,33 +340,49 @@ func New(ctx context.Context, log *slog.Logger, cfg Config) (*Deps, error) {
 	return &Deps{
 		Metrics:   m,
 		DB:        db,
+		Queue:     q,
 		Registry:  reg,
 		Publisher: pub,
-		Outbox:    ob,
 	}, nil
 }
 
-// Events — единственное место, где сборка решает, куда идут события: в outbox
-// транзакции tx.
-func (d *Deps) Events(tx *dbx.Tx) *outbox.Publisher {
-	return outbox.Bind(tx, d.Outbox, d.Registry)
+// Tasks — единственное место, где сборка решает, куда идут задачи: в очереди
+// транзакции tx, по маршрутам реестра.
+func (d *Deps) Tasks(tx *dbx.Tx) *queue.Scheduler {
+	return queue.Bind(tx, d.Queue, d.Registry)
 }
 ```
 
 ```go
-// addOutboxWorkers регистрирует доставку событий, записанных в outbox внутри
-// бизнес-транзакции: relay, sweeper, cleaner и опрос backlog.
-func addOutboxWorkers(log *slog.Logger, g *worker.Group, d *deps.Deps) {
-	// outbox видит только broker.Publisher, о RabbitMQ он не знает.
-	g.Add(outbox.Workers(log, d.Outbox, d.Publisher, outbox.WithMetrics(d.Metrics))...)
+// addEventWorkers регистрирует публикацию событий, поставленных внутри
+// бизнес-транзакции: рабочие очереди событий, уборщик её dead letters и опрос
+// backlog.
+func addEventWorkers(log *slog.Logger, g *worker.Group, d *deps.Deps) error {
+	// Handler видит только broker.Publisher, о RabbitMQ он не знает.
+	mux := queue.NewMux()
+	if err := mux.Register("order.created", outbox.Handler(d.Publisher, "orders")); err != nil {
+		return err
+	}
+	// Вид без обработчика ушёл бы в dead letters: проверка при старте.
+	if err := d.Registry.Check(deps.EventsQueue, mux); err != nil {
+		return err
+	}
+	ws, err := queue.Workers(log, d.Queue, outbox.Config(deps.EventsQueue), mux.Handle,
+		queue.WithMetrics(d.Metrics))
+	if err != nil {
+		return err
+	}
+	g.Add(ws...)
+	return nil
 }
 ```
 
-Брокер недоступен — relay повторяет публикацию без лимита попыток, с паузой до 5 минут, и
-ничего не теряет: первая ошибка останавливает пачку, остальные события возвращаются в очередь
-нетронутыми. В `failed` событие уходит, только если publisher пометил ошибку
-`broker.Permanent`: конверт не собирается или сообщение больше предела брокера. Тревога —
-по `skit_outbox_oldest_pending_seconds` и `skit_outbox_failed`.
+Брокер недоступен — `outbox.Handler` возвращает `queue.Halt`: одна неудачная публикация за
+опрос, остаток пачки возвращается нетронутым, задача повторяется с паузой до 5 минут и без
+лимита попыток, ничего не теряется. В dead letters событие уходит, только если publisher
+пометил ошибку `broker.Permanent` (конверт не собирается, сообщение больше предела брокера)
+или конверт не разбирается. Тревога — по `skit_queue_pending{queue="events"}` и
+`skit_queue_dead{queue="events"}`.
 
 В `main` видно, что собирается и что запускается:
 
@@ -354,15 +391,17 @@ d, err := deps.New(ctx, log, cfg)
 if err != nil {
 	return err
 }
-app := orderapp.New(orderdb.NewStore(log, d.DB, orderdb.WithEvents(d.Events)))
-addOutboxWorkers(log, g, d)
+app := orderapp.New(orderdb.NewStore(log, d.DB, orderdb.WithTasks(d.Tasks)))
+if err := addEventWorkers(log, g, d); err != nil {
+	return err
+}
 ```
 
-Брокер выключен — store без `WithEvents`: `orderdb.NewStore(log, d.DB)`, запись проходит,
-события отбрасываются, домен не ветвится.
+Брокер выключен — маршрут события с `queue.Drop()` вместо конверта, `addEventWorkers` не
+вызывается: запись проходит, событие никуда не пишется, домен не ветвится.
 
-Команде миграций или тесту, которым нужны `DB` и `Outbox` без relay, достаточно
-`deps.New` — `addOutboxWorkers` они не вызывают.
+Команде миграций или тесту, которым нужны `DB` и `Queue` без публикации, достаточно
+`deps.New` — `addEventWorkers` они не вызывают.
 
-Kafka вместо RabbitMQ — замена `pub` в `deps.New` на `kafka.NewPublisher(…)`; `outbox`,
-`dbx`, store, `addOutboxWorkers` и домен не меняются.
+Kafka вместо RabbitMQ — замена `pub` в `deps.New` на `kafka.NewPublisher(…)`; `queue`,
+`outbox`, `dbx`, store, `addEventWorkers` и домен не меняются.
