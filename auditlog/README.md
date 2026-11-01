@@ -84,9 +84,15 @@ rec := auditlog.NewAsyncRecorder(core, auditlog.AsyncConfig{Workers: 4, Buffer: 
 group.Add(rec)                  // worker.Runnable
 auditbus.Register(bus, rec)     // bus consumer now records asynchronously
 
-// Durable queue + worker:
+// Durable queue + its workers:
 qrec := auditqueue.NewRecorder(q, log)
-group.Add(auditqueue.NewWorker(q, core, log, auditqueue.WorkerConfig{Interval: time.Second}))
+workers, err := auditqueue.NewWorkers(q, core, log, auditqueue.WorkerConfig{Metrics: reg})
+if err != nil {
+	return err
+}
+for _, w := range workers {
+	group.Add(w)
+}
 ```
 
 ## Read API (handler group)

@@ -1,7 +1,7 @@
 // Package {{.Pkg}} is a queue-backed worker: it defines a queue.JobFunc for its
-// task kind, driven by a worker.Processor (Claim → Handle → MarkDone/MarkFailed)
-// with lease-based, multi-replica-safe delivery. Producers enqueue work with
-// queue.Schedule(ScheduleParams{Kind: {{.Pkg}}.Kind, Payload: ...}).
+// task kind, run by the workers of its queue (queue.Workers) with lease-based,
+// multi-replica-safe delivery. Producers enqueue work with
+// q.Schedule(ctx, queue.Params{Queue: {{.Pkg}}.Queue, Kind: {{.Pkg}}.Kind, Payload: ...}).
 package {{.Pkg}}
 
 import (
@@ -13,8 +13,13 @@ import (
 	"github.com/assanoff/skit/queue"
 )
 
-// Kind routes queue tasks to this worker's handler (see queue.Mux).
-const Kind = "{{.Pkg}}"
+const (
+	// Queue is the queue of the {{.Pkg}} tasks, with its own workers: give slow
+	// and fast work queues of their own.
+	Queue = "{{.Pkg}}"
+	// Kind routes the tasks of Queue to this worker's handler (see queue.Mux).
+	Kind = "{{.Pkg}}"
+)
 
 // Worker handles claimed {{.Pkg}} tasks.
 type Worker struct {
@@ -33,14 +38,14 @@ type Task struct {
 	// ID string `json:"id"`
 }
 
-// Handle processes one claimed task; it is a queue.JobFunc. Returning nil marks
-// the task done; returning an error releases the lease so the queue retries it
-// (until the retry budget is exhausted, then the task is parked as a dead
-// letter). Wrap the handler in queue.Retry to classify terminal vs retryable.
+// Handle processes one claimed task; it is a queue.JobFunc. nil removes the
+// task; an error retries it with backoff; queue.Permanent sends it to the dead
+// letters; queue.Halt also stops the batch, for a dependency every task needs
+// that is down.
 func (w *Worker) Handle(ctx context.Context, t queue.Task) error {
 	var payload Task
 	if err := json.Unmarshal(t.Payload, &payload); err != nil {
-		return fmt.Errorf("decode {{.Pkg}} task %d: %w", t.ID, err)
+		return queue.Permanent(fmt.Errorf("decode {{.Pkg}} task %d: %w", t.ID, err))
 	}
 
 	// TODO: drive the domain, e.g. return w.core.Do(ctx, payload)

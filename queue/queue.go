@@ -2,78 +2,104 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
-// ErrLeaseLost is returned by MarkDone/MarkFailed when the task's lease no longer
-// matches — another consumer reclaimed it after the lease expired. The mark is a
-// no-op; the other consumer now owns the task.
-var ErrLeaseLost = errors.New("queue: lease lost")
-
-// Task is a unit of queued work — a pure core type with no db tags (the PG
-// store owns that mapping via taskRow). Payload is opaque to the queue;
-// consumers route on Kind and decode Payload (typically JSON) themselves.
+// Task is a unit of queued work as its handler sees it. Payload is opaque to
+// the queue: the handler decodes it, typically through Decode.
 type Task struct {
 	ID        int64
-	Name      string
+	Queue     string
 	Kind      string
+	Key       string // dedup key within Queue; "" — none
 	Payload   []byte
 	CreatedAt time.Time
 	RunAt     time.Time
-	Attempts  int
-	LeaseID   string
-	LastError string
+	Attempts  int    // failed attempts before this one
+	LastError string // error of the last failed attempt
 }
 
-// ScheduleParams describes a task to enqueue.
-type ScheduleParams struct {
-	// Name is an optional dedup key. When set, scheduling the same Name twice is a
-	// no-op (Schedule reports inserted=false). When empty, the queue assigns a
-	// unique name so every call enqueues a distinct task.
-	Name string
-	// Kind routes the task to a handler; required.
+// Params describes a task to schedule.
+type Params struct {
+	// Queue is the queue the task goes to; required.
+	Queue string
+	// Kind selects the handler of the task within its queue; required.
 	Kind string
-	// Payload is the opaque task body.
+	// Key deduplicates the task within Queue: while a task with the same Key
+	// is in the queue — waiting, leased or dead — Schedule inserts nothing
+	// and reports false. "" schedules every call.
+	Key string
+	// Payload is the opaque body of the task.
 	Payload []byte
-	// Delay postpones the earliest claim time (RunAt = now + Delay). Zero means
-	// claimable immediately.
+	// Delay postpones the task: it runs not before now + Delay.
 	Delay time.Duration
 }
 
-// Queue is a durable work queue. Implementations are safe for concurrent use by
-// multiple consumers. Claim/MarkDone/MarkFailed mirror worker.Source/Sink.
-type Queue interface {
-	// Schedule enqueues a task, returning inserted=false if Name already exists.
-	Schedule(ctx context.Context, p ScheduleParams) (inserted bool, err error)
-	// Claim leases up to limit ready tasks (run_at <= now and not currently
-	// leased), bumping their attempt count. Each returned Task carries a fresh
-	// LeaseID that MarkDone/MarkFailed must echo back.
-	Claim(ctx context.Context, now time.Time, limit int) ([]Task, error)
-	// MarkDone acknowledges successful processing and removes the task.
-	MarkDone(ctx context.Context, t Task, now time.Time) error
-	// MarkFailed records a failure. terminal=true parks the task as a dead letter;
-	// terminal=false releases the lease so a later Claim retries it.
-	MarkFailed(ctx context.Context, t Task, errMsg string, terminal bool, now time.Time) error
+// JobFunc handles one task. Its error decides the outcome of the task: nil
+// removes it; an error marked by Permanent dead-letters it; one marked by
+// Halt retries it with backoff and stops the batch, whose rest goes back
+// untouched; any other error retries the task with backoff.
+type JobFunc func(ctx context.Context, t Task) error
+
+// permanentError marks a failure no retry fixes; see Permanent.
+type permanentError struct{ err error }
+
+func (e permanentError) Error() string { return e.err.Error() }
+
+func (e permanentError) Unwrap() error { return e.err }
+
+// Permanent marks err as a failure no retry fixes, such as a payload that does
+// not decode: the task goes to the dead letters of its queue. Permanent(nil) is
+// nil.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return permanentError{err: err}
 }
 
-// Schema returns the DDL that creates the queue_tasks table and its index. Call
-// PG.EnsureSchema at startup to provision it (advisory-lock guarded, replica-
-// safe); Schema is exposed for embedding the DDL in your own migration tooling.
-func Schema() string {
-	return `
-CREATE TABLE IF NOT EXISTS queue_tasks (
-    id         BIGSERIAL PRIMARY KEY,
-    name       TEXT NOT NULL UNIQUE,
-    kind       TEXT NOT NULL,
-    payload    BYTEA,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    run_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    attempts   INT NOT NULL DEFAULT 0,
-    leased_at  TIMESTAMPTZ,
-    lease_id   TEXT,
-    last_error TEXT,
-    done_at    TIMESTAMPTZ
-);
-CREATE INDEX IF NOT EXISTS queue_tasks_ready_idx ON queue_tasks (done_at, run_at);`
+// haltError marks a failure that stops the batch; see Halt.
+type haltError struct{ err error }
+
+func (e haltError) Error() string { return e.err.Error() }
+
+func (e haltError) Unwrap() error { return e.err }
+
+// Halt marks err as a failure of a dependency every task of the batch needs,
+// such as a broker that is down: the task is retried with backoff, and the
+// batch stops — its rest goes back untouched, with no attempt counted, and
+// the queue polls again after Config.Poll. Halt(nil) is nil.
+func Halt(err error) error {
+	if err == nil {
+		return nil
+	}
+	return haltError{err: err}
+}
+
+// isPermanent reports whether err, or an error it wraps, was marked by
+// Permanent.
+func isPermanent(err error) bool {
+	_, ok := errors.AsType[permanentError](err)
+	return ok
+}
+
+// isHalt reports whether err, or an error it wraps, was marked by Halt.
+func isHalt(err error) bool {
+	_, ok := errors.AsType[haltError](err)
+	return ok
+}
+
+// Decode adapts fn to a JobFunc that decodes the JSON Payload of a task into
+// a T first. A payload that does not decode is Permanent: it never will.
+func Decode[T any](fn func(ctx context.Context, t Task, v T) error) JobFunc {
+	return func(ctx context.Context, t Task) error {
+		var v T
+		if err := json.Unmarshal(t.Payload, &v); err != nil {
+			return Permanent(fmt.Errorf("queue: decode %s: %w", t.Kind, err))
+		}
+		return fn(ctx, t, v)
+	}
 }

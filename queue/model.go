@@ -5,15 +5,24 @@ import (
 	"time"
 )
 
+// leased is a task under the lease of the claim that returned it: the item
+// the processor of a queue claims, handles and marks.
+type leased struct {
+	Task
+
+	leaseID string
+}
+
 // taskRow is the persistence model for a queue_tasks row. The nullable columns
-// (lease_id, last_error) map to sql.Null* wrappers; the rest map directly. It
-// is deliberately separate from the core Task (queue.go): Task is the pure type
-// consumers see, taskRow owns the db tags and NULL handling. toTask bridges the
-// two so neither leaks into the other.
+// (key, lease_id, last_error) map to sql.Null* wrappers; the rest map directly.
+// It is deliberately separate from the core Task: Task is the pure type
+// handlers see, taskRow owns the db tags and NULL handling, and toLeased
+// bridges the two.
 type taskRow struct {
 	ID        int64          `db:"id"`
-	Name      string         `db:"name"`
+	Queue     string         `db:"queue"`
 	Kind      string         `db:"kind"`
+	Key       sql.NullString `db:"key"`
 	Payload   []byte         `db:"payload"`
 	CreatedAt time.Time      `db:"created_at"`
 	RunAt     time.Time      `db:"run_at"`
@@ -22,27 +31,28 @@ type taskRow struct {
 	LastError sql.NullString `db:"last_error"`
 }
 
-// toTask converts a DB row into a core Task. NULL columns become zero values
-// ("" for LeaseID/LastError); timestamps are normalized to UTC.
-func toTask(r taskRow) Task {
+// toLeased converts a claimed row into a leased task. NULL columns become zero
+// values; timestamps are normalized to UTC.
+func toLeased(r taskRow) leased {
 	//exhaustruct:enforce
-	return Task{
+	return leased{
 		ID:        r.ID,
-		Name:      r.Name,
+		Queue:     r.Queue,
 		Kind:      r.Kind,
+		Key:       r.Key.String,
 		Payload:   r.Payload,
 		CreatedAt: r.CreatedAt.UTC(),
 		RunAt:     r.RunAt.UTC(),
 		Attempts:  r.Attempts,
-		LeaseID:   r.LeaseID.String,
 		LastError: r.LastError.String,
+		leaseID:   r.LeaseID.String,
 	}
 }
 
-func toTasks(rows []taskRow) []Task {
-	out := make([]Task, len(rows))
+func toLeasedAll(rows []taskRow) []leased {
+	out := make([]leased, len(rows))
 	for i := range rows {
-		out[i] = toTask(rows[i])
+		out[i] = toLeased(rows[i])
 	}
 	return out
 }

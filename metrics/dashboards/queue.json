@@ -1,7 +1,7 @@
 {
   "uid": "skit-queue",
   "title": "skit / queue",
-  "description": "The durable queue: tasks by kind and the backlog of the table.",
+  "description": "The durable queues: tasks by queue and kind and the backlog of each queue.",
   "tags": [
     "skit"
   ],
@@ -92,6 +92,27 @@
         "current": {},
         "sort": 1,
         "hide": 0
+      },
+      {
+        "name": "queue",
+        "label": "queue",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\"}, queue)",
+          "refId": "queue"
+        },
+        "definition": "label_values(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\"}, queue)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {},
+        "sort": 1,
+        "hide": 0
       }
     ]
   },
@@ -111,7 +132,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Tasks by kind and result",
+      "title": "Tasks by queue, kind and result",
       "id": 2,
       "datasource": {
         "type": "prometheus",
@@ -151,15 +172,15 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (kind, result) (rate(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\"}[$__rate_interval]))",
-          "legendFormat": "{{kind}} {{result}}",
+          "expr": "sum by (queue, kind, result) (rate(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", queue=~\"$queue\"}[$__rate_interval]))",
+          "legendFormat": "{{queue}} {{kind}} {{result}}",
           "refId": "A"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Error ratio by kind",
+      "title": "Error ratio by queue and kind",
       "id": 3,
       "datasource": {
         "type": "prometheus",
@@ -199,16 +220,16 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (kind) (rate(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", result=\"error\"}[$__rate_interval])) / sum by (kind) (rate(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\"}[$__rate_interval]))",
-          "legendFormat": "{{kind}}",
+          "expr": "sum by (queue, kind) (rate(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", queue=~\"$queue\", result=\"error\"}[$__rate_interval])) / sum by (queue, kind) (rate(skit_queue_handled_total{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", queue=~\"$queue\"}[$__rate_interval]))",
+          "legendFormat": "{{queue}} {{kind}}",
           "refId": "A"
         }
       ],
-      "description": "A panicking handler is not here: it ends the tick, see the worker dashboard."
+      "description": "A panic in a handler counts as an error."
     },
     {
       "type": "timeseries",
-      "title": "Handler latency p95 by kind",
+      "title": "Handler latency p95 by queue and kind",
       "id": 4,
       "datasource": {
         "type": "prometheus",
@@ -248,8 +269,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(skit_queue_handle_duration_seconds_bucket{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\"}[$__rate_interval])))",
-          "legendFormat": "{{kind}}",
+          "expr": "histogram_quantile(0.95, sum by (le, queue, kind) (rate(skit_queue_handle_duration_seconds_bucket{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", queue=~\"$queue\"}[$__rate_interval])))",
+          "legendFormat": "{{queue}} {{kind}}",
           "refId": "A"
         }
       ]
@@ -269,7 +290,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Tasks in the table",
+      "title": "Tasks by queue",
       "id": 6,
       "datasource": {
         "type": "prometheus",
@@ -309,8 +330,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max without (pod, instance) (skit_queue_pending{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\"})",
-          "legendFormat": "pending {{job}}",
+          "expr": "max without (pod, instance) (skit_queue_pending{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", queue=~\"$queue\"})",
+          "legendFormat": "pending {{queue}}",
           "refId": "A"
         },
         {
@@ -318,8 +339,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max without (pod, instance) (skit_queue_leased{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\"})",
-          "legendFormat": "leased {{job}}",
+          "expr": "max without (pod, instance) (skit_queue_leased{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", queue=~\"$queue\"})",
+          "legendFormat": "leased {{queue}}",
           "refId": "B"
         },
         {
@@ -327,12 +348,12 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max without (pod, instance) (skit_queue_dead{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\"})",
-          "legendFormat": "dead {{job}}",
+          "expr": "max without (pod, instance) (skit_queue_dead{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", queue=~\"$queue\"})",
+          "legendFormat": "dead {{queue}}",
           "refId": "C"
         }
       ],
-      "description": "Every replica reports the whole table, so the panel takes max, not sum."
+      "description": "Every replica reports the same table, so the panel takes max, not sum."
     },
     {
       "type": "timeseries",
@@ -376,7 +397,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "time() - max by (worker) (skit_worker_last_success_timestamp_seconds{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", worker=\"queue-backlog\"})",
+          "expr": "time() - max by (worker) (skit_worker_last_success_timestamp_seconds{namespace=~\"$namespace\", job=~\"$job\", pod=~\"$pod\", worker=~\"queue-.+-backlog\"})",
           "legendFormat": "{{worker}}",
           "refId": "A"
         }

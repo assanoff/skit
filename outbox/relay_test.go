@@ -189,7 +189,7 @@ func (typePublisher) Close() error { return nil }
 
 // A permanent error fails its event and the batch goes on; the first other
 // error stops the batch, and the rest goes back under its lease.
-func TestRelayFailFast(t *testing.T) {
+func TestRelayHaltsOnBrokerDown(t *testing.T) {
 	is := is.New(t)
 	lease := uuid.New()
 	var events []Event

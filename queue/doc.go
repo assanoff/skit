@@ -1,120 +1,92 @@
-// Package queue is a durable work queue with at-least-once delivery, safe for
-// concurrent consumers across processes.
+// Package queue runs durable background work with at-least-once delivery,
+// safe for concurrent workers across goroutines and replicas.
 //
-// The Postgres implementation (PG) claims work with SELECT … FOR UPDATE SKIP
-// LOCKED, so running N consumers (goroutines or replicas) over one table just
-// works — each ready task goes to exactly one consumer at a time. A Queue plugs
-// straight into worker.Processor: its Claim/MarkDone/MarkFailed methods satisfy
-// worker.Source[Task] and worker.Sink[Task], so the reliable
-// claim -> handle -> ack/retry loop comes for free. Schedule enqueues work; an
-// optional unique Name deduplicates retries of the same logical task. An InMem
-// implementation with identical semantics is provided for unit tests and local
-// runs without a database.
+// Every queue lives in one Postgres table, queue_tasks; the queue column
+// tells them apart. A queue has its own workers, lease and backoff: give slow
+// and fast work queues of their own, so a long task does not hold up a quick
+// one. Within a queue, Kind selects the handler: a Mux routes each task to the
+// JobFunc registered for its kind.
 //
-// # Wiring (Postgres + worker.Processor)
+// # Usage
 //
-// Schedule produces work; a worker.Processor consumes it by leasing a batch
-// (Claim), running a Handler, and recording the outcome (MarkDone /
-// MarkFailed):
-//
-//	q := queue.NewPG(log, db, queue.Options{LeaseTimeout: 5 * time.Minute})
+//	q := queue.NewPG(log, db)
 //	if err := q.EnsureSchema(ctx); err != nil { // safe at startup, even across replicas
 //	    return err
 //	}
 //
-//	// Producer: enqueue a task. A Name makes the enqueue idempotent.
-//	_, err := q.Schedule(ctx, queue.ScheduleParams{
-//	    Name:    "send-welcome:42",
+//	// Producer: a Key makes the enqueue idempotent within the queue.
+//	_, err := q.Schedule(ctx, queue.Params{
+//	    Queue:   "email",
 //	    Kind:    "email.welcome",
+//	    Key:     "welcome:42",
 //	    Payload: payload,
-//	    Delay:   0,
 //	})
 //
-//	// Consumer: a Mux routes each task to a handler by Kind, so one queue and
-//	// one worker pool can serve many task kinds. q is both the Source (Claim)
-//	// and Sink (MarkDone/MarkFailed).
+//	// Consumer: the workers of the queue claim its tasks and run the Mux.
 //	mux := queue.NewMux()
-//	if err := mux.Register("email.welcome", sendWelcome); err != nil {
+//	if err := mux.Register("email.welcome", queue.Decode(sendWelcome)); err != nil {
 //	    return err
 //	}
-//	proc := worker.NewProcessor[queue.Task](log, q, mux, q, worker.ProcessorConfig{
-//	    Name:       "queue",
-//	    BatchSize:  100,
-//	    IsTerminal: func(err error) bool {
-//	        return errors.Is(err, queue.ErrUnknownKind)
-//	    },
-//	})
-//
-//	group := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 10 * time.Second})
-//	group.Add(worker.NewPacedLoop(log, worker.LoopConfig{}, proc.PacedTick()))
-//	if err := group.Run(ctx); err != nil {
+//	workers, err := queue.Workers(log, q, queue.Config{Queue: "email", Batch: 10},
+//	    mux.Handle, queue.WithMetrics(reg))
+//	if err != nil {
 //	    return err
 //	}
+//	for _, w := range workers {
+//	    group.Add(w) // a worker.Group
+//	}
 //
-// # Dispatch and retry
+// # Outcomes
 //
-// Mux maps a Task.Kind to a JobFunc and implements worker.Handler[Task]
-// (Register returns an error — it never panics — on an empty kind, nil handler,
-// or duplicate). Because Claim does not filter by Kind, the Mux is what makes
-// the Kind column route work. Retry wraps a JobFunc with in-process retry (over
-// the retry package) to absorb transient errors quickly; for durable backoff
-// that survives crashes and frees the worker between attempts, rely instead on
-// the store retry below (a non-terminal MarkFailed reschedules the task).
+// The error of the handler decides the outcome of a task:
 //
-// # Schema
+//   - nil removes the task;
+//   - Permanent(err) sends it to the dead letters of its queue: a payload that
+//     does not decode (Decode does this itself), a kind with no handler
+//     (ErrUnknownKind), anything no retry fixes;
+//   - Halt(err) retries it with backoff and stops the batch: the rest goes back
+//     untouched, and the queue polls again after Config.Poll — for a
+//     dependency every task needs, such as a broker that is down;
+//   - any other error retries the task with backoff.
 //
-// The backing table is owned by this package, so you don't hand-write a
-// migration for it: call PG.EnsureSchema at startup to provision it. The DDL is
-// idempotent (CREATE ... IF NOT EXISTS) and runs under a transaction-scoped
-// advisory lock, so several replicas can call it concurrently without racing.
-// Schema returns the same DDL as a string if you'd rather embed it in your own
-// migration tooling instead.
+// A retried task runs again after a backoff of 2s × 2 up to 5 minutes, with
+// no limit on attempts; WithBackoff changes it, and its MaxAttempts sends the
+// task to the dead letters at that many failures. Task.Attempts counts only
+// the failures: a task released from a stopped batch, or reclaimed after a
+// crash, keeps its attempts. A panic in the handler is recovered and logged
+// with its stack and, by default, retried; WithOnPanic decides otherwise.
 //
-// # Semantics
+// # Delivery
 //
-// Claim leases up to limit ready tasks (run_at <= now and not currently leased,
-// or with an expired lease), bumps each task's attempt count, stamps a fresh
-// LeaseID that MarkDone/MarkFailed must echo back, and returns the batch in
-// run_at, id order. MarkDone acknowledges success and removes the task.
-// PG.Release returns tasks claimed but not handled with their attempt taken
-// back: a worker.Processor releases the rest of a batch it stops (FailFast,
-// BatchTimeout, shutdown). A panic in a handler of the Mux is returned as a
-// *safetick.PanicError; the Processor logs it and, by default, retries the
-// task. MarkFailed with terminal=false releases the
-// lease and reschedules the task to now+RetryDelay so a later Claim retries it
-// without busy-looping; terminal=true parks it as a dead letter. When a lease
-// no longer matches — because it expired and another
-// consumer reclaimed the task — the mark is a no-op and returns ErrLeaseLost.
-// PG.Cleanup reaps done/dead-lettered rows finished before a cutoff; run it
-// periodically via worker.Loop.
+// A claim leases a batch of ready tasks of one queue with SELECT … FOR UPDATE
+// SKIP LOCKED and returns it in run_at order. A task stays leased for
+// 3 × Config.Timeout + 10s: if its worker dies, another reclaims it after
+// that, so delivery is at-least-once and handlers must be idempotent. A batch
+// starts no task once it has run Config.Timeout; at shutdown the task being
+// handled is still marked and the rest goes back. A handled task is removed
+// at once; a dead one stays 7 days for inspection, then the cleaner of its
+// queue removes it.
 //
 // # Metrics
 //
-// A Mux built with WithMetrics records skit_queue_handled_total by kind and
-// result (ok, error) and skit_queue_handle_duration_seconds by kind. NewBacklog
-// builds the worker.Loop that reads PG.Stats every 30 seconds into the gauges
-// skit_queue_pending, skit_queue_leased and skit_queue_dead; add it to the
-// group of a process that has metrics:
+// With WithMetrics the workers of a queue record, labeled with the queue,
+// skit_queue_handled_total by kind and result (ok, error — a panic is an
+// error), skit_queue_handle_duration_seconds by kind and, from a loop of their
+// own every 30 seconds, the backlog gauges skit_queue_pending,
+// skit_queue_leased and skit_queue_dead. Every replica reports the same
+// backlog, so a dashboard takes max, not sum. The loops record skit_worker_*
+// under the names queue-<queue>, queue-<queue>-cleaner and
+// queue-<queue>-backlog. The queue opens no spans.
 //
-//	mux := queue.NewMux(queue.WithMetrics(reg))
-//	group.Add(queue.NewBacklog(log, q, reg))
+// # Config and options
 //
-// The Loop that runs the processor records its ticks itself when its
-// LoopConfig has the same registry.
-//
-// # Options
-//
-//   - Options.LeaseTimeout: how long a claimed task stays leased before another
-//     consumer may reclaim it (default 5m).
-//   - Options.RetryDelay: how long a retryable (non-terminal) failure waits
-//     before it is claimable again (default 30s). NewInMem takes the same
-//     Options as NewPG.
-//   - WithFallback(fn): the Mux handler for a Kind with no registered handler.
-//   - WithMetrics(reg): the registry of the Mux metrics.
-//   - ScheduleParams: Name (optional dedup key — empty means always insert),
-//     Kind (handler routing key, required), Payload (opaque body), Delay
-//     (postpones the earliest claim time).
-//
-// The backing table is fixed (queue_tasks); all time math and lease-id
-// generation happen in Go, keeping the SQL free of NOW()/gen_random_uuid().
+//   - Config: Queue (required), Concurrency (claim loops per process, default
+//     1), Batch (tasks per claim, default 1), Timeout (per task, default 30s),
+//     Poll (wait after an empty claim, default 1s).
+//   - WithBackoff(retry.Backoff): the retry delay and the attempt limit.
+//   - WithOnPanic(fn): the outcome of a task whose handler panicked.
+//   - WithMetrics(reg): the registry of the metrics.
+//   - WithFallback(fn): the Mux handler of a kind with no registered handler.
+//   - Params: Queue and Kind (required), Key (dedup within the queue while
+//     the task is in it — waiting, leased or dead), Payload, Delay.
 package queue

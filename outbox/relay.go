@@ -85,7 +85,9 @@ func NewRelay(log *slog.Logger, store Store, pub broker.Publisher, cfg RelayConf
 			// A permanent error concerns its event only; any other means the
 			// broker is down, so the rest of the batch would fail the same way.
 			IsTerminal: broker.IsPermanent,
-			FailFast:   true,
+			IsHalt: func(err error) bool {
+				return !broker.IsPermanent(err)
+			},
 		},
 	)
 	return worker.NewPacedLoop(log, worker.LoopConfig{

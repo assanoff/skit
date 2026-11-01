@@ -32,8 +32,8 @@
 // (canonically SELECT ... FOR UPDATE SKIP LOCKED, so replicas can run
 // concurrently), runs the Handler on each item, then records the outcome via
 // the Sink (MarkDone on success, MarkFailed on error with terminal/retryable
-// decided by IsTerminal). With FailFast the first retryable failure stops the
-// batch, and a Sink that is a Releaser returns the rest to the Source
+// decided by IsTerminal). An error IsHalt accepts stops the batch, and a Sink
+// that is a Releaser returns the rest to the Source
 // untouched: a dependency that is down costs one failed item per tick, not a
 // batch. A canceled tick and BatchTimeout stop the batch before its next item
 // and release the rest the same way, so no item is handled past the lease of
@@ -116,7 +116,8 @@
 //
 // ProcessorConfig: Name (default "processor"), BatchSize (default 100),
 // HandleTimeout, BatchTimeout, IsTerminal (nil = all failures retryable),
-// FailFast, OnPanic (nil = a panicked item is retried), Now (default
+// IsHalt (nil = no error stops the batch), OnPanic (nil = a panicked item is
+// retried), Now (default
 // time.Now().UTC; override in tests).
 //
 // Retry wraps a Handler using retry.Config (Backoff + IsTerminal); the backoff

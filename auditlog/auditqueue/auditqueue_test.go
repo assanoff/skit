@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/assanoff/skit/auditlog"
 	"github.com/assanoff/skit/auditlog/auditbus"
@@ -12,23 +11,11 @@ import (
 	"github.com/assanoff/skit/queue"
 )
 
-type fakeQueue struct{ scheduled []queue.ScheduleParams }
+type fakeQueue struct{ scheduled []queue.Params }
 
-func (f *fakeQueue) Schedule(_ context.Context, p queue.ScheduleParams) (bool, error) {
+func (f *fakeQueue) Schedule(_ context.Context, p queue.Params) (bool, error) {
 	f.scheduled = append(f.scheduled, p)
 	return true, nil
-}
-
-func (f *fakeQueue) Claim(context.Context, time.Time, int) ([]queue.Task, error) {
-	return nil, nil
-}
-
-func (f *fakeQueue) MarkDone(context.Context, queue.Task, time.Time) error {
-	return nil
-}
-
-func (f *fakeQueue) MarkFailed(context.Context, queue.Task, string, bool, time.Time) error {
-	return nil
 }
 
 func TestRecorderEnqueues(t *testing.T) {
@@ -43,8 +30,8 @@ func TestRecorderEnqueues(t *testing.T) {
 	if len(q.scheduled) != 1 {
 		t.Fatalf("scheduled = %d, want 1", len(q.scheduled))
 	}
-	if q.scheduled[0].Kind != auditqueue.Kind {
-		t.Fatalf("kind = %q, want %q", q.scheduled[0].Kind, auditqueue.Kind)
+	if q.scheduled[0].Queue != auditqueue.Queue || q.scheduled[0].Kind != auditqueue.Kind {
+		t.Fatalf("queue, kind = %q, %q", q.scheduled[0].Queue, q.scheduled[0].Kind)
 	}
 	var ev auditbus.Event
 	if err := json.Unmarshal(q.scheduled[0].Payload, &ev); err != nil {

@@ -43,9 +43,9 @@
 //   - outbox: skit_outbox_relay_*, skit_outbox_sweeper_reclaimed_total,
 //     skit_outbox_cleaner_deleted_total — the configs of the workers; the
 //     backlog gauges — NewBacklog.
-//   - queue: skit_queue_handled_total by kind and result,
-//     skit_queue_handle_duration_seconds by kind — WithMetrics; the backlog
-//     gauges — NewBacklog.
+//   - queue: skit_queue_handled_total by queue, kind and result,
+//     skit_queue_handle_duration_seconds by queue and kind and the backlog
+//     gauges by queue — the WithMetrics option of Workers.
 //   - broker: skit_broker_consumed_total by consumer and action,
 //     skit_broker_handle_duration_seconds by consumer — Instrument.
 //   - worker: skit_worker_ticks_total by worker and result,

@@ -172,27 +172,25 @@ its HTTP retries — the same `Backoff`, used as math rather than as a loop.
 
 ### Wrap a worker Handler
 
-`worker.Retry` adds in-process retry to a `worker.Handler[T]` (e.g. a queue
-`Mux`), absorbing transient errors before the Processor records the outcome:
+`worker.Retry` adds in-process retry to a `worker.Handler[T]`, absorbing
+transient errors before the Processor records the outcome:
 
 ```go
-handler := worker.Retry[queue.Task](retry.Config{
+handler := worker.Retry[Job](retry.Config{
     Backoff:    retry.Backoff{Base: 50 * time.Millisecond, MaxAttempts: 3},
     IsTerminal: func(err error) bool { return errors.Is(err, ErrPermanent) },
-}, mux)
+}, h)
 
-proc := worker.NewProcessor[queue.Task](log, q, handler, q, worker.ProcessorConfig{Name: "queue"})
+proc := worker.NewProcessor[Job](log, src, handler, sink, worker.ProcessorConfig{Name: "jobs"})
 ```
 
-### Wrap a queue JobFunc
+### Back off a queue
+
+A `queue` retries a failed task itself, durably, after a `retry.Backoff`:
 
 ```go
-mux := queue.NewMux()
-if err := mux.Register("email.welcome", queue.Retry(retry.Config{
-    Backoff: retry.Backoff{Base: 100 * time.Millisecond, MaxAttempts: 3},
-}, sendWelcome)); err != nil {
-    return err
-}
+workers, err := queue.Workers(log, q, queue.Config{Queue: "email"}, mux.Handle,
+    queue.WithBackoff(retry.Backoff{Base: time.Second, Max: time.Minute, MaxAttempts: 10}))
 ```
 
 ### HTTP client middleware

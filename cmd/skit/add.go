@@ -629,8 +629,8 @@ func (c *addWorkerCommand) Execute([]string) error {
 }
 
 // addWorker generates a background worker into internal/app/workers/<name>:
-// a periodic worker.Loop (Tick) by default, or a queue.JobFunc (Handle) driven
-// by a worker.Processor when opts.Claim is set.
+// a periodic worker.Loop (Tick) by default, or a queue.JobFunc (Handle) run
+// by the workers of a queue when opts.Claim is set.
 func addWorker(out io.Writer, opts addRESTOpts) error {
 	if err := checkName(opts.Name, nil); err != nil {
 		return err
@@ -694,28 +694,33 @@ Scaffolded the %[1]q queue-backed worker (task kind %[1]s.Kind). Next:
 
 1. go mod tidy   # test dep (matryer/is)
 
-2. Provision the queue table once — add queue.Schema() to a migration, or call
-   EnsureSchema at startup — and expose a queue.Queue in deps if absent:
+2. Provision the queue table at startup and expose a *queue.PG in deps if
+   absent:
 
-   q := queue.NewPG(d.Logger, d.DB(ctx), queue.Options{})
-   _ = q.EnsureSchema(ctx)
+   q := queue.NewPG(d.Logger, d.DB(ctx))
+   if err := q.EnsureSchema(ctx); err != nil {
+       return nil, err
+   }
 
-3. Wire the processor into initWorkers (internal/app/server/server.go), behind
-   the Worker.Disabled kill switch:
+3. Wire the workers of the queue into initWorkers
+   (internal/app/server/server.go), behind the Worker.Disabled kill switch:
 
    if !a.d.Opts.Worker.Disabled {
-       mux := queue.NewMux(queue.WithMetrics(a.d.Metrics))
-       _ = mux.Register(%[1]s.Kind, %[1]s.New(a.d.Logger).Handle)
-       proc := worker.NewProcessor[queue.Task](a.d.Logger, q, mux, q, worker.ProcessorConfig{})
-       a.workers = append(a.workers, worker.NewPacedLoop(a.d.Logger, worker.LoopConfig{
-           Name: %[1]q + "-worker", Interval: time.Second, Metrics: a.d.Metrics,
-       }, proc.PacedTick()))
+       mux := queue.NewMux()
+       if err := mux.Register(%[1]s.Kind, %[1]s.New(a.d.Logger).Handle); err != nil {
+           return err
+       }
+       ws, err := queue.Workers(a.d.Logger, q, queue.Config{Queue: %[1]s.Queue},
+           mux.Handle, queue.WithMetrics(a.d.Metrics))
+       if err != nil {
+           return err
+       }
+       a.workers = append(a.workers, ws...)
    }
-   // One per process, not per worker: the skit_queue_{pending,leased,dead} gauges.
-   a.workers = append(a.workers, queue.NewBacklog(a.d.Logger, q, a.d.Metrics))
-   // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue", "github.com/assanoff/skit/worker"
+   // imports: %[1]s "%[2]s/internal/app/workers/%[1]s", "github.com/assanoff/skit/queue"
 
-4. Enqueue work: q.Schedule(ctx, queue.ScheduleParams{Kind: %[1]s.Kind, Payload: ...})
+4. Enqueue work:
+   q.Schedule(ctx, queue.Params{Queue: %[1]s.Queue, Kind: %[1]s.Kind, Payload: ...})
 
 5. go test ./internal/app/workers/%[1]s/...
 `, d.Pkg, d.Module)

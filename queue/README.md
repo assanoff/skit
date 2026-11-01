@@ -1,293 +1,148 @@
 # queue
 
-A durable work queue with **at-least-once** delivery, safe for concurrent
-consumers across goroutines and replicas.
+Durable background work with **at-least-once** delivery, safe for concurrent
+workers across goroutines and replicas.
 
-The Postgres implementation claims work with `SELECT … FOR UPDATE SKIP LOCKED`,
-so running N consumers over one table just works — each ready task goes to
-exactly one consumer at a time. A queue plugs straight into `worker.Processor`
-(it is both the `Source` and the `Sink`), and a `Mux` routes each task to a
-handler by `Kind`, so one queue and one worker pool can serve many task kinds.
-
-> Need to enqueue a task **atomically with a domain write** (the transactional
-> outbox guarantee)? `Schedule` is a standalone insert — use the `outbox` package
-> for transactional event emission. `queue` is for general deferred/background
-> work.
+Every queue lives in one Postgres table, `queue_tasks`; the `queue` column tells
+them apart. A queue has its own workers, lease and backoff: give slow and fast
+work queues of their own, so a long task does not hold up a quick one. Within a
+queue, `Kind` selects the handler: a `Mux` routes each task to the `JobFunc`
+registered for its kind.
 
 ## Features
 
-- Durable, replica-safe claiming via `FOR UPDATE SKIP LOCKED`.
-- Lease + attempt tracking; a crashed consumer's task is reclaimed after the
-  lease expires (at-least-once).
-- Optional `Name` for idempotent enqueue (dedup).
-- `Delay` to postpone a task.
-- `Mux` dispatch by `Kind` — many job types over one table.
-- Two-tier retry: fast **in-process** retry (`queue.Retry`) and durable
-  **store** retry (`Options.RetryDelay`), plus dead-lettering for permanent
-  failures.
-- `InMem` implementation with identical semantics for unit tests.
-
-## Install
-
-```go
-import "github.com/assanoff/skit/queue"
-```
+- Replica-safe claiming via `FOR UPDATE SKIP LOCKED`, a batch in `run_at` order.
+- Queues isolated by name: their own workers, lease, backoff and metrics.
+- `Key` for idempotent enqueue within a queue; `Delay` to postpone a task.
+- Outcomes by the error of the handler: done, retry with backoff, `Permanent`
+  (dead letter), `Halt` (stop the batch).
+- A panic in a handler is recovered per task and retried, or decided by
+  `WithOnPanic`.
+- A crashed worker's task is reclaimed after its lease (at-least-once).
 
 ## Setup
 
 ```go
-log := logger.New(os.Stdout, logger.Config{Service: "worker"})
-
-q := queue.NewPG(log, db, queue.Options{
-    LeaseTimeout: 5 * time.Minute,  // a claimed task is reclaimable after this if not acked
-    RetryDelay:   30 * time.Second, // wait before a retryable failure is retried
-})
+q := queue.NewPG(log, db)
+if err := q.EnsureSchema(ctx); err != nil { // safe at startup, even across replicas
+    return err
+}
 ```
 
-Create the table from a migration with `queue.Schema()` (the DDL for the fixed
-`queue_tasks` table and its index). In tests or local runs, call
-`q.EnsureSchema(ctx)` to run the same DDL directly.
+`EnsureSchema` creates the table and its indexes under an advisory lock, so
+several replicas can call it at once.
 
 ## Producing work
-
-`Schedule` enqueues a task. `Kind` routes it to a handler; `Payload` is opaque
-bytes the handler decodes.
 
 ```go
 payload, _ := json.Marshal(WelcomeEmail{UserID: 42})
 
-inserted, err := q.Schedule(ctx, queue.ScheduleParams{
-    Kind:    "email.welcome",
+inserted, err := q.Schedule(ctx, queue.Params{
+    Queue:   "email",          // required
+    Kind:    "email.welcome",  // required: the handler within the queue
+    Key:     "welcome:42",     // optional: dedup within the queue
     Payload: payload,
+    Delay:   time.Minute,      // optional: not before now + Delay
 })
 ```
 
-### Idempotent enqueue (dedup by Name)
-
-A non-empty `Name` is unique: scheduling the same `Name` twice is a no-op and
-returns `inserted == false`. An empty `Name` always inserts.
-
-```go
-inserted, err := q.Schedule(ctx, queue.ScheduleParams{
-    Name:    "import:2024-06",      // dedup key — enqueue this batch at most once
-    Kind:    "widget.import",
-    Payload: batch,
-})
-if err != nil {
-    return err
-}
-if !inserted {
-    // already queued earlier; nothing to do
-}
-```
-
-### Delayed work
-
-```go
-q.Schedule(ctx, queue.ScheduleParams{
-    Kind:    "reminder",
-    Payload: b,
-    Delay:   24 * time.Hour, // not claimable until now + Delay
-})
-```
+While a task with the same `Key` is in the queue — waiting, leased or dead —
+`Schedule` inserts nothing and returns `inserted == false`. An empty `Key`
+always inserts.
 
 ## Consuming work
 
-A `Mux` maps each `Task.Kind` to a `JobFunc` and implements
-`worker.Handler[Task]`. Wire it into a `worker.Processor` (the queue is both the
-`Source` and `Sink`), run it as a `worker.Loop`, and supervise it in a
-`worker.Group`.
-
 ```go
-func sendWelcome(ctx context.Context, t queue.Task) error {
-    var p WelcomeEmail
-    if err := json.Unmarshal(t.Payload, &p); err != nil {
-        return fmt.Errorf("%w: %v", ErrBadPayload, err) // terminal → dead-letter
-    }
+func sendWelcome(ctx context.Context, t queue.Task, p WelcomeEmail) error {
     return mailer.Send(ctx, p)
 }
 
-func run(ctx context.Context, log *slog.Logger, q *queue.PG) error {
-    mux := queue.NewMux()
-    if err := mux.Register("email.welcome", sendWelcome); err != nil {
-        return err
-    }
-    if err := mux.Register("widget.import", importBatch); err != nil {
-        return err
-    }
-
-    proc := worker.NewProcessor[queue.Task](log, q, mux, q, worker.ProcessorConfig{
-        Name:      "jobs",
-        BatchSize: 100,
-        // An unroutable kind or a bad payload is permanent — dead-letter it
-        // instead of retrying forever.
-        IsTerminal: func(err error) bool {
-            return errors.Is(err, queue.ErrUnknownKind) || errors.Is(err, ErrBadPayload)
-        },
-    })
-
-    group := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 10 * time.Second})
-    group.Add(worker.NewLoop(log, worker.LoopConfig{
-        Name:               "jobs",
-        Interval:           time.Second,
-        ImmediateFirstTick: true,
-    }, proc.Tick()))
-
-    return group.Run(ctx)
+mux := queue.NewMux()
+if err := mux.Register("email.welcome", queue.Decode(sendWelcome)); err != nil {
+    return err
+}
+workers, err := queue.Workers(log, q, queue.Config{
+    Queue:       "email",
+    Concurrency: 2,                // claim loops per process (default 1)
+    Batch:       10,               // tasks per claim (default 1)
+    Timeout:     30 * time.Second, // per task (default 30s)
+    Poll:        time.Second,      // wait after an empty claim (default 1s)
+}, mux.Handle, queue.WithMetrics(reg))
+if err != nil {
+    return err
+}
+for _, w := range workers {
+    group.Add(w) // a worker.Group
 }
 ```
 
-`Claim` does **not** filter by `Kind`, so the `Mux` is what makes the `Kind`
-column route work. To run a single kind you can register just one handler (or
-hand a `worker.HandlerFunc[queue.Task]` to the processor directly).
+`Workers` returns the claim loops of the queue, the cleaner of its dead letters
+and, with `WithMetrics`, the loop of its backlog gauges. Run them on every
+replica: the claim splits the tasks.
 
-### Unknown kinds
+`Decode` decodes the JSON payload into the type of the handler; a payload that
+does not decode is `Permanent`.
 
-By default a task whose `Kind` has no registered handler yields
-`queue.ErrUnknownKind` (classify it terminal, as above, so it dead-letters).
-Override with a fallback to handle them yourself:
+## Outcomes
 
-```go
-mux := queue.NewMux(queue.WithFallback(func(ctx context.Context, t queue.Task) error {
-    log.WarnContext(ctx, "dropping task with unknown kind", "kind", t.Kind)
-    return nil // ack and drop
-}))
-```
+| Handler returns | The task |
+|---|---|
+| `nil` | is removed |
+| `queue.Permanent(err)` | goes to the dead letters of its queue |
+| `queue.Halt(err)` | is retried with backoff; the batch stops, the rest goes back untouched |
+| any other error | is retried with backoff |
 
-### High throughput: adaptive pacing
+Use `Halt` for a dependency every task needs, such as a broker that is down:
+one failed task per poll instead of a whole batch. A kind with no handler fails
+with `ErrUnknownKind`, marked `Permanent`; `WithFallback` handles such kinds
+instead.
 
-Use a paced loop to drain a backlog promptly while idling cheaply when empty:
-
-```go
-group.Add(worker.NewPacedLoop(log, worker.LoopConfig{
-    Name:            "jobs",
-    Interval:        time.Second,      // idle wait
-    MaxIdleInterval: 30 * time.Second, // back off when persistently idle
-}, proc.PacedTick()))
-```
-
-Run several loops (in one process, or across replicas) over the same queue for
-more throughput — `SKIP LOCKED` keeps them from colliding.
-
-## Retry & failure handling
-
-There are two complementary tiers.
-
-### In-process retry (fast, transient errors)
-
-`queue.Retry` wraps a `JobFunc` so transient failures retry in-process before the
-task is marked failed — no DB round-trip, no poll wait. Keep the budget small;
-the task's lease is held for the whole retry.
+A retried task runs again after a backoff of 2s × 2 up to 5 minutes, with no
+limit on attempts. `WithBackoff` changes it; its `MaxAttempts` sends the task to
+the dead letters at that many failures:
 
 ```go
-mux.Register("email.welcome", queue.Retry(retry.Config{
-    Backoff:    retry.Backoff{Base: 100 * time.Millisecond, MaxAttempts: 3},
-    IsTerminal: func(err error) bool { return errors.Is(err, ErrBadPayload) },
-}, sendWelcome))
+queue.WithBackoff(retry.Backoff{Base: time.Second, Max: time.Minute, MaxAttempts: 10})
 ```
 
-### Store retry (durable, survives crashes)
+`Task.Attempts` counts only the failures: a task released from a stopped batch,
+or reclaimed after a crash, keeps its attempts.
 
-When a handler returns a non-terminal error, the queue reschedules the task to
-`now + Options.RetryDelay` and a later `Claim` retries it — durable, non-blocking,
-and replica-safe. Tune it with `Options.RetryDelay`.
-
-### Dead-lettering permanent failures
-
-A failure classified terminal by the processor's `IsTerminal` is parked as a
-dead letter (`done_at` set): it is never claimed again but stays in the table for
-inspection until `Cleanup` reaps it. Return a terminal sentinel for failures that
-will never succeed (bad payload, unknown kind).
+A panic in a handler is recovered and logged with its stack; by default the
+task is retried. `WithOnPanic` decides the outcome instead:
 
 ```go
-var ErrBadPayload = errors.New("bad payload") // classified terminal in ProcessorConfig
+queue.WithOnPanic(func(ctx context.Context, t queue.Task, p *safetick.PanicError) error {
+    return queue.Permanent(p) // a task that panics once is not run again
+})
 ```
 
-## Crash recovery (at-least-once)
+## Delivery
 
-If a consumer dies after claiming a task but before acking, its lease expires
-after `LeaseTimeout` and the next `Claim` re-leases the task (its `Attempts`
-increment). Because delivery is at-least-once, **handlers must be idempotent** —
-e.g. upsert with `ON CONFLICT DO NOTHING`, or dedup on a business key.
+A task stays leased for `3 × Timeout + 10s`. If its worker dies, another
+reclaims it after that, so delivery is **at-least-once** and handlers must be
+idempotent — upsert with `ON CONFLICT DO NOTHING`, or dedup on a business key.
 
-## Retention cleanup
+A batch starts no task once it has run `Timeout`, so no task is handled past
+its lease. At shutdown the task being handled is still marked, and the rest of
+the batch goes back untouched.
 
-Done and dead-lettered rows accumulate; reap them periodically with a
-`worker.Loop`:
-
-```go
-group.Add(worker.NewLoop(log, worker.LoopConfig{
-    Name:     "queue-cleanup",
-    Interval: time.Hour,
-}, func(ctx context.Context) error {
-    _, err := q.Cleanup(ctx, time.Now().Add(-24*time.Hour)) // delete rows finished > 24h ago
-    return err
-}))
-```
+A handled task is removed at once. A dead one stays 7 days for inspection;
+then the cleaner of its queue removes it.
 
 ## Metrics
 
-`WithMetrics` makes a `Mux` record every task it handles on the registry:
+With `WithMetrics`, labeled with the queue:
 
-- `skit_queue_handled_total{kind,result}` — `result` is `ok` or `error`;
-- `skit_queue_handle_duration_seconds{kind}`.
+- `skit_queue_handled_total{queue,kind,result}` — `result` is `ok` or `error`;
+  a panic is an `error`;
+- `skit_queue_handle_duration_seconds{queue,kind}`;
+- `skit_queue_pending{queue}` (ready to claim), `skit_queue_leased{queue}` and
+  `skit_queue_dead{queue}` — read every 30 seconds. Every replica reports the
+  same values, so a dashboard takes `max`, not `sum`.
 
-`kind` is the kind given to `Register`; a task of another kind is recorded as
-`<fallback>` with `WithFallback` and as `<unknown>` without it. A panicking
-handler is recorded as `error`.
+The loops record `skit_worker_*` under the names `queue-<queue>`,
+`queue-<queue>-cleaner` and `queue-<queue>-backlog`. The queue opens no spans.
 
-`NewBacklog` builds the `worker.Loop` that reads `PG.Stats` every 30 seconds into
-the gauges `skit_queue_pending` (ready to claim), `skit_queue_leased` and
-`skit_queue_dead` (dead letters). Every replica reports the same values, so a
-dashboard takes `max`, not `sum`.
-
-```go
-mux := queue.NewMux(queue.WithMetrics(reg))
-group.Add(worker.NewPacedLoop(log, worker.LoopConfig{Name: "jobs", Metrics: reg}, proc.PacedTick()))
-group.Add(queue.NewBacklog(log, q, reg))
-```
-
-## Testing with InMem
-
-`NewInMem` has the same lease/retry/dedup semantics as Postgres but needs no
-database — ideal for unit tests. It takes the same `Options` as `NewPG`.
-
-```go
-q := queue.NewInMem(queue.Options{LeaseTimeout: time.Minute})
-
-q.Schedule(ctx, queue.ScheduleParams{Kind: "x", Payload: b})
-tasks, _ := q.Claim(ctx, time.Now(), 10)
-// ... assert on tasks, then q.MarkDone / q.MarkFailed
-```
-
-`InMem` is safe for concurrent use but is not durable and does not coordinate
-across processes.
-
-## Options reference
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `LeaseTimeout` | 5m | How long a claimed task stays leased before another consumer may reclaim it (crash recovery). |
-| `RetryDelay` | 30s | How long a retryable (non-terminal) failure waits before it is claimable again. |
-
-`ScheduleParams`: `Name` (optional dedup key — empty means always insert),
-`Kind` (handler routing key, required), `Payload` (opaque bytes), `Delay`
-(postpones the earliest claim time).
-
-## Semantics summary
-
-- **Claim** leases up to `limit` ready tasks (`run_at <= now`, unleased or
-  lease-expired), bumps each task's `Attempts`, stamps a fresh `LeaseID`, and
-  returns the batch in `run_at, id` order.
-- **Release** (`PG`) returns tasks claimed but not handled and takes back
-  their attempt; a `worker.Processor` releases the rest of a batch it stops.
-- **MarkDone** acks success and removes the task.
-- **MarkFailed** (terminal=false) reschedules to `now + RetryDelay`;
-  (terminal=true) parks a dead letter.
-- A mark with a stale lease (the task was reclaimed) is a no-op returning
-  `ErrLeaseLost`.
-- All time math and lease-id generation happen in Go, so the SQL stays free of
-  `NOW()`/`gen_random_uuid()` and the clock is injectable in tests.
-
-See also: [`worker`](../worker) (Processor/Loop/Group), [`retry`](../retry)
-(in-process retry policy), [`outbox`](../outbox) (transactional event emission).
+See also: [`worker`](../worker) (Processor, Loop, Group), [`retry`](../retry)
+(the backoff policy).

@@ -40,7 +40,7 @@ type Sink[T any] interface {
 
 // Releaser returns claimed items to their source untouched: no attempt is
 // counted and each item keeps its place. A Processor releases the rest of a
-// batch it stops — at a FailFast failure, at BatchTimeout or when its tick is
+// batch it stops — at an error IsHalt accepts, at BatchTimeout or when its tick is
 // canceled — through its Sink, when the Sink implements Releaser; otherwise the
 // rest stays claimed until the source reclaims it on its own, such as by a
 // lease that expires. items is never empty.
@@ -84,12 +84,12 @@ type ProcessorConfig struct {
 	// IsTerminal classifies a Handle error as permanent (true) or retryable
 	// (false). When nil, every failure is treated as retryable.
 	IsTerminal func(err error) bool
-	// FailFast stops a batch at its first retryable failure: that item is
-	// marked failed, and the rest goes back to the source untouched through
-	// the Sink as a Releaser. Set it when a retryable failure means a
-	// dependency is down, so the rest of the batch would fail the same way; a
-	// terminal failure concerns its item only and does not stop the batch.
-	FailFast bool
+	// IsHalt reports whether a Handle error stops the batch: that item is
+	// marked failed as IsTerminal says, and the rest goes back to the source
+	// untouched through the Sink as a Releaser. Have it accept the errors that
+	// mean a dependency is down, so the rest of the batch would fail the same
+	// way. When nil, no error stops the batch.
+	IsHalt func(err error) bool
 	// OnPanic decides the outcome of an item whose Handle panicked. The panic
 	// is recovered and logged with its stack, then the item is marked with the
 	// error OnPanic returns: nil marks it done, an error IsTerminal accepts
@@ -109,6 +109,9 @@ func (c ProcessorConfig) withDefaults() ProcessorConfig {
 	}
 	if c.IsTerminal == nil {
 		c.IsTerminal = func(error) bool { return false }
+	}
+	if c.IsHalt == nil {
+		c.IsHalt = func(error) bool { return false }
 	}
 	if c.OnPanic == nil {
 		c.OnPanic = retryPanic
@@ -156,12 +159,13 @@ func (p *Processor[T]) Tick() TickFunc { return p.process }
 // PacedTick returns the drain cycle as a PacedTickFunc for NewPacedLoop: it
 // reports Busy when it handled a full batch (a backlog likely remains, so the
 // adaptive loop drains again promptly) and Idle otherwise. A batch stopped by
-// FailFast is Idle: a dependency that is down is retried at the idle pace.
+// IsHalt is Idle: a dependency that is down is retried at the idle pace.
 func (p *Processor[T]) PacedTick() PacedTickFunc { return p.drain }
 
 // process runs one full claim -> handle -> mark cycle. It returns an error only
 // when the claim itself fails (so the surrounding Loop can log it); per-item
-// failures are recorded via the Sink and abort the batch only with FailFast.
+// failures are recorded via the Sink and abort the batch only when IsHalt
+// accepts them.
 // A canceled tick or BatchTimeout stops the batch before its next item.
 func (p *Processor[T]) process(ctx context.Context) error {
 	_, err := p.drain(ctx)
@@ -202,10 +206,9 @@ func (p *Processor[T]) expired(ctx context.Context, start time.Time) bool {
 	return p.cfg.BatchTimeout > 0 && p.cfg.Now().Sub(start) >= p.cfg.BatchTimeout
 }
 
-// stops reports whether err of Handle stops the batch: with FailFast, a
-// retryable failure does.
+// stops reports whether err of Handle stops the batch.
 func (p *Processor[T]) stops(err error) bool {
-	return err != nil && p.cfg.FailFast && !p.cfg.IsTerminal(err)
+	return err != nil && p.cfg.IsHalt(err)
 }
 
 // release hands the rest of a stopped batch back to the source, when the Sink

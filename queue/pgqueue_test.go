@@ -1,4 +1,4 @@
-package queue_test
+package queue
 
 import (
 	"context"
@@ -10,164 +10,275 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/dbtest"
-	"github.com/assanoff/skit/queue"
+	"github.com/assanoff/skit/retry"
 	"github.com/assanoff/skit/safetick"
-	"github.com/assanoff/skit/worker"
 )
 
-// newPG starts Postgres for the test and returns a queue on it with its
+// newPG starts Postgres for the test and returns a store on it with its
 // schema.
-func newPG(t *testing.T) *queue.PG {
+func newPG(t *testing.T) *PG {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test requires docker")
 	}
 	pg := dbtest.NewPostgres(t.Context(), t, dbtest.Config{})
-	q := queue.NewPG(slog.New(slog.DiscardHandler), pg.DB, queue.Options{})
+	q := NewPG(slog.New(slog.DiscardHandler), pg.DB)
 	if err := q.EnsureSchema(t.Context()); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 	return q
 }
 
-// schedule enqueues a task of kind under name, due after delay.
-func schedule(t *testing.T, q *queue.PG, name, kind string, delay time.Duration) {
+// schedule enqueues p and fails the test on an error.
+func schedule(t *testing.T, q *PG, p Params) {
 	t.Helper()
-	p := queue.ScheduleParams{Name: name, Kind: kind, Delay: delay}
 	if _, err := q.Schedule(t.Context(), p); err != nil {
-		t.Fatalf("schedule %s: %v", name, err)
+		t.Fatalf("schedule %s/%s: %v", p.Queue, p.Kind, err)
 	}
 }
 
-// names returns the names of tasks in order.
-func names(tasks []queue.Task) []string {
+// kinds returns the kinds of tasks in order.
+func kinds(tasks []leased) []string {
 	out := make([]string, len(tasks))
 	for i := range tasks {
-		out[i] = tasks[i].Name
+		out[i] = tasks[i].Kind
 	}
 	return out
 }
 
-// Stats counts the ready, the leased and the dead tasks; a delayed task is in
-// none of them.
-func TestPGStats(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test requires docker")
-	}
-
-	is := is.New(t)
-	ctx := t.Context()
-	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
-	q := queue.NewPG(slog.New(slog.DiscardHandler), pg.DB, queue.Options{})
-	is.NoErr(q.EnsureSchema(ctx))
-
-	for _, delay := range []time.Duration{0, 0, 0, time.Hour} {
-		_, err := q.Schedule(ctx, queue.ScheduleParams{Kind: "email", Delay: delay})
-		is.NoErr(err)
-	}
-	now := time.Now().UTC()
-	claimed, err := q.Claim(ctx, now, 2)
-	is.NoErr(err)
-	is.Equal(len(claimed), 2) // two of the three ready tasks are leased
-	is.NoErr(q.MarkFailed(ctx, claimed[0], "boom", true, now))
-
-	st, err := q.Stats(ctx, now)
-	is.NoErr(err)
-	is.Equal(st, queue.Stats{Pending: 1, Leased: 1, Dead: 1})
+// later is a claim time past every delay and backoff of a test.
+func later() time.Time {
+	return time.Now().UTC().Add(time.Hour)
 }
 
-// Claim returns its batch in run_at order, and Release gives back the tasks of
-// a batch with their attempt, guarded by the lease.
-func TestPGClaimOrderAndRelease(t *testing.T) {
+// A Key deduplicates within its queue only; no Key schedules every call.
+func TestPGScheduleKey(t *testing.T) {
+	is := is.New(t)
+	ctx := t.Context()
+	q := newPG(t)
+
+	for _, c := range []struct {
+		p    Params
+		want bool
+	}{
+		{Params{Queue: "a", Kind: "k", Key: "x"}, true},
+		{Params{Queue: "a", Kind: "k", Key: "x"}, false}, // same key, same queue
+		{Params{Queue: "b", Kind: "k", Key: "x"}, true},  // same key, another queue
+		{Params{Queue: "a", Kind: "k"}, true},
+		{Params{Queue: "a", Kind: "k"}, true}, // no key, no dedup
+	} {
+		inserted, err := q.Schedule(ctx, c.p)
+		is.NoErr(err)
+		is.Equal(inserted, c.want)
+	}
+
+	_, err := q.Schedule(ctx, Params{Kind: "k"})
+	is.True(err != nil) // a queue is required
+	_, err = q.Schedule(ctx, Params{Queue: "a"})
+	is.True(err != nil) // and so is a kind
+}
+
+// A claim takes the tasks of its queue only, in run_at order; an expired
+// lease is reclaimed, and release gives back the tasks of its lease only.
+func TestPGClaimAndRelease(t *testing.T) {
 	is := is.New(t)
 	ctx := t.Context()
 	q := newPG(t)
 	// Scheduled first, due last: the storage order is the reverse of run_at.
-	schedule(t, q, "a", "job", 30*time.Millisecond)
-	schedule(t, q, "b", "job", 20*time.Millisecond)
-	schedule(t, q, "c", "job", 10*time.Millisecond)
-	later := time.Now().UTC().Add(time.Hour)
+	schedule(t, q, Params{Queue: "a", Kind: "3", Delay: 30 * time.Millisecond})
+	schedule(t, q, Params{Queue: "a", Kind: "2", Delay: 20 * time.Millisecond})
+	schedule(t, q, Params{Queue: "a", Kind: "1", Delay: 10 * time.Millisecond})
+	schedule(t, q, Params{Queue: "b", Kind: "other"})
+	now := later()
 
-	claimed, err := q.Claim(ctx, later, 10)
+	claimed, err := q.claim(ctx, "a", now, time.Minute, 10)
 	is.NoErr(err)
-	is.Equal(names(claimed), []string{"c", "b", "a"}) // the batch comes in run_at order
-	is.NoErr(q.MarkDone(ctx, claimed[0], later))
-	is.NoErr(q.Release(ctx, claimed[1:]))
+	is.Equal(kinds(claimed), []string{"1", "2", "3"}) // its queue only, in run_at order
+	is.Equal(claimed[0].Queue, "a")
 
-	again, err := q.Claim(ctx, later, 10)
+	none, err := q.claim(ctx, "a", now, time.Minute, 10)
 	is.NoErr(err)
-	is.Equal(names(again), []string{"b", "a"}) // released tasks are claimable at once
-	is.Equal(again[0].Attempts, 1)             // with the attempt of the release taken back
+	is.Equal(len(none), 0) // leased tasks are not claimed again
 
-	is.NoErr(q.Release(ctx, claimed[1:])) // under a lease since replaced
-	st, err := q.Stats(ctx, later)
+	reclaimed, err := q.claim(ctx, "a", now.Add(2*time.Minute), time.Minute, 1)
 	is.NoErr(err)
-	is.Equal(st.Leased, int64(2)) // a stale lease releases nothing
+	is.Equal(kinds(reclaimed), []string{"1"}) // an expired lease is reclaimed
+
+	is.NoErr(q.release(ctx, claimed)) // the first task is under another lease now
+	again, err := q.claim(ctx, "a", now, time.Minute, 10)
+	is.NoErr(err)
+	is.Equal(kinds(again), []string{"2", "3"}) // the rest of the lease is back
+	is.Equal(again[0].Attempts, 0)             // with no attempt counted
 }
 
-// A panicked handler is retried by default; OnPanic can dead-letter the task
-// instead.
-func TestPGProcessorPanic(t *testing.T) {
+// A failed task counts its attempt and runs again at its time; a dead one
+// stays for the cleaner, which removes the old dead tasks of its queue only.
+func TestPGMarksStatsCleanup(t *testing.T) {
 	is := is.New(t)
 	ctx := t.Context()
 	q := newPG(t)
-	mux := queue.NewMux()
-	is.NoErr(mux.Register("retry", func(context.Context, queue.Task) error {
-		panic("boom")
-	}))
-	is.NoErr(mux.Register("drop", func(context.Context, queue.Task) error {
-		panic("bad payload")
-	}))
+	for _, k := range []string{"done", "retry", "dead"} {
+		schedule(t, q, Params{Queue: "a", Kind: k})
+	}
+	schedule(t, q, Params{Queue: "b", Kind: "dead"})
+	now := time.Now().UTC()
 
-	schedule(t, q, "r", "retry", 0)
-	byDefault := worker.NewProcessor[queue.Task](nil, q, mux, q, worker.ProcessorConfig{})
-	is.NoErr(byDefault.Tick()(ctx))
-	st, err := q.Stats(ctx, time.Now().UTC())
+	claimed, err := q.claim(ctx, "a", now, time.Minute, 10)
 	is.NoErr(err)
-	is.Equal(st, queue.Stats{}) // the task waits for its retry: neither ready, leased nor dead
+	is.NoErr(q.markDone(ctx, claimed[0]))
+	is.NoErr(q.markFailed(ctx, claimed[1], "down", false, now, now.Add(time.Minute)))
+	is.NoErr(q.markFailed(ctx, claimed[2], "bad", true, now, now))
+	is.True(errors.Is(q.markDone(ctx, claimed[0]), errLeaseLost)) // the task is gone
+	other, err := q.claim(ctx, "b", now, time.Minute, 10)
+	is.NoErr(err)
+	is.NoErr(q.markFailed(ctx, other[0], "bad", true, now, now))
 
-	errDead := errors.New("dead")
-	schedule(t, q, "d", "drop", 0)
-	decided := worker.NewProcessor[queue.Task](nil, q, mux, q, worker.ProcessorConfig{
-		IsTerminal: func(err error) bool { return errors.Is(err, errDead) },
-		OnPanic: func(context.Context, any, *safetick.PanicError) error {
-			return errDead
-		},
-	})
-	is.NoErr(decided.Tick()(ctx))
-	st, err = q.Stats(ctx, time.Now().UTC())
+	st, err := q.stats(ctx, "a", now)
 	is.NoErr(err)
-	is.Equal(st, queue.Stats{Dead: 1}) // OnPanic dead-letters the task
+	is.Equal(st, stats{Dead: 1}) // the retried task waits for its time
 
-	retried, err := q.Claim(ctx, time.Now().UTC().Add(time.Hour), 10)
+	retried, err := q.claim(ctx, "a", now.Add(time.Minute), time.Minute, 10)
 	is.NoErr(err)
-	is.Equal(names(retried), []string{"r"})       // the default retried the task
-	is.Equal(retried[0].LastError, "panic: boom") // with the panic as its error
-	is.Equal(retried[0].Attempts, 2)
+	is.Equal(kinds(retried), []string{"retry"})
+	is.Equal(retried[0].Attempts, 1)
+	is.Equal(retried[0].LastError, "down")
+
+	n, err := q.cleanup(ctx, "a", now.Add(time.Second))
+	is.NoErr(err)
+	is.Equal(n, int64(1)) // the dead task of its queue only
+	st, err = q.stats(ctx, "b", now)
+	is.NoErr(err)
+	is.Equal(st.Dead, int64(1))
 }
 
-// A shutdown mid-batch acknowledges the task being handled and releases the
+// tick runs one claim of the processor of cfg over h.
+func tick(ctx context.Context, t *testing.T, q *PG, cfg Config, h JobFunc, opts ...Option) {
+	t.Helper()
+	p := newProcessor(nil, q, cfg.withDefaults(), h, newOptions(opts))
+	if err := p.Tick()(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+}
+
+// The error of the handler decides the outcome of each task of a batch.
+func TestProcessorOutcomes(t *testing.T) {
+	is := is.New(t)
+	ctx := t.Context()
+	q := newPG(t)
+	for _, k := range []string{"ok", "retry", "dead", "unknown"} {
+		schedule(t, q, Params{Queue: "a", Kind: k})
+	}
+	mux := NewMux()
+	is.NoErr(mux.Register("ok", func(context.Context, Task) error {
+		return nil
+	}))
+	is.NoErr(mux.Register("retry", func(context.Context, Task) error {
+		return errors.New("down")
+	}))
+	is.NoErr(mux.Register("dead", func(context.Context, Task) error {
+		return Permanent(errors.New("bad"))
+	}))
+
+	tick(ctx, t, q, Config{Queue: "a", Batch: 10}, mux.Handle)
+
+	st, err := q.stats(ctx, "a", time.Now().UTC())
+	is.NoErr(err)
+	is.Equal(st, stats{Dead: 2}) // ok is removed, retry waits for its backoff
+	retried, err := q.claim(ctx, "a", later(), time.Minute, 10)
+	is.NoErr(err)
+	is.Equal(kinds(retried), []string{"retry"})
+	is.Equal(retried[0].Attempts, 1)
+	is.True(retried[0].RunAt.After(retried[0].CreatedAt.Add(time.Second))) // after a backoff of 2s
+}
+
+// Halt retries its task and stops the batch: the rest goes back untouched.
+func TestProcessorHalt(t *testing.T) {
+	is := is.New(t)
+	ctx := t.Context()
+	q := newPG(t)
+	for _, k := range []string{"a", "b", "c"} {
+		schedule(t, q, Params{Queue: "events", Kind: k})
+	}
+	var handled []string
+	h := func(_ context.Context, t Task) error {
+		handled = append(handled, t.Kind)
+		return Halt(errors.New("broker down"))
+	}
+
+	tick(ctx, t, q, Config{Queue: "events", Batch: 10}, h)
+
+	is.Equal(handled, []string{"a"}) // the batch stops at Halt
+	rest, err := q.claim(ctx, "events", time.Now().UTC(), time.Minute, 10)
+	is.NoErr(err)
+	is.Equal(kinds(rest), []string{"b", "c"}) // the rest is back at once
+	is.Equal(rest[0].Attempts, 0)             // with no attempt counted
+}
+
+// With MaxAttempts a task dies at its last failed attempt.
+func TestProcessorMaxAttempts(t *testing.T) {
+	is := is.New(t)
+	ctx := t.Context()
+	q := newPG(t)
+	schedule(t, q, Params{Queue: "a", Kind: "k"})
+	fail := func(context.Context, Task) error { return errors.New("down") }
+	cfg := Config{Queue: "a"}
+	backoff := WithBackoff(retry.Backoff{Base: time.Nanosecond, MaxAttempts: 2})
+
+	tick(ctx, t, q, cfg, fail, backoff)
+	tick(ctx, t, q, cfg, fail, backoff)
+
+	st, err := q.stats(ctx, "a", time.Now().UTC())
+	is.NoErr(err)
+	is.Equal(st, stats{Dead: 1}) // the second failure is the last
+}
+
+// A panic retries its task by default; WithOnPanic decides otherwise.
+func TestProcessorPanic(t *testing.T) {
+	is := is.New(t)
+	ctx := t.Context()
+	q := newPG(t)
+	boom := func(context.Context, Task) error { panic("boom") }
+
+	schedule(t, q, Params{Queue: "a", Kind: "k"})
+	tick(ctx, t, q, Config{Queue: "a"}, boom)
+	retried, err := q.claim(ctx, "a", later(), time.Minute, 10)
+	is.NoErr(err)
+	is.Equal(len(retried), 1)                     // the default retries the task
+	is.Equal(retried[0].LastError, "panic: boom") // with the panic as its error
+
+	var seen Task
+	schedule(t, q, Params{Queue: "b", Kind: "k"})
+	tick(ctx, t, q, Config{Queue: "b"}, boom,
+		WithOnPanic(func(_ context.Context, t Task, p *safetick.PanicError) error {
+			seen = t
+			return Permanent(p)
+		}))
+	is.Equal(seen.Queue, "b") // WithOnPanic gets the task
+	st, err := q.stats(ctx, "b", time.Now().UTC())
+	is.NoErr(err)
+	is.Equal(st, stats{Dead: 1}) // and decides its outcome
+}
+
+// A shutdown mid-batch removes the task being handled and gives back the
 // rest untouched.
-func TestPGProcessorShutdown(t *testing.T) {
+func TestProcessorShutdown(t *testing.T) {
 	is := is.New(t)
 	q := newPG(t)
-	for _, name := range []string{"a", "b", "c"} {
-		schedule(t, q, name, "job", 0)
+	for _, k := range []string{"a", "b", "c"} {
+		schedule(t, q, Params{Queue: "q", Kind: k})
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	var handled []string
-	h := worker.HandlerFunc[queue.Task](func(_ context.Context, task queue.Task) error {
-		handled = append(handled, task.Name)
+	h := func(_ context.Context, t Task) error {
+		handled = append(handled, t.Kind)
 		cancel() // shutdown while the task is handled
 		return nil
-	})
-	p := worker.NewProcessor[queue.Task](nil, q, h, q, worker.ProcessorConfig{})
+	}
 
-	is.NoErr(p.Tick()(ctx))
+	tick(ctx, t, q, Config{Queue: "q", Batch: 10}, h)
+
 	is.Equal(handled, []string{"a"}) // no task starts after the cancel
-
-	rest, err := q.Claim(t.Context(), time.Now().UTC(), 10)
+	rest, err := q.claim(t.Context(), "q", time.Now().UTC(), time.Minute, 10)
 	is.NoErr(err)
-	is.Equal(names(rest), []string{"b", "c"}) // the handled task is done, the rest is back
-	is.Equal(rest[0].Attempts, 1)             // with no attempt counted
+	is.Equal(kinds(rest), []string{"b", "c"}) // the handled task is gone, the rest is back
 }

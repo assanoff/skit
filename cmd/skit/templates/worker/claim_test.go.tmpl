@@ -27,5 +27,5 @@ func Test{{.Type}}WorkerHandleMalformed(t *testing.T) {
 	w := newTestWorker()
 
 	err := w.Handle(context.Background(), queue.Task{ID: 2, Kind: Kind, Payload: []byte(`{`)})
-	is.True(err != nil) // a malformed payload is an error (queue retries, then dead-letters)
+	is.True(err != nil) // a malformed payload is an error: Permanent, the task is dead-lettered
 }
