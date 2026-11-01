@@ -156,13 +156,4 @@
 // BulkInsert writes len(values)/len(columns) rows, splitting into batches that
 // stay under Postgres's bind-parameter cap, with values laid out row-major. An
 // optional conflictAction (e.g. "ON CONFLICT DO NOTHING") is appended verbatim.
-//
-// # Schema provisioning
-//
-// EnsureSchema applies idempotent DDL at startup under a transaction-scoped
-// Postgres advisory lock, so several service replicas can provision the same
-// table concurrently without racing — this is how the SDK storage packages
-// (outbox, queue, auditlog, translation) create their own tables without a
-// hand-written migration. AdvisoryKey derives a stable, collision-resistant lock
-// key from a namespaced name (e.g. "skit.outbox.schema").
 package dbx

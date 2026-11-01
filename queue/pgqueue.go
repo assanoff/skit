@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/internal/pgschema"
 )
 
 // errLeaseLost is returned by a mark when the lease of the task no longer
@@ -38,16 +39,12 @@ func NewPG(log *slog.Logger, db *dbx.DB) *PG {
 	return &PG{log: log, db: db}
 }
 
-// schemaLockKey keys the transaction-level advisory lock that serializes
-// EnsureSchema across replicas booting at once.
-var schemaLockKey = dbx.AdvisoryKey("skit.queue.schema")
-
 // EnsureSchema creates the table and its indexes if they do not exist. It is
 // safe to call at startup, including from several replicas at once: the DDL
 // runs under a transaction-scoped advisory lock, so concurrent boots serialize
 // instead of racing on CREATE TABLE.
 func (q *PG) EnsureSchema(ctx context.Context) error {
-	return dbx.EnsureSchema(ctx, q.log, q.db, schemaLockKey, schema())
+	return pgschema.Ensure(ctx, q.log, q.db, "queue", Schema())
 }
 
 // Schedule enqueues a task on the pool and reports whether it was inserted:
@@ -264,10 +261,12 @@ SELECT
 	return st, nil
 }
 
-// schema returns the DDL of queue_tasks: the key index deduplicates within a
+// Schema returns the DDL of queue_tasks: the key index deduplicates within a
 // queue, the ready index serves the claim and the dead index the cleaner and
-// the dead count.
-func schema() string {
+// the dead count. Call PG.EnsureSchema at startup to provision it
+// (advisory-lock guarded, replica-safe); Schema is exposed for embedding the
+// DDL in your own migration tooling.
+func Schema() string {
 	return `
 CREATE TABLE IF NOT EXISTS queue_tasks (
     id         BIGSERIAL PRIMARY KEY,

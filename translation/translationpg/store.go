@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/internal/pgschema"
 	"github.com/assanoff/skit/translation"
 )
 
@@ -28,10 +29,6 @@ func NewStore(log *slog.Logger, q dbx.Querier) *Store {
 
 // Compile-time check that Store satisfies the domain contract.
 var _ translation.Store = (*Store)(nil)
-
-// schemaLockKey keys the transaction-level advisory lock that serializes
-// EnsureSchema across replicas booting at once.
-var schemaLockKey = dbx.AdvisoryKey("skit.translation.schema")
 
 // Schema returns the DDL for the translations table.
 func Schema() string {
@@ -61,7 +58,7 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if !ok {
 		return dbx.Exec(ctx, s.db, Schema())
 	}
-	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
+	return pgschema.Ensure(ctx, s.log, db, "translation", Schema())
 }
 
 // SaveTranslation upserts every column of data in a single transaction. An empty

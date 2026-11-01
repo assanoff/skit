@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/internal/pgschema"
 )
 
 // PG is a Locker backed by Postgres session-scoped advisory locks
@@ -33,7 +34,7 @@ var _ Locker = (*PG)(nil)
 // is ignored (the lock is session-scoped and released on Release or connection
 // death). ok==false means another session holds the lock.
 func (p *PG) TryLock(ctx context.Context, key string, _ time.Duration) (Release, bool, error) {
-	lockKey := dbx.AdvisoryKey(key)
+	lockKey := pgschema.Key(key)
 
 	conn, err := p.db.Connx(ctx)
 	if err != nil {

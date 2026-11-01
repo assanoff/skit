@@ -14,6 +14,7 @@ import (
 
 	"github.com/assanoff/skit/auditlog"
 	"github.com/assanoff/skit/dbx"
+	"github.com/assanoff/skit/internal/pgschema"
 )
 
 // Store implements auditlog.Store against Postgres.
@@ -32,10 +33,6 @@ func NewStore(log *slog.Logger, q dbx.Querier) *Store {
 // Compile-time check that Store satisfies the domain contract.
 var _ auditlog.Store = (*Store)(nil)
 
-// schemaLockKey keys the transaction-level advisory lock that serializes
-// EnsureSchema across replicas booting at once.
-var schemaLockKey = dbx.AdvisoryKey("skit.auditlog.schema")
-
 // EnsureSchema creates the audit_log table and indexes if absent. It is safe to
 // call at startup, including from several replicas at once: the DDL runs under a
 // transaction-scoped advisory lock that auto-releases on commit, so concurrent
@@ -46,7 +43,7 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if !ok {
 		return dbx.Exec(ctx, s.db, Schema())
 	}
-	return dbx.EnsureSchema(ctx, s.log, db, schemaLockKey, Schema())
+	return pgschema.Ensure(ctx, s.log, db, "auditlog", Schema())
 }
 
 // Save inserts a new audit log entry.
