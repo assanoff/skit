@@ -1,33 +1,11 @@
 package outbox
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"sync"
 )
-
-// Codec encodes a published event into the payload stored in the outbox.
-// ContentType names the encoding: the relay sends it as the content type of
-// the message, and a consumer decodes the payload by it.
-type Codec interface {
-	ContentType() string
-	Marshal(v any) ([]byte, error)
-}
-
-// jsonCodec is the default Codec, encoding/json.
-type jsonCodec struct{}
-
-func (jsonCodec) ContentType() string { return "application/json" }
-
-func (jsonCodec) Marshal(v any) ([]byte, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, fmt.Errorf("json codec: %w", err)
-	}
-	return b, nil
-}
 
 // route is the transport descriptor resolved for one registered event type.
 type route struct {
@@ -36,39 +14,20 @@ type route struct {
 }
 
 // Registry maps a domain event's Go type to its event type name and topic, and
-// encodes every event with one Codec. It lets the domain publish a plain typed
-// value while the routing stays a wiring concern: the domain never names a
-// topic or exchange.
+// encodes every event as JSON. It lets the domain publish a plain typed value
+// while the routing stays a wiring concern: the domain never names a topic or
+// exchange.
 //
 // Populate it once at startup with Register, then hand it to Bind.
 // Registry is safe for concurrent reads after setup.
 type Registry struct {
 	mu     sync.RWMutex
 	routes map[reflect.Type]route
-	codec  Codec
 }
 
-// RegistryOption customizes a Registry.
-type RegistryOption func(*Registry)
-
-// WithCodec sets how events are encoded (default JSON). A service usually
-// writes its events in one format, such as protobuf.
-func WithCodec(c Codec) RegistryOption {
-	return func(r *Registry) {
-		if c != nil {
-			r.codec = c
-		}
-	}
-}
-
-// NewRegistry returns an empty Registry; events are JSON unless WithCodec sets
-// another codec.
-func NewRegistry(opts ...RegistryOption) *Registry {
-	r := &Registry{routes: make(map[reflect.Type]route), codec: jsonCodec{}}
-	for _, opt := range opts {
-		opt(r)
-	}
-	return r
+// NewRegistry returns an empty Registry.
+func NewRegistry() *Registry {
+	return &Registry{routes: make(map[reflect.Type]route)}
 }
 
 // Register maps the Go type T to a CloudEvents type name and a transport topic.

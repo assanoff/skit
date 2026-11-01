@@ -197,29 +197,6 @@ func TestRegisterValidationErrors(t *testing.T) {
 	}
 }
 
-// rawCodec stores every event as the same bytes.
-type rawCodec struct{}
-
-func (rawCodec) ContentType() string { return "application/x-custom" }
-
-func (rawCodec) Marshal(any) ([]byte, error) { return []byte("RAW"), nil }
-
-func TestWithCodec(t *testing.T) {
-	reg := NewRegistry(WithCodec(rawCodec{}))
-	mustRegister[widgetCreated](t, reg, "widget.created", "widgets")
-
-	ev, err := reg.event(context.Background(), widgetCreated{})
-	if err != nil {
-		t.Fatalf("publish: %v", err)
-	}
-	if ev.ContentType != "application/x-custom" {
-		t.Errorf("content type = %q", ev.ContentType)
-	}
-	if string(ev.Payload) != "RAW" {
-		t.Errorf("payload = %q, want RAW", ev.Payload)
-	}
-}
-
 // A Publisher from Discard drops every event, registered or not, and needs
 // neither a transaction nor a registry.
 func TestDiscard(t *testing.T) {

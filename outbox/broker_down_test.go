@@ -3,28 +3,33 @@ package outbox_test
 import (
 	"context"
 	"log/slog"
+	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/matryer/is"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/dbtest"
+	"github.com/assanoff/skit/dbx"
 	"github.com/assanoff/skit/internal/brokertest"
 	"github.com/assanoff/skit/outbox"
+	"github.com/assanoff/skit/queue"
+	"github.com/assanoff/skit/retry"
 	"github.com/assanoff/skit/worker"
 )
 
-// TestRelayBrokerDown runs the relay against a RabbitMQ that stops answering
-// for a while. No event becomes failed, no lease expires under a batch the
-// broker holds up, and once the broker answers again every event arrives. An
-// event arrives twice only after a publish that timed out yet reached the
-// broker (at-least-once), so the extra deliveries never exceed the failed
-// publishes.
-func TestRelayBrokerDown(t *testing.T) {
+// TestBrokerDown runs a queue of events against a RabbitMQ that stops
+// answering for a while. No event goes to the dead letters, and once the
+// broker answers again every event arrives. An event arrives twice only after
+// a publish that timed out yet reached the broker (at-least-once), so the
+// extra deliveries never exceed the failed publishes.
+func TestBrokerDown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test requires docker")
 	}
@@ -33,8 +38,8 @@ func TestRelayBrokerDown(t *testing.T) {
 	ctx := t.Context()
 	log := slog.New(slog.DiscardHandler)
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
-	store := outbox.NewPG(log, pg.DB, outbox.Options{})
-	is.NoErr(store.EnsureSchema(ctx))
+	q := queue.NewPG(log, pg.DB)
+	is.NoErr(q.EnsureSchema(ctx))
 
 	rmq, url := brokertest.RabbitMQ(ctx, t)
 	conn, err := rabbitmq.Dial(rabbitmq.Config{URL: url})
@@ -46,7 +51,7 @@ func TestRelayBrokerDown(t *testing.T) {
 
 	got := newDeliveries()
 	cons, err := rabbitmq.NewConsumer(conn, log, rabbitmq.ConsumerConfig{
-		Queue:    "widgets.relay",
+		Queue:    "widgets.events",
 		Exchange: "widgets",
 	}, got.handle)
 	is.NoErr(err)
@@ -55,39 +60,48 @@ func TestRelayBrokerDown(t *testing.T) {
 	t.Cleanup(func() { <-consumed })
 	waitBound(t, pub, got)
 
+	reg := queue.NewRegistry()
+	enc := queue.WithEncoder(outbox.Envelope())
+	is.NoErr(reg.Register[created]("events", "widget.created", enc))
+	mux := queue.NewMux()
+	is.NoErr(mux.Register("widget.created", outbox.Handler(pub, "widgets")))
+	is.NoErr(reg.Check("events", mux))
 	const n = 30
-	for range n {
-		ev, err := outbox.NewEvent("widget.created", "widgets", "application/json", []byte(`{}`), nil)
-		is.NoErr(err)
-		is.NoErr(store.Insert(ctx, ev))
-	}
+	err = dbx.WithinTran(ctx, log, pg.DB, func(tx *dbx.Tx) error {
+		s := queue.Bind(tx, q, reg)
+		for i := range n {
+			if err := s.Schedule(ctx, created{ID: strconv.Itoa(i)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	is.NoErr(err)
 
 	resume := brokertest.Pause(ctx, t, rmq)
-	reg := prometheus.NewRegistry()
+	metrics := prometheus.NewRegistry()
+	cfg := outbox.Config("events")
+	cfg.Batch = 10
+	cfg.Timeout = time.Second
+	cfg.Poll = 100 * time.Millisecond
+	rs, err := queue.Workers(log, q, cfg, mux.Handle,
+		queue.WithBackoff(retry.Backoff{Base: 100 * time.Millisecond, Max: time.Second}),
+		queue.WithMetrics(metrics))
+	is.NoErr(err)
 	group := worker.NewGroup(log, worker.GroupConfig{ShutdownTimeout: 5 * time.Second})
-	group.Add(outbox.NewRelay(log, store, pub, outbox.RelayConfig{
-		PollInterval:   100 * time.Millisecond,
-		BatchSize:      10,
-		PublishTimeout: time.Second,
-		Metrics:        reg,
-	}))
-	// Without the fast fail a batch held up by the broker outlives its lease
-	// (10 × 1s against 2s), the sweeper hands it out again, and events go
-	// twice.
-	group.Add(outbox.NewSweeper(log, store, outbox.SweeperConfig{
-		Interval:     200 * time.Millisecond,
-		LeaseTimeout: 2 * time.Second,
-		Metrics:      reg,
-	}))
+	for _, r := range rs {
+		group.Add(r)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- group.Run(runCtx) }()
 	t.Cleanup(func() { cancel(); <-done })
 
-	time.Sleep(4 * time.Second) // the relay keeps trying while the broker hangs
-	stats, err := store.Stats(ctx, time.Now().UTC())
+	time.Sleep(4 * time.Second) // the queue keeps trying while the broker hangs
+	dead, err := dbx.QueryOne[int](ctx, pg.DB,
+		`SELECT count(*) FROM queue_tasks WHERE done_at IS NOT NULL`)
 	is.NoErr(err)
-	is.Equal(stats.Failed, int64(0)) // a broker that hangs fails nothing
+	is.Equal(dead, 0) // a broker that hangs dead-letters nothing
 	resume()
 
 	deadline := time.Now().Add(60 * time.Second)
@@ -96,9 +110,8 @@ func TestRelayBrokerDown(t *testing.T) {
 	}
 	is.Equal(got.unique(), n) // every event arrives
 
-	failures := counter(t, reg, "skit_outbox_relay_publish_failures_total")
-	is.True(failures > 0) // the broker did hang
-	is.Equal(counter(t, reg, "skit_outbox_sweeper_reclaimed_total"), 0.0)
+	failures := failedHandles(t, metrics)
+	is.True(failures > 0)                       // the broker did hang
 	is.True(float64(got.total()-n) <= failures) // no extra copies beyond the timeouts
 }
 
@@ -158,18 +171,29 @@ func waitBound(t *testing.T, pub broker.Publisher, d *deliveries) {
 	t.Fatal("consumer not bound")
 }
 
-// counter returns the value of the counter name on reg.
-func counter(t *testing.T, reg *prometheus.Registry, name string) float64 {
+// failedHandles returns the tasks handled with an error, per
+// skit_queue_handled_total on reg.
+func failedHandles(t *testing.T, reg *prometheus.Registry) float64 {
 	t.Helper()
 	mfs, err := reg.Gather()
 	if err != nil {
 		t.Fatalf("gather: %v", err)
 	}
+	var n float64
 	for _, mf := range mfs {
-		if mf.GetName() == name {
-			return mf.GetMetric()[0].GetCounter().GetValue()
+		if mf.GetName() != "skit_queue_handled_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			if slices.ContainsFunc(m.GetLabel(), isErrorResult) {
+				n += m.GetCounter().GetValue()
+			}
 		}
 	}
-	t.Fatalf("no metric %s", name)
-	return 0
+	return n
+}
+
+// isErrorResult reports whether l is the label result="error".
+func isErrorResult(l *dto.LabelPair) bool {
+	return l.GetName() == "result" && l.GetValue() == "error"
 }

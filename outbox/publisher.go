@@ -40,7 +40,7 @@ func Discard() *Publisher { return &Publisher{discard: true} }
 
 // Publish records event in the outbox within the bound transaction. event's Go
 // type must be registered: the Registry resolves its event type and topic and
-// encodes it with its Codec. Returns an error if the type is unregistered or
+// encodes it as JSON. Returns an error if the type is unregistered or
 // encoding/insert fails. A Publisher from Discard returns nil.
 func (p *Publisher) Publish(ctx context.Context, event any) error {
 	if p.discard {
@@ -63,11 +63,12 @@ func (r *Registry) event(ctx context.Context, v any) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
-	payload, err := r.codec.Marshal(v)
+	codec := jsonCodec{}
+	payload, err := codec.Marshal(v)
 	if err != nil {
 		return Event{}, fmt.Errorf("outbox: publish %s: marshal: %w", rt.eventType, err)
 	}
-	ct := r.codec.ContentType()
+	ct := codec.ContentType()
 	ev, err := NewEvent(rt.eventType, rt.topic, ct, payload, traceHeaders(ctx))
 	if err != nil {
 		return Event{}, fmt.Errorf("outbox: publish %s: %w", rt.eventType, err)

@@ -193,7 +193,7 @@ with a domain layer that knows nothing about SQL or the transport:
 
 - Routing is a **wiring concern**. A `Registry`, populated once at startup, maps
   each event's Go type to its event type and a transport-neutral `Topic`, and
-  encodes events with one codec (JSON unless `outbox.WithCodec` sets another):
+  encodes events as JSON:
 
   ```go
   reg := outbox.NewRegistry()

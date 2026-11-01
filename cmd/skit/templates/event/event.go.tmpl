@@ -20,8 +20,7 @@ const Topic = "{{.Plural}}"
 
 // Register maps {{.Core}}.{{.Type}} to its CloudEvents type and topic on reg.
 // Call it once at startup, before the relay starts, so the outbox knows how to
-// route the event. The payload is JSON unless the registry has another codec
-// (outbox.WithCodec).
+// route the event. The payload is JSON.
 //
 // The broker publisher derives any key from the message: Kafka keeps the
 // events of one aggregate in order with kafka.WithPartitionKey.
