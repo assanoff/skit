@@ -61,10 +61,10 @@ func TestInstrumentMarksFailedVerdicts(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
 	h := consume.Instrument(verdicts(broker.Requeue, broker.Discard),
 		consume.InstrumentConfig{TracerProvider: tp})
-	body := ceBody(t, "order.paid")
+	d := delivery(t, "order.paid")
 
 	for range 3 {
-		consume.Process(t.Context(), nil, "orders", body, nil, h)
+		consume.Process(t.Context(), nil, "orders", broker.CloudEvents{}, d, h)
 	}
 
 	spans := rec.Ended()

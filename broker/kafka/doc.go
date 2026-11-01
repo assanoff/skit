@@ -1,7 +1,7 @@
 // Package kafka is the Apache Kafka adapter for the skit broker abstraction. It
 // implements broker.Publisher and a worker.Runnable consumer over
-// github.com/segmentio/kafka-go, exchanging CloudEvents v1.0 structured-mode
-// JSON (broker.Marshal/UnmarshalCloudEvent) exactly like the rabbitmq adapter,
+// github.com/segmentio/kafka-go, packing messages with a broker.Envelope —
+// CloudEvents v1.0 structured-mode JSON by default — like the rabbitmq adapter,
 // so application code depends only on broker.Message / Handler / Publisher
 // and never on the concrete transport.
 //
@@ -43,10 +43,17 @@
 // PRODUCER span as its creation context, one that carries it is sent under a
 // CLIENT child of it. NewPublisher takes the brokers in Config, the
 // CloudEvents source and the TracerProvider in PublisherConfig, and the
-// option WithPartitionKey.
+// options WithPartitionKey and WithEnvelope.
 //
 // NewConsumer takes the brokers in Config and the Topic, Group, Concurrency,
 // Name (default Group), Metrics and TracerProvider in ConsumerConfig. It records
 // every attempt at a record as a CONSUMER span "process <topic>" in the trace
 // the message was created in and in skit_broker_* (see broker).
+//
+// # Envelope
+//
+// WithEnvelope sets the broker.Envelope of a publisher and of a consumer, the
+// same on both sides of a stream; the headers of the envelope, content-type
+// among them, travel as record headers. A consumer commits a record its
+// envelope rejects, with a warning.
 package kafka

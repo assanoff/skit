@@ -46,13 +46,14 @@ type ConsumerConfig struct {
 	TracerProvider trace.TracerProvider
 }
 
-// Consumer consumes CloudEvents from Kafka and dispatches them to a
-// broker.Handler. It implements worker.Runnable: Start blocks until the context
+// Consumer consumes records from Kafka, unpacks them with its envelope and
+// dispatches them to a broker.Handler. It implements worker.Runnable: Start blocks until the context
 // is canceled (or Stop is called), then drains its readers.
 type Consumer struct {
 	log     *slog.Logger
 	brokers []string
 	cfg     ConsumerConfig
+	env     broker.Envelope
 	handler broker.Handler
 
 	mu      sync.Mutex
@@ -63,7 +64,8 @@ type Consumer struct {
 // NewConsumer builds a Consumer of h on the brokers of cfg. Every attempt of h
 // at a record is a consumer span in the trace the message was created in and,
 // with ccfg.Metrics, a record in skit_broker_*; a panic of h retries the record.
-func NewConsumer(log *slog.Logger, cfg Config, ccfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
+// The envelope is broker.CloudEvents{} unless WithEnvelope sets another.
+func NewConsumer(log *slog.Logger, cfg Config, ccfg ConsumerConfig, h broker.Handler, opts ...ConsumerOption) (*Consumer, error) {
 	if len(cfg.Brokers) == 0 {
 		return nil, errors.New("kafka: new consumer: brokers are required")
 	}
@@ -81,7 +83,11 @@ func NewConsumer(log *slog.Logger, cfg Config, ccfg ConsumerConfig, h broker.Han
 		Metrics:        ccfg.Metrics,
 		TracerProvider: ccfg.TracerProvider,
 	})
-	return &Consumer{log: log, brokers: cfg.Brokers, cfg: ccfg, handler: h}, nil
+	c := &Consumer{log: log, brokers: cfg.Brokers, cfg: ccfg, env: broker.CloudEvents{}, handler: h}
+	for _, opt := range opts {
+		opt.applyConsumer(c)
+	}
+	return c, nil
 }
 
 // Name identifies the consumer in the supervisor and logs.
@@ -161,20 +167,22 @@ func (c *Consumer) consume(ctx context.Context, r *kgo.Reader) {
 	}
 }
 
-// handle decodes one record and drives the handler, committing the offset once
+// handle unpacks one record and drives the handler, committing the offset once
 // the record reaches a terminal state (Ack, Discard, or a Requeue that exhausts
-// its retries). A malformed envelope is committed (dropped) — retrying it would
-// loop forever.
+// its retries). A record the envelope rejects is committed (dropped) with a
+// warning — retrying it would loop forever.
 func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
-	m, err := broker.UnmarshalCloudEvent(msg.Value)
+	m, err := consume.Decode(c.env, consume.Delivery{
+		Body:    msg.Value,
+		Headers: headers(msg.Headers),
+		Topic:   msg.Topic,
+	})
 	if err != nil {
 		c.log.WarnContext(ctx, "kafka consumer: malformed message, dropping",
 			"consumer", c.cfg.Name, "err", err, "offset", msg.Offset)
 		c.commit(ctx, r, msg)
 		return
 	}
-	m.Topic = msg.Topic
-	m.Headers = headers(msg.Headers)
 
 	for attempt := 0; ; attempt++ {
 		switch c.dispatch(ctx, m) {

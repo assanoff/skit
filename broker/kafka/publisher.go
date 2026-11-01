@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 	"uuid"
@@ -21,13 +22,14 @@ import (
 // scope names the tracer of this package.
 const scope = "github.com/assanoff/skit/broker/kafka"
 
-// Publisher publishes broker.Messages to Kafka as CloudEvents v1.0
-// structured-mode JSON. It writes with RequireAll acks, so Publish returns nil
+// Publisher publishes broker.Messages to Kafka packed by its envelope,
+// CloudEvents v1.0 structured-mode JSON by default. It writes with RequireAll acks, so Publish returns nil
 // only after every in-sync replica has the record — at-least-once delivery.
 type Publisher struct {
 	w            *kgo.Writer
 	source       string
 	partitionKey func(m broker.Message) (string, error)
+	env          broker.Envelope
 	tracer       trace.Tracer
 }
 
@@ -44,19 +46,16 @@ type PublisherConfig struct {
 	TracerProvider trace.TracerProvider
 }
 
-// PublisherOption customizes a Publisher.
-type PublisherOption func(*Publisher)
-
 // WithPartitionKey sets how the partition key of a message is derived; by
 // default a record has no key. The records of one key keep their order within
 // a partition. An error of fn fails the publish as it is: wrap it in
 // broker.Permanent when the message itself has no key.
 func WithPartitionKey(fn func(m broker.Message) (string, error)) PublisherOption {
-	return func(p *Publisher) {
+	return publisherFunc(func(p *Publisher) {
 		if fn != nil {
 			p.partitionKey = fn
 		}
-	}
+	})
 }
 
 // noKey leaves a record without a key.
@@ -85,17 +84,18 @@ func NewPublisher(cfg Config, pcfg PublisherConfig, opts ...PublisherOption) (*P
 		w:            w,
 		source:       pcfg.Source,
 		partitionKey: noKey,
+		env:          broker.CloudEvents{},
 		tracer:       otel.Tracer(pcfg.TracerProvider, scope),
 	}
 	for _, opt := range opts {
-		opt(p)
+		opt.applyPublisher(p)
 	}
 	return p, nil
 }
 
 // Publish sends m to the Kafka topic m.Topic, under its partition key, as a
-// CloudEvents record and blocks until the brokers acknowledge it. The span "send <topic>"
-// covers the write; without a trace context in m.Headers it is the creation
+// record packed by the envelope and blocks until the brokers acknowledge it.
+// The span "send <topic>" covers the write; without a trace context in m.Headers it is the creation
 // context of the message and goes out in its headers. A record over the size
 // limit fails with a broker.Permanent error.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
@@ -129,16 +129,19 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	return err
 }
 
-// send writes m as a CloudEvents record under key ("" for none) and waits for
-// the acknowledgement.
+// send packs m with the envelope, writes it as a record under key ("" for
+// none) and waits for the acknowledgement. The headers of the envelope go over
+// the headers of m.
 func (p *Publisher) send(ctx context.Context, m broker.Message, key string) error {
-	body, err := broker.MarshalCloudEvent(m)
+	body, envHeaders, err := p.env.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("kafka publish: %w", err)
 	}
-
-	headers := make([]kgo.Header, 0, len(m.Headers))
-	for k, v := range m.Headers {
+	wire := make(map[string]string, len(m.Headers)+len(envHeaders))
+	maps.Copy(wire, m.Headers)
+	maps.Copy(wire, envHeaders)
+	headers := make([]kgo.Header, 0, len(wire))
+	for k, v := range wire {
 		headers = append(headers, kgo.Header{Key: k, Value: []byte(v)})
 	}
 

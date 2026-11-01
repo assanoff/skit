@@ -129,3 +129,46 @@ cons, err := kafka.NewConsumer(log, kafka.Config{Brokers: cfg.Brokers},
 (`rabbitmq.WithRoutingKey` — своя маршрутизация), Kafka пишет записи без ключа, а порядок
 событий одного заказа даёт `kafka.WithPartitionKey`, который берёт id заказа из `Data`
 (`broker/kafka/doc.go`).
+
+## 5. Свой конверт
+
+По умолчанию сообщение уходит конвертом `broker.CloudEvents` (structured JSON). Другой формат —
+binary mode CloudEvents, конверт старой системы, голый payload с атрибутами в заголовках —
+это `broker.Envelope` клиента. Его получают через `WithEnvelope` и publisher, и консьюмеры
+одного потока:
+
+```go
+// legacy — голый payload, тип и id — в заголовках.
+type legacy struct{}
+
+func (legacy) Marshal(m broker.Message) ([]byte, map[string]string, error) {
+	return m.Data, map[string]string{
+		"content-type": m.ContentType,
+		"x-event-id":   m.ID,
+		"x-event-type": m.Type,
+	}, nil
+}
+
+func (legacy) Unmarshal(body []byte, h map[string]string) (broker.Message, error) {
+	if h["x-event-type"] == "" {
+		return broker.Message{}, errors.New("legacy: no event type")
+	}
+	return broker.Message{
+		ID: h["x-event-id"], Type: h["x-event-type"],
+		ContentType: h["content-type"], Data: body,
+	}, nil
+}
+```
+
+```go
+pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "orders"},
+	rabbitmq.WithEnvelope(legacy{}))
+cons, err := rabbitmq.NewConsumer(log, conn, rabbitmq.ConsumerConfig{Queue: "orders.payments"},
+	app.HandlePaid, rabbitmq.WithEnvelope(legacy{}))
+```
+
+Заголовки конверта адаптер кладёт поверх `Message.Headers`, поэтому trace context не теряется.
+`content-type` RabbitMQ переносит в свойство `content_type`, Kafka оставляет заголовком.
+Консьюмер получает все заголовки доставки в `Message.Headers`, а сообщение, которое конверт не
+разобрал, отвергает с предупреждением в логе. Ошибку `Marshal` адаптер возвращает как есть:
+если сообщение упаковать нельзя совсем, оберните её в `broker.Permanent`.

@@ -1,9 +1,10 @@
 // Package broker abstracts an event broker behind transport-agnostic Publisher
 // and Consumer contracts.
 //
-// Messages travel the wire as CloudEvents v1.0 structured-mode JSON; this
-// package owns that envelope so every transport (e.g. broker/rabbitmq) speaks
-// the same shape and consumers can dedupe on the CloudEvents id. The interfaces
+// Messages travel the wire packed by an Envelope, CloudEvents v1.0
+// structured-mode JSON by default, so every transport (e.g. broker/rabbitmq)
+// speaks the same shape and consumers can dedupe on the CloudEvents id. The
+// interfaces
 // here have no transport dependencies, so the same producer/consumer code can
 // ship over RabbitMQ, Kafka, NATS, or a WebSocket gateway by swapping the
 // adapter behind Publisher.
@@ -24,24 +25,31 @@
 //   - Action is the consumer's verdict: Ack (drop), Requeue (redeliver), or
 //     Discard (drop without requeue / dead-letter).
 //
-// # CloudEvents envelope
+// # Envelope
 //
-// MarshalCloudEvent serializes a Message into a CloudEvents v1.0 structured-mode
-// JSON envelope (SpecVersion is stamped automatically, ContentTypeCloudEvents is
-// the wire content type); the business payload lands under "data", or base64
-// under "data_base64" when ContentType is not JSON. Transport fields (Topic,
-// Headers) are NOT part of the envelope — the transport applies them at
-// publish time. UnmarshalCloudEvent reverses it, leaving the
-// transport fields zero for the adapter to fill from the delivery.
+// An Envelope packs a Message into the body and headers sent over the wire and
+// unpacks a delivery back. The built-in one is CloudEvents: the CloudEvents
+// v1.0 structured-mode JSON body, its context attributes at the top level and
+// the business payload under "data", or base64 under "data_base64" when
+// ContentType is not JSON, with the wire content type
+// application/cloudevents+json. Transport fields (Topic, Headers) are not part
+// of the body.
 //
-//	body, err := broker.MarshalCloudEvent(broker.Message{
-//	    Type:        "widget.created",
-//	    ContentType: "application/json",
-//	    Data:        []byte(`{"id":"w-1"}`),
-//	    Topic:       "widgets",
-//	})
+// Another format — CloudEvents binary mode, the envelope of an older system,
+// the bare payload with the attributes in headers — is an Envelope of the
+// client, set by WithEnvelope of the adapter on the publisher and on the
+// consumers of one stream alike:
 //
-//	m, err := broker.UnmarshalCloudEvent(body) // m.Topic/Headers are zero
+//	pub, err := kafka.NewPublisher(cfg, kafka.PublisherConfig{Source: "orders"},
+//	    kafka.WithEnvelope(ceBinary{}))
+//	cons, err := kafka.NewConsumer(log, cfg, kafka.ConsumerConfig{
+//	    Topic: "orders", Group: "billing",
+//	}, h, kafka.WithEnvelope(ceBinary{}))
+//
+// The adapter sends the headers of the envelope over Message.Headers and gives
+// a consumer every header of the delivery as Message.Headers, so an envelope
+// never drops the trace context; the content type travels in the header
+// content-type. A delivery the envelope rejects is discarded with a warning.
 //
 // # How a transport plugs in
 //

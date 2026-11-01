@@ -3,10 +3,11 @@
 // It is the concrete adapter for the broker package, built on
 // github.com/wagslane/go-rabbitmq (automatic reconnection and publisher confirms
 // on top of amqp091). It provides a connection manager (Conn via Dial), a
-// confirm-mode Publisher (broker.Publisher) that sends the CloudEvents body with
-// persistent delivery, and a Consumer (worker.Runnable) that decodes deliveries
-// back into broker.Messages and dispatches them to a broker.Handler, recording
-// each as a span and in the metrics.
+// confirm-mode Publisher (broker.Publisher) that sends the body of its envelope
+// (broker.CloudEvents by default) with persistent delivery, and a Consumer
+// (worker.Runnable) that unpacks deliveries back into broker.Messages and
+// dispatches them to a broker.Handler, recording each as a span and in the
+// metrics.
 //
 // A single Conn transparently reconnects and is shared by every publisher and
 // consumer in the process.
@@ -65,6 +66,13 @@
 // message that no binding matches without an error, so the event types are
 // part of the contract of the bindings.
 //
+// # Envelope
+//
+// WithEnvelope sets the broker.Envelope of a publisher and of a consumer, the
+// same on both sides of a stream. The header content-type of the envelope
+// travels in the AMQP content_type property and comes back to the consumer as
+// that header; every other header goes in the AMQP headers.
+//
 // # Tracing
 //
 // Every publish is a span "send <exchange>" with messaging.system rabbitmq and
@@ -82,13 +90,15 @@
 //   - Publisher: NewPublisher(conn, PublisherConfig, opts...); runs in
 //     confirm mode for at-least-once delivery. PublisherConfig fields: Source
 //     (required; the CloudEvents source stamped on messages that carry none),
-//     TracerProvider (nil → the global provider). Option: WithRoutingKey.
-//   - Consumer: NewConsumer(log, conn, ConsumerConfig, handler). ConsumerConfig
+//     TracerProvider (nil → the global provider). Options: WithRoutingKey,
+//     WithEnvelope.
+//   - Consumer: NewConsumer(log, conn, ConsumerConfig, handler, opts...).
+//     Option: WithEnvelope. ConsumerConfig
 //     fields: Queue (required), Exchange (declared as a durable topic
 //     exchange), RoutingKeys (default ["#"] when Exchange is set), Concurrency
 //     (default 1), Name (default Queue), Metrics (the skit_broker_* registry;
-//     nil — off), TracerProvider (nil → the global provider). A malformed
-//     envelope is discarded (nack without requeue, so a dead-letter exchange of
+//     nil — off), TracerProvider (nil → the global provider). A delivery the
+//     envelope rejects is discarded (nack without requeue, so a dead-letter exchange of
 //     the queue receives it); a panicking handler is recovered and the delivery
 //     is requeued.
 package rabbitmq

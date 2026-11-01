@@ -44,11 +44,11 @@ func TestInstrumentRecordsVerdicts(t *testing.T) {
 		verdicts(broker.Ack, broker.Requeue, broker.Discard, broker.Action(7)),
 		consume.InstrumentConfig{Consumer: "orders", Metrics: reg},
 	)
-	body := ceBody(t, "order.paid")
+	d := delivery(t, "order.paid")
 
 	got := make([]broker.Action, 0, 5)
 	for range 5 {
-		got = append(got, consume.Process(t.Context(), nil, "orders", body, nil, h))
+		got = append(got, consume.Process(t.Context(), nil, "orders", broker.CloudEvents{}, d, h))
 	}
 
 	is.Equal(got, []broker.Action{

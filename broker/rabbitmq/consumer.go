@@ -41,12 +41,13 @@ type ConsumerConfig struct {
 	TracerProvider trace.TracerProvider
 }
 
-// Consumer consumes CloudEvents messages from RabbitMQ and dispatches them to a
-// broker.Handler. It implements worker.Runnable: Start blocks until the context
+// Consumer consumes messages from RabbitMQ, unpacks them with its envelope and
+// dispatches them to a broker.Handler. It implements worker.Runnable: Start blocks until the context
 // is canceled (or Stop is called), then drains.
 type Consumer struct {
 	log     *slog.Logger
 	cfg     ConsumerConfig
+	env     broker.Envelope
 	handler broker.Handler
 	rc      *rmq.Consumer
 	once    sync.Once
@@ -57,15 +58,16 @@ type Consumer struct {
 // record in skit_broker_*; a panic of h requeues the message. Start declares
 // the topology (exchange, queue, bindings) and consumes; until then a message
 // published to the exchange has no queue to land in. Register it on a
-// worker.Group like any other Runnable.
-func NewConsumer(log *slog.Logger, conn *Conn, cfg ConsumerConfig, h broker.Handler) (*Consumer, error) {
+// worker.Group like any other Runnable. The envelope is broker.CloudEvents{}
+// unless WithEnvelope sets another.
+func NewConsumer(log *slog.Logger, conn *Conn, cfg ConsumerConfig, h broker.Handler, opts ...ConsumerOption) (*Consumer, error) {
 	if cfg.Queue == "" {
 		return nil, errors.New("rabbitmq: new consumer: queue is required")
 	}
 	cfg.Name = cmp.Or(cfg.Name, cfg.Queue)
 	cfg.Concurrency = max(cfg.Concurrency, 1)
 
-	opts := []func(*rmq.ConsumerOptions){
+	rmqOpts := []func(*rmq.ConsumerOptions){
 		rmq.WithConsumerOptionsConsumerName(cfg.Name),
 		rmq.WithConsumerOptionsQueueDurable,
 		rmq.WithConsumerOptionsConcurrency(cfg.Concurrency),
@@ -75,19 +77,19 @@ func NewConsumer(log *slog.Logger, conn *Conn, cfg ConsumerConfig, h broker.Hand
 		if len(keys) == 0 {
 			keys = []string{"#"}
 		}
-		opts = append(
-			opts,
+		rmqOpts = append(
+			rmqOpts,
 			rmq.WithConsumerOptionsExchangeName(cfg.Exchange),
 			rmq.WithConsumerOptionsExchangeKind("topic"),
 			rmq.WithConsumerOptionsExchangeDeclare,
 			rmq.WithConsumerOptionsExchangeDurable,
 		)
 		for _, k := range keys {
-			opts = append(opts, rmq.WithConsumerOptionsRoutingKey(k))
+			rmqOpts = append(rmqOpts, rmq.WithConsumerOptionsRoutingKey(k))
 		}
 	}
 
-	rc, err := rmq.NewConsumer(conn.conn, cfg.Queue, opts...)
+	rc, err := rmq.NewConsumer(conn.conn, cfg.Queue, rmqOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: new consumer: %w", err)
 	}
@@ -97,7 +99,11 @@ func NewConsumer(log *slog.Logger, conn *Conn, cfg ConsumerConfig, h broker.Hand
 		Metrics:        cfg.Metrics,
 		TracerProvider: cfg.TracerProvider,
 	})
-	return &Consumer{log: log, cfg: cfg, handler: h, rc: rc}, nil
+	c := &Consumer{log: log, cfg: cfg, env: broker.CloudEvents{}, handler: h, rc: rc}
+	for _, opt := range opts {
+		opt.applyConsumer(c)
+	}
+	return c, nil
 }
 
 // Name identifies the consumer in the supervisor and logs.
@@ -141,14 +147,16 @@ func (c *Consumer) close() {
 	c.once.Do(func() { c.rc.Close() })
 }
 
-// dispatch decodes one delivery into a broker.Message and runs the
+// dispatch unpacks one delivery into a broker.Message and runs the
 // instrumented handler under panic recovery, mapping the broker.Action back to
-// an rmq.Action. A malformed envelope is discarded (nack without requeue): requeuing it would
-// loop forever, and a dead-letter exchange of the queue receives it.
+// an rmq.Action. A delivery the envelope rejects is discarded (nack without
+// requeue): requeuing it would loop forever, and a dead-letter exchange of the
+// queue receives it.
 func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
-	action := consume.Process(ctx, c.log, c.cfg.Name, d.Body, func(m *broker.Message) {
-		m.Topic = d.Exchange
-		m.Headers = headers(d.Headers)
+	action := consume.Process(ctx, c.log, c.cfg.Name, c.env, consume.Delivery{
+		Body:    d.Body,
+		Headers: headers(d.Headers, d.ContentType),
+		Topic:   d.Exchange,
 	}, c.handler)
 	return toAction(action)
 }
@@ -165,19 +173,22 @@ func toAction(a broker.Action) rmq.Action {
 	}
 }
 
-// headers projects the header table of an AMQP delivery to
-// broker.Message.Headers, dropping non-string values (CloudEvents and trace
-// headers are strings), so the consumer span continues the trace the message
-// was created in.
-func headers(t amqp.Table) map[string]string {
-	if len(t) == 0 {
+// headers projects the header table and the content_type property of an AMQP
+// delivery to the headers the envelope reads and broker.Message.Headers,
+// dropping non-string values (envelope and trace headers are strings), so the
+// consumer span continues the trace the message was created in.
+func headers(t amqp.Table, contentType string) map[string]string {
+	if len(t) == 0 && contentType == "" {
 		return nil
 	}
-	out := make(map[string]string, len(t))
+	out := make(map[string]string, len(t)+1)
 	for k, v := range t {
 		if s, ok := v.(string); ok {
 			out[k] = s
 		}
+	}
+	if contentType != "" {
+		out[contentTypeHeader] = contentType
 	}
 	return out
 }

@@ -11,28 +11,43 @@ import (
 	"github.com/assanoff/skit/safetick"
 )
 
-// Process turns one raw delivery into a handler verdict. It:
-//
-//   - decodes body as a CloudEvents v1.0 envelope; a malformed envelope is
-//     logged at warn level and returns Discard: requeuing it would loop
-//     forever, and a dead-letter destination keeps it for a look;
-//   - applies route to fill the transport fields (Topic, Headers) onto the
-//     decoded Message, when route is non-nil;
-//   - runs h under panic recovery, returning Requeue on panic so the message is
-//     retried elsewhere rather than lost.
+// Delivery is one message as the transport received it.
+type Delivery struct {
+	Body []byte
+	// Headers are every header of the delivery, the wire content type under
+	// content-type.
+	Headers map[string]string
+	// Topic is the destination the message was delivered from.
+	Topic string
+}
+
+// Decode unpacks d with env into a Message whose Headers and Topic come from
+// the delivery.
+func Decode(env broker.Envelope, d Delivery) (broker.Message, error) {
+	m, err := env.Unmarshal(d.Body, d.Headers)
+	if err != nil {
+		return broker.Message{}, err
+	}
+	m.Headers = d.Headers
+	m.Topic = d.Topic
+	return m, nil
+}
+
+// Process turns one delivery into a handler verdict. It decodes d with env; a
+// delivery the envelope rejects is logged at warn level and returns Discard:
+// requeuing it would loop forever, and a dead-letter destination keeps it for
+// a look. It runs h under panic recovery, returning Requeue on panic so the
+// message is retried elsewhere rather than lost.
 //
 // log may be nil. The caller maps the returned Action onto its transport's ack
 // primitives.
-func Process(ctx context.Context, log *slog.Logger, name string, body []byte, route func(*broker.Message), h broker.Handler) broker.Action {
-	m, err := broker.UnmarshalCloudEvent(body)
+func Process(ctx context.Context, log *slog.Logger, name string, env broker.Envelope, d Delivery, h broker.Handler) broker.Action {
+	m, err := Decode(env, d)
 	if err != nil {
 		if log != nil {
-			log.WarnContext(ctx, "broker: malformed message, discarding", "consumer", name, "err", err, "body_size", len(body))
+			log.WarnContext(ctx, "broker: malformed message, discarding", "consumer", name, "err", err, "body_size", len(d.Body))
 		}
 		return broker.Discard
-	}
-	if route != nil {
-		route(&m)
 	}
 	return Guard(ctx, log, name, m, h)
 }

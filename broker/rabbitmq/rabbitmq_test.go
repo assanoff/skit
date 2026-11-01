@@ -23,6 +23,8 @@ import (
 // consumer gets every message it binds with its data, type and topic, and
 // records it as a span and in the metrics. The routing key is the type, or
 // what WithRoutingKey derives; a message no binding matches is dropped.
+// Another envelope works when the publisher and the consumer both take it,
+// and a consumer of CloudEvents rejects its messages.
 func TestPublishConsume(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test requires docker")
@@ -45,10 +47,7 @@ func TestPublishConsume(t *testing.T) {
 		RoutingKeys:    []string{"ping", "widget.created", "custom"},
 		Metrics:        reg,
 		TracerProvider: tp,
-	}, func(_ context.Context, m broker.Message) broker.Action {
-		got <- m
-		return broker.Ack
-	})
+	}, collect(got))
 	is.NoErr(err)
 	is.Equal(cons.Name(), "widgets.test") // the queue names the consumer
 	done := make(chan error, 1)
@@ -101,6 +100,49 @@ func TestPublishConsume(t *testing.T) {
 	err = empty.Publish(ctx, created)
 	is.True(err != nil)               // no routing key
 	is.True(!broker.IsPermanent(err)) // the function is wrong, not the message
+
+	rawGot := make(chan broker.Message, 64)
+	rawCons, err := rabbitmq.NewConsumer(slog.New(slog.DiscardHandler), conn, rabbitmq.ConsumerConfig{
+		Queue:       "widgets.raw",
+		Exchange:    "widgets",
+		RoutingKeys: []string{"ping", "widget.raw"},
+	}, collect(rawGot), rabbitmq.WithEnvelope(brokertest.Raw{}))
+	is.NoErr(err)
+	rawDone := make(chan error, 1)
+	go func() { rawDone <- rawCons.Start(ctx) }()
+	t.Cleanup(func() { <-rawDone })
+	rawPub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "test"},
+		rabbitmq.WithEnvelope(brokertest.Raw{}))
+	is.NoErr(err)
+	t.Cleanup(func() { _ = rawPub.Close() })
+	waitBound(t, rawPub, rawGot)
+
+	raw := broker.Message{
+		ID: "3", Type: "widget.raw", Topic: "widgets",
+		ContentType: "text/plain", Data: []byte("raw"),
+	}
+	is.NoErr(rawPub.Publish(ctx, raw))
+	m := receive(t, rawGot)
+	is.Equal(m.ID, raw.ID)
+	is.Equal(m.Data, raw.Data)
+	is.Equal(m.ContentType, raw.ContentType)
+	is.Equal(m.Headers["content-type"], "text/plain") // the content_type property
+
+	// The queue of the CloudEvents consumer binds custom: it gets the raw
+	// message first and must reject it, then the CloudEvents one.
+	is.NoErr(rawPub.Publish(ctx, broker.Message{ID: "4", Type: "custom", Topic: "widgets"}))
+	after := created
+	after.ID = "5"
+	is.NoErr(pub.Publish(ctx, after))
+	is.Equal(receive(t, got).ID, after.ID)
+}
+
+// collect returns a handler that sends every message to got.
+func collect(got chan<- broker.Message) broker.Handler {
+	return func(_ context.Context, m broker.Message) broker.Action {
+		got <- m
+		return broker.Ack
+	}
 }
 
 // waitBound publishes pings until one comes back: the consumer declares its

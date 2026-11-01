@@ -17,9 +17,11 @@ import (
 )
 
 // TestPublishConsume sends records through a real Kafka one by one, as the
-// outbox relay does, and reads them back with the consumer: each publish takes
-// milliseconds, not the second of the default batch timer, binary data
-// survives, and a record carries the key of WithPartitionKey.
+// queue of events does, and reads them back with the consumer: each publish
+// takes milliseconds, not the second of the default batch timer, binary data
+// survives, and a record carries the key of WithPartitionKey. Another envelope
+// works when the publisher and the consumer both take it, and a consumer of
+// CloudEvents drops its records.
 func TestPublishConsume(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test requires docker")
@@ -80,6 +82,63 @@ func TestPublishConsume(t *testing.T) {
 		}
 	}
 	is.Equal(keyOf(ctx, t, cfg.Brokers, "widgets", binary.ID), binary.ID)
+
+	rawPub, err := kafka.NewPublisher(cfg, kafka.PublisherConfig{Source: "test"},
+		kafka.WithEnvelope(brokertest.Raw{}))
+	is.NoErr(err)
+	t.Cleanup(func() { _ = rawPub.Close() })
+	raw := broker.Message{
+		ID: "raw", Type: "widget.raw", Topic: "widgets.raw",
+		ContentType: "text/plain", Data: []byte("raw"),
+	}
+	createTopic(t, rawPub, raw)
+	ce := broker.Message{ID: "ce", Type: "widget.created", Topic: "widgets.raw"}
+	is.NoErr(pub.Publish(ctx, ce))
+
+	// Each consumer handles the record of its envelope and drops the other.
+	rawGot := consume(ctx, t, cfg, "raw", kafka.WithEnvelope(brokertest.Raw{}))
+	ceGot := consume(ctx, t, cfg, "ce")
+	m := first(t, rawGot)
+	is.Equal(m.ID, raw.ID)
+	is.Equal(m.Data, raw.Data)
+	is.Equal(m.ContentType, raw.ContentType)
+	is.Equal(m.Headers["content-type"], "text/plain")
+	is.Equal(first(t, ceGot).ID, ce.ID)
+}
+
+// consume starts a consumer of the group on the topic widgets.raw and returns
+// the channel of the messages it handles.
+func consume(
+	ctx context.Context, t *testing.T, cfg kafka.Config, group string,
+	opts ...kafka.ConsumerOption,
+) <-chan broker.Message {
+	t.Helper()
+	got := make(chan broker.Message, 8)
+	h := func(_ context.Context, m broker.Message) broker.Action {
+		got <- m
+		return broker.Ack
+	}
+	ccfg := kafka.ConsumerConfig{Topic: "widgets.raw", Group: group}
+	cons, err := kafka.NewConsumer(slog.New(slog.DiscardHandler), cfg, ccfg, h, opts...)
+	if err != nil {
+		t.Fatalf("new consumer %s: %v", group, err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cons.Start(ctx) }()
+	t.Cleanup(func() { <-done })
+	return got
+}
+
+// first returns the first message of got.
+func first(t *testing.T, got <-chan broker.Message) broker.Message {
+	t.Helper()
+	select {
+	case m := <-got:
+		return m
+	case <-time.After(30 * time.Second):
+		t.Fatal("record not received")
+	}
+	return broker.Message{}
 }
 
 // keyOf reads topic from the start up to the record of the message id and
@@ -95,7 +154,7 @@ func keyOf(ctx context.Context, t *testing.T, brokers []string, topic, id string
 		if err != nil {
 			t.Fatalf("read %s: %v", id, err)
 		}
-		m, err := broker.UnmarshalCloudEvent(rec.Value)
+		m, err := broker.CloudEvents{}.Unmarshal(rec.Value, nil)
 		if err == nil && m.ID == id {
 			return string(rec.Key)
 		}

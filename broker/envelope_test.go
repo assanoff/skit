@@ -22,9 +22,12 @@ func TestCloudEventRoundTrip(t *testing.T) {
 		Headers: map[string]string{"traceparent": "abc"},
 	}
 
-	body, err := MarshalCloudEvent(in)
+	body, headers, err := CloudEvents{}.Marshal(in)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
+	}
+	if headers["content-type"] != contentTypeCloudEvents {
+		t.Errorf("content-type = %q, want %s", headers["content-type"], contentTypeCloudEvents)
 	}
 
 	// The envelope is structured-mode CloudEvents JSON.
@@ -32,8 +35,8 @@ func TestCloudEventRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatalf("envelope is not JSON: %v", err)
 	}
-	if raw["specversion"] != SpecVersion {
-		t.Errorf("specversion = %v, want %s", raw["specversion"], SpecVersion)
+	if raw["specversion"] != specVersion {
+		t.Errorf("specversion = %v, want %s", raw["specversion"], specVersion)
 	}
 	if _, ok := raw["data"]; !ok {
 		t.Error("envelope missing data field")
@@ -42,7 +45,7 @@ func TestCloudEventRoundTrip(t *testing.T) {
 		t.Error("transport field topic leaked into the envelope")
 	}
 
-	out, err := UnmarshalCloudEvent(body)
+	out, err := CloudEvents{}.Unmarshal(body, headers)
 	if err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -63,23 +66,22 @@ func TestCloudEventRoundTrip(t *testing.T) {
 }
 
 func TestMarshalRequiresType(t *testing.T) {
-	if _, err := MarshalCloudEvent(Message{Data: []byte(`{}`)}); err == nil {
-		t.Error("expected error when type is empty")
-	}
+	is := is.New(t)
+	_, _, err := CloudEvents{}.Marshal(Message{Data: []byte(`{}`)})
+	is.True(err != nil) // the type is required
 }
 
 func TestUnmarshalRejectsMissingFields(t *testing.T) {
-	// Valid JSON but missing required envelope fields.
-	if _, err := UnmarshalCloudEvent([]byte(`{"data":{}}`)); err == nil {
-		t.Error("expected error for envelope missing specversion/id/type")
-	}
-	if _, err := UnmarshalCloudEvent([]byte(`not json`)); err == nil {
-		t.Error("expected error for non-JSON body")
-	}
+	is := is.New(t)
+	var ce CloudEvents
+	_, err := ce.Unmarshal([]byte(`{"data":{}}`), nil)
+	is.True(err != nil) // valid JSON without specversion, id and type
+	_, err = ce.Unmarshal([]byte(`not json`), nil)
+	is.True(err != nil)
 }
 
 func TestMarshalEmptyDataIsNull(t *testing.T) {
-	body, err := MarshalCloudEvent(Message{Type: "x"})
+	body, _, err := CloudEvents{}.Marshal(Message{Type: "x"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -96,7 +98,7 @@ func TestCloudEventBinaryData(t *testing.T) {
 	is := is.New(t)
 	data := []byte{0x08, 0x03, 0xff, 0x00}
 
-	body, err := MarshalCloudEvent(Message{
+	body, _, err := CloudEvents{}.Marshal(Message{
 		ID: "1", Type: "x", Source: "s",
 		ContentType: "application/protobuf",
 		Data:        data,
@@ -108,7 +110,7 @@ func TestCloudEventBinaryData(t *testing.T) {
 	_, ok := raw["data"]
 	is.True(!ok) // data and data_base64 never come together
 
-	out, err := UnmarshalCloudEvent(body)
+	out, err := CloudEvents{}.Unmarshal(body, nil)
 	is.NoErr(err)
 	is.Equal(out.Data, data)
 	is.Equal(out.ContentType, "application/protobuf")
@@ -117,7 +119,7 @@ func TestCloudEventBinaryData(t *testing.T) {
 func TestCloudEventJSONTypes(t *testing.T) {
 	is := is.New(t)
 	for _, ct := range []string{"", "application/json", "application/json; charset=utf-8", "application/vnd.x+json"} {
-		body, err := MarshalCloudEvent(Message{Type: "x", ContentType: ct, Data: []byte(`{"a":1}`)})
+		body, _, err := CloudEvents{}.Marshal(Message{Type: "x", ContentType: ct, Data: []byte(`{"a":1}`)})
 		is.NoErr(err)
 		var raw map[string]json.RawMessage
 		is.NoErr(json.Unmarshal(body, &raw))
@@ -128,10 +130,10 @@ func TestCloudEventJSONTypes(t *testing.T) {
 func TestMarshalErrorsArePermanent(t *testing.T) {
 	is := is.New(t)
 
-	_, err := MarshalCloudEvent(Message{Data: []byte(`{}`)})
+	_, _, err := CloudEvents{}.Marshal(Message{Data: []byte(`{}`)})
 	is.True(IsPermanent(err)) // no type
 
-	_, err = MarshalCloudEvent(Message{Type: "x", ContentType: "application/json", Data: []byte(`{bad`)})
+	_, _, err = CloudEvents{}.Marshal(Message{Type: "x", ContentType: "application/json", Data: []byte(`{bad`)})
 	is.True(err != nil)
 	is.True(IsPermanent(err)) // the data is not the JSON its type claims
 }

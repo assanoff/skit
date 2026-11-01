@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 	"uuid"
 
@@ -19,17 +20,23 @@ import (
 // scope names the tracer of this package.
 const scope = "github.com/assanoff/skit/broker/rabbitmq"
 
+// contentTypeHeader is the header an Envelope puts the wire content type in;
+// AMQP carries it in the content_type property.
+const contentTypeHeader = "content-type"
+
 // typeKey routes a message by its event type, the default routing key.
 func typeKey(m broker.Message) string { return m.Type }
 
-// Publisher publishes broker.Messages to RabbitMQ as CloudEvents v1.0
-// structured-mode JSON. It runs in confirm mode and waits for the broker's
-// publisher confirmation per publish, giving at-least-once delivery: Publish
-// returns nil only after the broker has durably accepted the message.
+// Publisher publishes broker.Messages to RabbitMQ packed by its envelope,
+// CloudEvents v1.0 structured-mode JSON by default. It runs in confirm mode
+// and waits for the broker's publisher confirmation per publish, giving
+// at-least-once delivery: Publish returns nil only after the broker has
+// durably accepted the message.
 type Publisher struct {
 	pub        *rmq.Publisher
 	source     string
 	routingKey func(m broker.Message) string
+	env        broker.Envelope
 	tracer     trace.Tracer
 }
 
@@ -46,18 +53,15 @@ type PublisherConfig struct {
 	TracerProvider trace.TracerProvider
 }
 
-// PublisherOption customizes a Publisher.
-type PublisherOption func(*Publisher)
-
 // WithRoutingKey sets how the routing key of a message is derived; the default
 // is its Type. The exchange is always the message's Topic. A key of "" fails
 // the publish.
 func WithRoutingKey(fn func(m broker.Message) string) PublisherOption {
-	return func(p *Publisher) {
+	return publisherFunc(func(p *Publisher) {
 		if fn != nil {
 			p.routingKey = fn
 		}
-	}
+	})
 }
 
 // NewPublisher builds a confirm-mode publisher.
@@ -77,17 +81,18 @@ func NewPublisher(conn *Conn, cfg PublisherConfig, opts ...PublisherOption) (*Pu
 		pub:        p,
 		source:     cfg.Source,
 		routingKey: typeKey,
+		env:        broker.CloudEvents{},
 		tracer:     otel.Tracer(cfg.TracerProvider, scope),
 	}
 	for _, opt := range opts {
-		opt(pub)
+		opt.applyPublisher(pub)
 	}
 	return pub, nil
 }
 
 // Publish sends m to the exchange m.Topic under its routing key as a
-// persistent CloudEvents message, then blocks on the broker's publisher
-// confirmation. The span "send <exchange>" covers the send and the
+// persistent message packed by the envelope, then blocks on the broker's
+// publisher confirmation. The span "send <exchange>" covers the send and the
 // confirmation; without a trace context in m.Headers it is the creation
 // context of the message and goes out in its headers.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
@@ -121,26 +126,26 @@ func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	return err
 }
 
-// send publishes m to the exchange m.Topic under routingKey and waits for the
-// broker's confirmation.
+// send packs m with the envelope, publishes it to the exchange m.Topic under
+// routingKey and waits for the broker's confirmation. The headers of the
+// envelope go over the headers of m.
 func (p *Publisher) send(ctx context.Context, m broker.Message, routingKey string) error {
-	body, err := broker.MarshalCloudEvent(m)
+	body, envHeaders, err := p.env.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("rabbitmq publish: %w", err)
 	}
-
-	headers := rmq.Table{}
-	for k, v := range m.Headers {
-		headers[k] = v
-	}
+	wire := make(map[string]string, len(m.Headers)+len(envHeaders))
+	maps.Copy(wire, m.Headers)
+	maps.Copy(wire, envHeaders)
+	table, contentType := amqpHeaders(wire)
 
 	confirms, err := p.pub.PublishWithDeferredConfirmWithContext(
 		ctx, body,
 		[]string{routingKey},
 		rmq.WithPublishOptionsExchange(m.Topic),
-		rmq.WithPublishOptionsContentType(broker.ContentTypeCloudEvents),
+		rmq.WithPublishOptionsContentType(contentType),
 		rmq.WithPublishOptionsPersistentDelivery,
-		rmq.WithPublishOptionsHeaders(headers),
+		rmq.WithPublishOptionsHeaders(table),
 		rmq.WithPublishOptionsMessageID(m.ID),
 		rmq.WithPublishOptionsTimestamp(m.Time),
 		rmq.WithPublishOptionsType(m.Type),
@@ -164,6 +169,17 @@ func (p *Publisher) send(ctx context.Context, m broker.Message, routingKey strin
 		return errors.New("rabbitmq publish: broker nacked the message")
 	}
 	return nil
+}
+
+// amqpHeaders splits the wire headers of a message into the AMQP header table
+// and the content_type property, which carries the header content-type.
+func amqpHeaders(wire map[string]string) (rmq.Table, string) {
+	table := make(rmq.Table, len(wire))
+	for k, v := range wire {
+		table[k] = v
+	}
+	delete(table, contentTypeHeader)
+	return table, wire[contentTypeHeader]
 }
 
 // Close closes the underlying publisher.
