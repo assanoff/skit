@@ -15,7 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/kafka"
 	"github.com/assanoff/skit/cron"
 	"github.com/assanoff/skit/dbx/pg"
 	"github.com/assanoff/skit/grpcserver"
@@ -47,7 +47,10 @@ func presets(t *testing.T) *metrics.Metrics {
 	if _, err := queue.Workers(log, &queue.PG{}, queue.Config{Queue: "q"}, ignore, queue.WithMetrics(m)); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	broker.Instrument(nil, broker.InstrumentConfig{Metrics: m})
+	kcfg := kafka.ConsumerConfig{Topic: "orders", Group: "billing", Metrics: m}
+	if _, err := kafka.NewConsumer(log, kafka.Config{Brokers: []string{"kafka"}}, kcfg, nil); err != nil {
+		t.Fatalf("kafka: %v", err)
+	}
 	s := cron.New(log, cron.Config{Metrics: m})
 	if err := s.Add("@hourly", "report", func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("cron: %v", err)

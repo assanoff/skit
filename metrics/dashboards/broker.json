@@ -1,7 +1,7 @@
 {
   "uid": "skit-broker",
   "title": "skit / broker",
-  "description": "Message consumers wrapped in broker.Instrument.",
+  "description": "Message consumers of the broker adapters.",
   "tags": [
     "skit"
   ],

@@ -101,10 +101,10 @@ func TestNewPublisherValidates(t *testing.T) {
 }
 
 func TestHeadersRoundTrip(t *testing.T) {
-	if Headers(nil) != nil {
+	if headers(nil) != nil {
 		t.Error("no headers should map to nil")
 	}
-	got := Headers([]kgo.Header{{Key: "traceparent", Value: []byte("00-abc")}, {Key: "x", Value: []byte("y")}})
+	got := headers([]kgo.Header{{Key: "traceparent", Value: []byte("00-abc")}, {Key: "x", Value: []byte("y")}})
 	if got["traceparent"] != "00-abc" || got["x"] != "y" {
 		t.Errorf("headers round-trip wrong: %v", got)
 	}

@@ -1,7 +1,7 @@
 # broker + RabbitMQ: импорты и использование
 
-`broker` — интерфейсы, CloudEvents, `Guard`/`Process`; `broker/rabbitmq` и `broker/kafka` —
-адаптеры. Друг друга адаптеры не импортируют.
+`broker` — интерфейсы и CloudEvents; `broker/rabbitmq` и `broker/kafka` — адаптеры:
+publisher и консьюмер, который сам пишет спан и метрики. Друг друга адаптеры не импортируют.
 
 ## 1. Импорты
 

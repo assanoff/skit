@@ -1,4 +1,4 @@
-package broker
+package consume
 
 import (
 	"cmp"
@@ -10,6 +10,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/internal/brokertrace"
 	"github.com/assanoff/skit/internal/prom"
 	"github.com/assanoff/skit/otel"
@@ -21,7 +22,8 @@ const (
 	metricsSubsystem = "broker"
 )
 
-// scope names the tracer of this package.
+// scope names the tracer of the consumers; it stays the one of the broker
+// package, where the consumer span is documented.
 const scope = "github.com/assanoff/skit/broker"
 
 // InstrumentConfig configures Instrument.
@@ -45,22 +47,22 @@ type InstrumentConfig struct {
 //
 // action is "ack", "requeue", "discard", or "panic" when h panics; the panic
 // goes on to the Guard of the consumer, which requeues the message. A verdict
-// outside the three is recorded as "ack", as the adapters treat it. Wrap the
-// handler you pass to an adapter or to Process, so a retried message is
-// recorded on every attempt.
+// outside the three is recorded as "ack", as the adapters treat it. The
+// adapters wrap the handler they pass to Process or Guard, so a retried
+// message is recorded on every attempt.
 //
 // The span is a CONSUMER span "process <topic>". The context the message was
 // created in, carried in its headers, is both the parent and the link of the
 // span, so a request, its event and the handling of the event are one trace
 // under one sampling decision. A requeue, a discard and a panic mark the span
 // failed with that error.type.
-func Instrument(h Handler, cfg InstrumentConfig) Handler {
+func Instrument(h broker.Handler, cfg InstrumentConfig) broker.Handler {
 	m := newConsumerMetrics(cfg.Metrics, cmp.Or(cfg.Consumer, "default"))
 	tracer := otel.Tracer(cfg.TracerProvider, scope)
-	return func(ctx context.Context, msg Message) Action {
+	return func(ctx context.Context, msg broker.Message) broker.Action {
 		ctx, span := startProcess(ctx, tracer, cfg.System, msg)
 		start := time.Now()
-		action := Requeue
+		action := broker.Requeue
 		// finished stays false when h panics: the deferred record then counts a
 		// panic while the panic goes on to the Guard of the consumer.
 		finished := false
@@ -76,7 +78,7 @@ func Instrument(h Handler, cfg InstrumentConfig) Handler {
 
 // startProcess opens the consumer span of msg under the context msg was created
 // in, linked to it as well; without one the span continues ctx.
-func startProcess(ctx context.Context, tracer trace.Tracer, system string, msg Message) (context.Context, trace.Span) {
+func startProcess(ctx context.Context, tracer trace.Tracer, system string, msg broker.Message) (context.Context, trace.Span) {
 	name := "process"
 	attrs := []attribute.KeyValue{
 		semconv.MessagingOperationName("process"),
@@ -100,13 +102,13 @@ func startProcess(ctx context.Context, tracer trace.Tracer, system string, msg M
 
 // endProcess ends span: a handler that did not finish panicked; a requeue or a
 // discard did not process the message.
-func endProcess(span trace.Span, action Action, finished bool) {
+func endProcess(span trace.Span, action broker.Action, finished bool) {
 	switch {
 	case !finished:
 		otel.SetError(span, verdictError("panic"))
-	case action == Requeue:
+	case action == broker.Requeue:
 		otel.SetError(span, verdictError("requeue"))
-	case action == Discard:
+	case action == broker.Discard:
 		otel.SetError(span, verdictError("discard"))
 	}
 	span.End()
@@ -156,14 +158,14 @@ func newConsumerMetrics(reg prometheus.Registerer, name string) *consumerMetrics
 
 // record records a message handled in d: a panic when the handler did not
 // finish, else its action.
-func (m *consumerMetrics) record(ctx context.Context, d time.Duration, action Action, finished bool) {
+func (m *consumerMetrics) record(ctx context.Context, d time.Duration, action broker.Action, finished bool) {
 	prom.ObserveDuration(ctx, m.duration, d)
 	switch {
 	case !finished:
 		m.panicked.Inc()
-	case action == Requeue:
+	case action == broker.Requeue:
 		m.requeue.Inc()
-	case action == Discard:
+	case action == broker.Discard:
 		m.discard.Inc()
 	default:
 		m.ack.Inc()

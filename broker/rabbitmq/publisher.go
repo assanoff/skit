@@ -66,7 +66,7 @@ func NewPublisher(conn *Conn, cfg PublisherConfig, opts ...PublisherOption) (*Pu
 		return nil, errors.New("rabbitmq: new publisher: source is required")
 	}
 	p, err := rmq.NewPublisher(
-		conn.Conn,
+		conn.conn,
 		rmq.WithPublisherOptionsLogging,
 		rmq.WithPublisherOptionsConfirm,
 	)

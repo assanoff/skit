@@ -41,8 +41,8 @@ func TestBrokerDown(t *testing.T) {
 	q := queue.NewPG(log, pg.DB)
 	is.NoErr(q.EnsureSchema(ctx))
 
-	rmq, url := brokertest.RabbitMQ(ctx, t)
-	conn, err := rabbitmq.Dial(rabbitmq.Config{URL: url})
+	rmq, rcfg := brokertest.RabbitMQ(ctx, t)
+	conn, err := rabbitmq.Dial(rcfg)
 	is.NoErr(err)
 	t.Cleanup(func() { _ = conn.Close() })
 	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "test"})

@@ -1,4 +1,4 @@
-package broker_test
+package consume_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/internal/consume"
 )
 
 // verdicts returns a handler that returns actions one by one and panics after
@@ -39,15 +40,15 @@ skit_broker_consumed_total{action="requeue",consumer="orders"} 1
 func TestInstrumentRecordsVerdicts(t *testing.T) {
 	is := is.New(t)
 	reg := prometheus.NewRegistry()
-	h := broker.Instrument(
+	h := consume.Instrument(
 		verdicts(broker.Ack, broker.Requeue, broker.Discard, broker.Action(7)),
-		broker.InstrumentConfig{Consumer: "orders", Metrics: reg},
+		consume.InstrumentConfig{Consumer: "orders", Metrics: reg},
 	)
 	body := ceBody(t, "order.paid")
 
 	got := make([]broker.Action, 0, 5)
 	for range 5 {
-		got = append(got, broker.Process(t.Context(), nil, "orders", body, nil, h))
+		got = append(got, consume.Process(t.Context(), nil, "orders", body, nil, h))
 	}
 
 	is.Equal(got, []broker.Action{
@@ -64,7 +65,7 @@ func TestInstrumentDefaultConsumer(t *testing.T) {
 	is := is.New(t)
 	reg := prometheus.NewRegistry()
 
-	broker.Instrument(verdicts(), broker.InstrumentConfig{Metrics: reg})
+	consume.Instrument(verdicts(), consume.InstrumentConfig{Metrics: reg})
 
 	want := `
 # HELP skit_broker_consumed_total Messages handled, by consumer and action: ack, requeue, discard or panic.

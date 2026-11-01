@@ -14,22 +14,33 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcrabbitmq "github.com/testcontainers/testcontainers-go/modules/rabbitmq"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/assanoff/skit/broker/rabbitmq"
 )
 
-// RabbitMQ starts RabbitMQ and returns its container and AMQP URL. The
-// container is removed when the test ends.
-func RabbitMQ(ctx context.Context, tb testing.TB) (testcontainers.Container, string) {
+// RabbitMQ starts RabbitMQ and returns its container and the config to dial
+// it with. The container is removed when the test ends.
+func RabbitMQ(ctx context.Context, tb testing.TB) (testcontainers.Container, rabbitmq.Config) {
 	tb.Helper()
 	c, err := tcrabbitmq.Run(ctx, "rabbitmq:3.13-management-alpine")
 	testcontainers.CleanupContainer(tb, c)
 	if err != nil {
 		tb.Fatalf("brokertest: start rabbitmq: %v", err)
 	}
-	url, err := c.AmqpURL(ctx)
+	host, err := c.Host(ctx)
 	if err != nil {
-		tb.Fatalf("brokertest: rabbitmq url: %v", err)
+		tb.Fatalf("brokertest: rabbitmq host: %v", err)
 	}
-	return c, url
+	port, err := c.MappedPort(ctx, tcrabbitmq.DefaultAMQPPort)
+	if err != nil {
+		tb.Fatalf("brokertest: rabbitmq port: %v", err)
+	}
+	return c, rabbitmq.Config{
+		User:     c.AdminUsername,
+		Password: c.AdminPassword,
+		Host:     host,
+		Port:     port.Port(),
+	}
 }
 
 // Kafka starts a single-node Kafka in KRaft mode and returns its bootstrap

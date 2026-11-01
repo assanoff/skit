@@ -152,7 +152,7 @@ type addRESTOpts struct {
 	Name    string // raw entity name
 	NoTests bool   // skip generating tests
 	Claim   bool   // worker: --claim (queue-backed) variant instead of periodic tick
-	Broker  string // consumer: transport for the generated wiring (rmq|kafka|nats)
+	Broker  string // consumer: transport for the generated wiring (rmq|kafka)
 	Core    string // event: the domain (core/<core>) the event type lives in
 }
 
@@ -436,7 +436,7 @@ const (
 type addConsumerCommand struct {
 	Dir     string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
 	Module  string `long:"module" description:"module path (default: read from go.mod)"`
-	Broker  string `long:"broker" choice:"rmq" choice:"kafka" choice:"nats" default:"rmq" description:"transport for the generated wiring (rmq and kafka have SDK adapters; nats is handler-only for now)"`
+	Broker  string `long:"broker" choice:"rmq" choice:"kafka" default:"rmq" description:"transport for the generated wiring"`
 	NoTests bool   `long:"no-tests" description:"skip generating the handler test"`
 	Args    struct {
 		Name string `positional-arg-name:"name" description:"consumer name, e.g. order or order-refund"`
@@ -496,8 +496,7 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 		{filepath.Join(dir, "internal", "app", "config", "consumer.go"), "templates/consumer/config.go.tmpl"},
 	}
 	// The handler is broker-agnostic; the transport wiring is a separate file so a
-	// broker swap replaces one file. RabbitMQ and Kafka have SDK adapters; nats
-	// does not yet, so its transport is wired by hand.
+	// broker swap replaces one file.
 	switch transport {
 	case brokerRMQ:
 		files = append(files, struct{ dest, tmpl string }{
@@ -507,6 +506,8 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 		files = append(files, struct{ dest, tmpl string }{
 			filepath.Join(consumerDir, pkg+"_kafka.go"), "templates/consumer/kafka.go.tmpl",
 		})
+	default:
+		return fmt.Errorf("unknown broker %q: want %s or %s", transport, brokerRMQ, brokerKafka)
 	}
 	if !opts.NoTests {
 		files = append(files, struct{ dest, tmpl string }{
@@ -525,10 +526,9 @@ func addConsumer(out io.Writer, opts addRESTOpts) error {
 }
 
 // printConsumerNextSteps prints the config group and broker wiring a developer
-// adds by hand — app-specific and not safe to generate blindly. For rmq the
-// transport file (<pkg>_rmq.go) is generated, so wiring is a single Runnable
-// call; kafka/nats have no SDK adapter yet, so the handler is generated but the
-// transport must be wired by hand.
+// adds by hand — app-specific and not safe to generate blindly. The transport
+// file (<pkg>_rmq.go or <pkg>_kafka.go) builds the consumer, so the wiring is a
+// single Runnable call.
 func printConsumerNextSteps(out io.Writer, d restData, transport string) {
 	if transport == brokerRMQ {
 		fmt.Fprintf(out, `
@@ -560,8 +560,7 @@ the transport lives in %[1]s_rmq.go. Next:
 		return
 	}
 
-	if transport == brokerKafka {
-		fmt.Fprintf(out, `
+	fmt.Fprintf(out, `
 Scaffolded the %[1]q consumer (Kafka). The handler (%[1]s.go) is broker-agnostic;
 the transport lives in %[1]s_kafka.go. Next:
 
@@ -584,25 +583,6 @@ the transport lives in %[1]s_kafka.go. Next:
 
 4. go test ./internal/app/consumers/%[1]s/...
 `, d.Pkg, d.Type, d.UpperSnake, d.Module)
-		return
-	}
-
-	// nats (or any transport without an SDK adapter): handler generated, wire by hand.
-	fmt.Fprintf(out, `
-Scaffolded the %[1]q consumer handler (broker-agnostic). NOTE: skit has no %[5]s
-adapter yet — use rmq or kafka. The handler (%[1]s.go) and config are ready; wire
-the transport by hand once the adapter lands (mirror the rmq/kafka case: map
-ConsumerOpts onto the ConsumerConfig of the adapter and hand it
-%[1]s.New(d.Logger).Handle).
-
-1. go mod tidy
-
-2. Add a config group to ServerOpts (internal/app/config/opts.go):
-
-   %[2]sConsumer ConsumerOpts `+"`"+`group:"%[1]s-consumer" namespace:"consumer-%[1]s" env-namespace:"CONSUMER_%[3]s"`+"`"+`
-
-3. go test ./internal/app/consumers/%[1]s/...
-`, d.Pkg, d.Type, d.UpperSnake, d.Module, transport)
 }
 
 // addWorkerCommand scaffolds a background worker: a periodic tick loop by

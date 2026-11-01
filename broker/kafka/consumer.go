@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/internal/consume"
 )
 
 // maxRetries bounds how many times a broker.Requeue verdict retries the same
@@ -74,7 +75,7 @@ func NewConsumer(log *slog.Logger, cfg Config, ccfg ConsumerConfig, h broker.Han
 	}
 	ccfg.Name = cmp.Or(ccfg.Name, ccfg.Group)
 	ccfg.Concurrency = max(ccfg.Concurrency, 1)
-	h = broker.Instrument(h, broker.InstrumentConfig{
+	h = consume.Instrument(h, consume.InstrumentConfig{
 		Consumer:       ccfg.Name,
 		System:         "kafka",
 		Metrics:        ccfg.Metrics,
@@ -173,7 +174,7 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 		return
 	}
 	m.Topic = msg.Topic
-	m.Headers = Headers(msg.Headers)
+	m.Headers = headers(msg.Headers)
 
 	for attempt := 0; ; attempt++ {
 		switch c.dispatch(ctx, m) {
@@ -196,11 +197,10 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	}
 }
 
-// dispatch runs the instrumented handler under panic recovery (via
-// broker.Guard), defaulting to Requeue on panic so the record is retried rather
-// than silently dropped.
+// dispatch runs the instrumented handler under panic recovery, defaulting to
+// Requeue on panic so the record is retried rather than silently dropped.
 func (c *Consumer) dispatch(ctx context.Context, m broker.Message) broker.Action {
-	return broker.Guard(ctx, c.log, c.cfg.Name, m, c.handler)
+	return consume.Guard(ctx, c.log, c.cfg.Name, m, c.handler)
 }
 
 func (c *Consumer) commit(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
@@ -209,10 +209,9 @@ func (c *Consumer) commit(ctx context.Context, r *kgo.Reader, msg kgo.Message) {
 	}
 }
 
-// Headers maps the headers of a Kafka record to broker.Message.Headers. A
-// consume loop of your own sets it on the message, so broker.Instrument
-// continues the trace the message was created in.
-func Headers(hs []kgo.Header) map[string]string {
+// headers maps the headers of a Kafka record to broker.Message.Headers, so the
+// consumer span continues the trace the message was created in.
+func headers(hs []kgo.Header) map[string]string {
 	if len(hs) == 0 {
 		return nil
 	}

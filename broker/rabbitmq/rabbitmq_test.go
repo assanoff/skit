@@ -9,7 +9,6 @@ import (
 	"github.com/matryer/is"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
-	rmq "github.com/wagslane/go-rabbitmq"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -19,13 +18,6 @@ import (
 	"github.com/assanoff/skit/broker/rabbitmq"
 	"github.com/assanoff/skit/internal/brokertest"
 )
-
-func TestToAction(t *testing.T) {
-	is := is.New(t)
-	is.Equal(rabbitmq.ToAction(broker.Ack), rmq.Ack)
-	is.Equal(rabbitmq.ToAction(broker.Requeue), rmq.NackRequeue)
-	is.Equal(rabbitmq.ToAction(broker.Discard), rmq.NackDiscard)
-}
 
 // TestPublishConsume sends JSON and binary data through a real RabbitMQ: the
 // consumer gets every message it binds with its data, type and topic, and
@@ -38,8 +30,8 @@ func TestPublishConsume(t *testing.T) {
 
 	is := is.New(t)
 	ctx := t.Context()
-	_, url := brokertest.RabbitMQ(ctx, t)
-	conn, err := rabbitmq.Dial(rabbitmq.Config{URL: url})
+	_, cfg := brokertest.RabbitMQ(ctx, t)
+	conn, err := rabbitmq.Dial(cfg)
 	is.NoErr(err)
 	t.Cleanup(func() { _ = conn.Close() })
 

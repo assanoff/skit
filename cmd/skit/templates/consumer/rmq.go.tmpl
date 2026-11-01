@@ -1,109 +1,28 @@
 package {{.Pkg}}
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
-	"sync"
-
 	"github.com/prometheus/client_golang/prometheus"
-	rmq "github.com/wagslane/go-rabbitmq"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/rabbitmq"
-	"github.com/assanoff/skit/worker"
 
 	"{{.Module}}/internal/app/config"
 )
 
-// rmqRunnable is the RabbitMQ consumer for this handler, generated into the
-// service so you own the topology and the consume loop. skit supplies only the
-// infrastructure: the managed connection (rabbitmq.Conn), the
-// decode+panic-guard+verdict primitive (broker.Process), and the verdict→AMQP
-// mapping (rabbitmq.ToAction), and the handler metrics and span
-// (broker.Instrument). Edit
-// the exchange kind, bindings, or concurrency freely — or replace the loop
-// wholesale; Handle in {{.Pkg}}.go stays untouched.
-type rmqRunnable struct {
-	log  *slog.Logger
-	rc   *rmq.Consumer
-	h    broker.Handler
-	name string
-	once sync.Once
-}
-
-// Runnable declares the queue/exchange/bindings from config and returns the
-// worker.Runnable to register on the worker group. Every message is recorded in
-// skit_broker_* on reg (a nil reg turns the metrics off) and as a span on tp,
-// in the trace the message was created in.
-func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts, reg prometheus.Registerer, tp trace.TracerProvider) (worker.Runnable, error) {
-	name := "{{.Pkg}}-consumer"
-	concurrency := opts.Concurrency
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-	keys := opts.Filters
-	if len(keys) == 0 {
-		keys = []string{"#"} // bind to everything on the exchange by default
-	}
-
-	rmqOpts := make([]func(*rmq.ConsumerOptions), 0, 7+len(keys))
-	rmqOpts = append(rmqOpts,
-		rmq.WithConsumerOptionsConsumerName(name),
-		rmq.WithConsumerOptionsQueueDurable,
-		rmq.WithConsumerOptionsConcurrency(concurrency),
-		rmq.WithConsumerOptionsExchangeName(opts.Topic),
-		rmq.WithConsumerOptionsExchangeKind("topic"),
-		rmq.WithConsumerOptionsExchangeDeclare,
-		rmq.WithConsumerOptionsExchangeDurable,
-	)
-	for _, k := range keys {
-		rmqOpts = append(rmqOpts, rmq.WithConsumerOptionsRoutingKey(k))
-	}
-
-	rc, err := rmq.NewConsumer(conn.Conn, opts.Group, rmqOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("%s: new rabbitmq consumer: %w", name, err)
-	}
-	h := broker.Instrument(c.Handle, broker.InstrumentConfig{
-		Consumer:       name,
-		System:         "rabbitmq",
+// Runnable builds the RabbitMQ consumer of Handle from config: the queue
+// opts.Group bound to the exchange opts.Topic by the routing keys opts.Filters
+// (every key when none are given). Register it on the worker group. Every
+// message is recorded in skit_broker_* on reg (a nil reg turns the metrics off)
+// and as a span on tp, in the trace the message was created in. A broker swap
+// replaces this file; Handle in {{.Pkg}}.go stays untouched.
+func (c *Consumer) Runnable(conn *rabbitmq.Conn, opts config.ConsumerOpts, reg prometheus.Registerer, tp trace.TracerProvider) (*rabbitmq.Consumer, error) {
+	return rabbitmq.NewConsumer(c.log, conn, rabbitmq.ConsumerConfig{
+		Queue:          opts.Group,
+		Exchange:       opts.Topic,
+		RoutingKeys:    opts.Filters,
+		Concurrency:    opts.Concurrency,
+		Name:           "{{.Pkg}}-consumer",
 		Metrics:        reg,
 		TracerProvider: tp,
-	})
-	return &rmqRunnable{log: c.log, rc: rc, h: h, name: name}, nil
+	}, c.Handle)
 }
-
-// Name implements worker.Runnable.
-func (r *rmqRunnable) Name() string { return r.name }
-
-// Start consumes until ctx is canceled (or Stop closes the consumer). Run blocks
-// with automatic reconnection; a watcher goroutine closes it on cancel.
-func (r *rmqRunnable) Start(ctx context.Context) error {
-	go func() {
-		<-ctx.Done()
-		r.close()
-	}()
-
-	r.log.InfoContext(ctx, "rabbitmq consumer started", "consumer", r.name)
-	err := r.rc.Run(func(d rmq.Delivery) rmq.Action {
-		action := broker.Process(ctx, r.log, r.name, d.Body, func(m *broker.Message) {
-			m.Topic = d.Exchange
-			m.Headers = rabbitmq.Headers(d.Headers)
-		}, r.h)
-		return rabbitmq.ToAction(action)
-	})
-	if err != nil && ctx.Err() == nil {
-		return fmt.Errorf("%s: consume: %w", r.name, err) // a ctx shutdown is graceful
-	}
-	return nil
-}
-
-// Stop implements worker.Runnable.
-func (r *rmqRunnable) Stop(context.Context) error {
-	r.close()
-	return nil
-}
-
-func (r *rmqRunnable) close() { r.once.Do(func() { r.rc.Close() }) }

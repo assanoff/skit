@@ -238,7 +238,7 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 	}
 
 	// The consumer handler is broker-agnostic: it depends on skit/broker and must
-	// NOT name a concrete transport (rabbitmq/kafka/nats) — that is a wiring choice.
+	// NOT name a concrete transport (rabbitmq/kafka) — that is a wiring choice.
 	handler := readFile(t, filepath.Join(dir, "internal/app/consumers/orderrefund/orderrefund.go"))
 	if !strings.Contains(handler, `"github.com/assanoff/skit/broker"`) {
 		t.Errorf("consumer should depend on skit/broker:\n%s", handler)
@@ -253,13 +253,12 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 	}
 
 	// The transport lives in its own file (rmq here) so a broker swap replaces one
-	// file; that file is where the concrete adapter is named.
-	// The transport file owns the full consume loop in the service, assembled from
-	// skit primitives (broker.Process + rabbitmq.ToAction) over the raw client.
+	// file; that file is where the concrete adapter is named. It maps the config
+	// onto the consumer of the adapter, which runs the loop.
 	rmq := readFile(t, filepath.Join(dir, "internal/app/consumers/orderrefund/orderrefund_rmq.go"))
-	for _, want := range []string{"broker.Process(", "rabbitmq.ToAction(", "rmq.NewConsumer(", "func (r *rmqRunnable) Start("} {
+	for _, want := range []string{"rabbitmq.NewConsumer(", "Queue:          opts.Group", "c.Handle)"} {
 		if !strings.Contains(rmq, want) {
-			t.Errorf("rmq transport file missing %q (expected a full in-service loop):\n%s", want, rmq)
+			t.Errorf("rmq transport file missing %q:\n%s", want, rmq)
 		}
 	}
 
@@ -273,25 +272,20 @@ func TestAddConsumerGeneratesBrokerAgnosticModule(t *testing.T) {
 		t.Errorf("kafka consumer must not emit an rmq transport file (stat err = %v)", err)
 	}
 	kfk := readFile(t, filepath.Join(kdir, "internal/app/consumers/payment/payment_kafka.go"))
-	for _, want := range []string{"broker.Process(", "kgo.NewReader(", "func (r *kafkaRunnable) Start("} {
+	for _, want := range []string{"kafka.NewConsumer(", "Group:          opts.Group", "c.Handle)"} {
 		if !strings.Contains(kfk, want) {
-			t.Errorf("kafka transport file missing %q (expected a full in-service loop):\n%s", want, kfk)
+			t.Errorf("kafka transport file missing %q:\n%s", want, kfk)
 		}
 	}
 
-	// --broker nats has no SDK adapter yet: handler generated, no transport file.
+	// A broker without an adapter is refused before anything is written.
 	ndir := t.TempDir()
 	writeGoMod(t, ndir, "github.com/me/svc")
-	if err := addConsumer(&bytes.Buffer{}, addRESTOpts{Dir: ndir, Name: "ship", Broker: "nats"}); err != nil {
-		t.Fatalf("addConsumer nats: %v", err)
+	if err := addConsumer(&bytes.Buffer{}, addRESTOpts{Dir: ndir, Name: "ship", Broker: "nats"}); err == nil {
+		t.Error("addConsumer nats: want an error, there is no adapter")
 	}
-	for _, f := range []string{"ship_rmq.go", "ship_kafka.go"} {
-		if _, err := os.Stat(filepath.Join(ndir, "internal/app/consumers/ship/"+f)); !os.IsNotExist(err) {
-			t.Errorf("nats consumer must not emit %s (no adapter yet)", f)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(ndir, "internal/app/consumers/ship/ship.go")); err != nil {
-		t.Errorf("nats consumer should still generate the agnostic handler: %v", err)
+	if _, err := os.Stat(filepath.Join(ndir, "internal/app/consumers/ship")); !os.IsNotExist(err) {
+		t.Errorf("a refused consumer must not be generated (stat err = %v)", err)
 	}
 
 	// The shared config type carries neutral field names (no exchange/routing-key).

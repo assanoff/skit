@@ -32,7 +32,6 @@ add grpc item
 add grpc-test item
 add consumer order
 add consumer payment --broker kafka
-add consumer audit --broker nats
 add worker cleanup
 add worker mailer --claim
 add cron report

@@ -77,8 +77,8 @@
 //
 // # Config
 //
-//   - Config: connection settings (User/Password/Host/Port/VHost), or a full
-//     URL that overrides the component fields.
+//   - Config: connection settings User, Password, Host and Port; the default
+//     virtual host.
 //   - Publisher: NewPublisher(conn, PublisherConfig, opts...); runs in
 //     confirm mode for at-least-once delivery. PublisherConfig fields: Source
 //     (required; the CloudEvents source stamped on messages that carry none),

@@ -1,4 +1,4 @@
-package broker_test
+package consume_test
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/internal/consume"
 	"github.com/assanoff/skit/otel"
 )
 
@@ -35,10 +36,10 @@ func TestInstrumentContinuesCreationTrace(t *testing.T) {
 	msg := broker.Message{ID: "evt-1", Topic: "widgets", Headers: otel.Carrier(ctx)}
 	request.End()
 	var inSpan trace.SpanContext
-	h := broker.Instrument(func(ctx context.Context, _ broker.Message) broker.Action {
+	h := consume.Instrument(func(ctx context.Context, _ broker.Message) broker.Action {
 		inSpan = trace.SpanContextFromContext(ctx)
 		return broker.Ack
-	}, broker.InstrumentConfig{System: "rabbitmq", TracerProvider: tp})
+	}, consume.InstrumentConfig{System: "rabbitmq", TracerProvider: tp})
 
 	h(t.Context(), msg)
 
@@ -58,12 +59,12 @@ func TestInstrumentMarksFailedVerdicts(t *testing.T) {
 	is := is.New(t)
 	rec := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
-	h := broker.Instrument(verdicts(broker.Requeue, broker.Discard),
-		broker.InstrumentConfig{TracerProvider: tp})
+	h := consume.Instrument(verdicts(broker.Requeue, broker.Discard),
+		consume.InstrumentConfig{TracerProvider: tp})
 	body := ceBody(t, "order.paid")
 
 	for range 3 {
-		broker.Process(t.Context(), nil, "orders", body, nil, h)
+		consume.Process(t.Context(), nil, "orders", body, nil, h)
 	}
 
 	spans := rec.Ended()

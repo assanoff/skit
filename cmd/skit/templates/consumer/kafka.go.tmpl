@@ -1,165 +1,27 @@
 package {{.Pkg}}
 
 import (
-	"context"
-	"errors"
-	"io"
-	"log/slog"
-	"sync"
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
-	kgo "github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/assanoff/skit/broker"
 	"github.com/assanoff/skit/broker/kafka"
-	"github.com/assanoff/skit/worker"
 
 	"{{.Module}}/internal/app/config"
 )
 
-// Retry budget for a broker.Requeue verdict — Kafka has no per-message nack, so a
-// requeued record is retried in place with a backoff, then committed (dropped)
-// to unblock the partition. Add a dead-letter topic for real poison handling.
-const (
-	maxRetries   = 5
-	retryBackoff = time.Second
-)
-
-// kafkaRunnable is the Kafka consumer for this handler, generated into the
-// service so you own the consume loop. skit supplies only the infrastructure:
-// the decode+panic-guard+verdict primitive (broker.Process) and the handler
-// metrics and span (broker.Instrument). Edit the reader config, retry policy, or commit
-// strategy freely — or replace the loop wholesale; Handle in {{.Pkg}}.go stays
-// untouched.
-type kafkaRunnable struct {
-	log     *slog.Logger
-	brokers []string
-	topic   string
-	group   string
-	conc    int
-	h       broker.Handler
-	name    string
-
-	mu      sync.Mutex
-	readers []*kgo.Reader
-	once    sync.Once
-}
-
-// Runnable returns the worker.Runnable to register on the worker group. Every
-// attempt at a message is recorded in skit_broker_* on reg (a nil reg turns the
-// metrics off) and as a span on tp, in the trace the message was created in.
-func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts, reg prometheus.Registerer, tp trace.TracerProvider) (worker.Runnable, error) {
-	const name = "{{.Pkg}}-consumer"
-	conc := opts.Concurrency
-	if conc <= 0 {
-		conc = 1
-	}
-	h := broker.Instrument(c.Handle, broker.InstrumentConfig{
-		Consumer:       name,
-		System:         "kafka",
+// Runnable builds the Kafka consumer of Handle from config: the consumer group
+// opts.Group reads the topic opts.Topic on the brokers of cfg; Kafka has no
+// filters, so opts.Filters is ignored. Register it on the worker group. Every
+// attempt at a record is recorded in skit_broker_* on reg (a nil reg turns the
+// metrics off) and as a span on tp, in the trace the message was created in. A
+// broker swap replaces this file; Handle in {{.Pkg}}.go stays untouched.
+func (c *Consumer) Runnable(cfg kafka.Config, opts config.ConsumerOpts, reg prometheus.Registerer, tp trace.TracerProvider) (*kafka.Consumer, error) {
+	return kafka.NewConsumer(c.log, cfg, kafka.ConsumerConfig{
+		Topic:          opts.Topic,
+		Group:          opts.Group,
+		Concurrency:    opts.Concurrency,
+		Name:           "{{.Pkg}}-consumer",
 		Metrics:        reg,
 		TracerProvider: tp,
-	})
-	return &kafkaRunnable{
-		log:     c.log,
-		brokers: cfg.Brokers,
-		topic:   opts.Topic,
-		group:   opts.Group,
-		conc:    conc,
-		h:       h,
-		name:    name,
-	}, nil
-}
-
-// Name implements worker.Runnable.
-func (r *kafkaRunnable) Name() string { return r.name }
-
-// Start runs conc readers in the consumer group until ctx is canceled.
-func (r *kafkaRunnable) Start(ctx context.Context) error {
-	var wg sync.WaitGroup
-	for range r.conc {
-		reader := kgo.NewReader(kgo.ReaderConfig{Brokers: r.brokers, GroupID: r.group, Topic: r.topic})
-		r.mu.Lock()
-		r.readers = append(r.readers, reader)
-		r.mu.Unlock()
-
-		wg.Add(1)
-		go func(rd *kgo.Reader) {
-			defer wg.Done()
-			r.consume(ctx, rd)
-		}(reader)
-	}
-
-	r.log.InfoContext(ctx, "kafka consumer started", "consumer", r.name, "topic", r.topic, "group", r.group)
-	<-ctx.Done()
-	r.close()
-	wg.Wait()
-	return nil
-}
-
-// Stop implements worker.Runnable.
-func (r *kafkaRunnable) Stop(context.Context) error {
-	r.close()
-	return nil
-}
-
-// consume leases records one at a time (FetchMessage does not auto-commit) and
-// commits only after a terminal verdict — the at-least-once loop.
-func (r *kafkaRunnable) consume(ctx context.Context, rd *kgo.Reader) {
-	for {
-		msg, err := rd.FetchMessage(ctx)
-		if err != nil {
-			// Shutdown: ctx canceled, or Stop closed the reader (io.EOF).
-			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-				return
-			}
-			r.log.ErrorContext(ctx, "kafka fetch", "consumer", r.name, "err", err)
-			continue
-		}
-		r.handle(ctx, rd, msg)
-	}
-}
-
-func (r *kafkaRunnable) handle(ctx context.Context, rd *kgo.Reader, msg kgo.Message) {
-	route := func(m *broker.Message) {
-		m.Topic = msg.Topic
-		m.Headers = kafka.Headers(msg.Headers)
-	}
-	for attempt := 0; ; attempt++ {
-		switch broker.Process(ctx, r.log, r.name, msg.Value, route, r.h) {
-		case broker.Requeue:
-			if attempt >= maxRetries {
-				r.log.ErrorContext(ctx, "kafka retries exhausted, dropping (add a dead-letter topic)",
-					"consumer", r.name, "offset", msg.Offset)
-				r.commit(ctx, rd, msg)
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return // leave uncommitted so it is redelivered
-			case <-time.After(retryBackoff):
-			}
-		default: // Ack or Discard: terminal
-			r.commit(ctx, rd, msg)
-			return
-		}
-	}
-}
-
-func (r *kafkaRunnable) commit(ctx context.Context, rd *kgo.Reader, msg kgo.Message) {
-	if err := rd.CommitMessages(ctx, msg); err != nil && ctx.Err() == nil {
-		r.log.ErrorContext(ctx, "kafka commit", "consumer", r.name, "offset", msg.Offset, "err", err)
-	}
-}
-
-func (r *kafkaRunnable) close() {
-	r.once.Do(func() {
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		for _, rd := range r.readers {
-			_ = rd.Close()
-		}
-	})
+	}, c.Handle)
 }

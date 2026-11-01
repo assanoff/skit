@@ -1,10 +1,11 @@
-package broker_test
+package consume_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/internal/consume"
 )
 
 func ceBody(t *testing.T, typ string) []byte {
@@ -18,7 +19,7 @@ func ceBody(t *testing.T, typ string) []byte {
 
 func TestProcessMalformedDiscards(t *testing.T) {
 	called := false
-	got := broker.Process(context.Background(), nil, "c", []byte("{not-cloudevents"), nil,
+	got := consume.Process(context.Background(), nil, "c", []byte("{not-cloudevents"), nil,
 		func(context.Context, broker.Message) broker.Action {
 			called = true
 			return broker.Requeue
@@ -33,7 +34,7 @@ func TestProcessMalformedDiscards(t *testing.T) {
 
 func TestProcessRoutesAndReturnsHandlerAction(t *testing.T) {
 	var seen broker.Message
-	got := broker.Process(context.Background(), nil, "c", ceBody(t, "widget.created"),
+	got := consume.Process(context.Background(), nil, "c", ceBody(t, "widget.created"),
 		func(m *broker.Message) { m.Topic = "widgets" },
 		func(_ context.Context, m broker.Message) broker.Action {
 			seen = m
@@ -51,7 +52,7 @@ func TestProcessRoutesAndReturnsHandlerAction(t *testing.T) {
 }
 
 func TestGuardPanicRequeues(t *testing.T) {
-	got := broker.Guard(context.Background(), nil, "c", broker.Message{ID: "1"},
+	got := consume.Guard(context.Background(), nil, "c", broker.Message{ID: "1"},
 		func(context.Context, broker.Message) broker.Action { panic("boom") })
 	if got != broker.Requeue {
 		t.Errorf("panic action = %v, want Requeue", got)

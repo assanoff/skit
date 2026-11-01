@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/assanoff/skit/broker"
+	"github.com/assanoff/skit/broker/internal/consume"
 )
 
 // ConsumerConfig configures a Consumer.
@@ -86,11 +87,11 @@ func NewConsumer(log *slog.Logger, conn *Conn, cfg ConsumerConfig, h broker.Hand
 		}
 	}
 
-	rc, err := rmq.NewConsumer(conn.Conn, cfg.Queue, opts...)
+	rc, err := rmq.NewConsumer(conn.conn, cfg.Queue, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: new consumer: %w", err)
 	}
-	h = broker.Instrument(h, broker.InstrumentConfig{
+	h = consume.Instrument(h, consume.InstrumentConfig{
 		Consumer:       cfg.Name,
 		System:         "rabbitmq",
 		Metrics:        cfg.Metrics,
@@ -145,17 +146,15 @@ func (c *Consumer) close() {
 // an rmq.Action. A malformed envelope is discarded (nack without requeue): requeuing it would
 // loop forever, and a dead-letter exchange of the queue receives it.
 func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
-	action := broker.Process(ctx, c.log, c.cfg.Name, d.Body, func(m *broker.Message) {
+	action := consume.Process(ctx, c.log, c.cfg.Name, d.Body, func(m *broker.Message) {
 		m.Topic = d.Exchange
-		m.Headers = Headers(d.Headers)
+		m.Headers = headers(d.Headers)
 	}, c.handler)
-	return ToAction(action)
+	return toAction(action)
 }
 
-// ToAction maps a broker.Action onto the go-rabbitmq delivery action, so a
-// hand-written or scaffolded consumer loop can reuse the same mapping skit's
-// Consumer uses.
-func ToAction(a broker.Action) rmq.Action {
+// toAction maps a broker.Action onto the go-rabbitmq delivery action.
+func toAction(a broker.Action) rmq.Action {
 	switch a {
 	case broker.Requeue:
 		return rmq.NackRequeue
@@ -166,11 +165,11 @@ func ToAction(a broker.Action) rmq.Action {
 	}
 }
 
-// Headers projects the header table of an AMQP delivery to
+// headers projects the header table of an AMQP delivery to
 // broker.Message.Headers, dropping non-string values (CloudEvents and trace
-// headers are strings). A consume loop of your own sets it on the message, so
-// broker.Instrument continues the trace the message was created in.
-func Headers(t amqp.Table) map[string]string {
+// headers are strings), so the consumer span continues the trace the message
+// was created in.
+func headers(t amqp.Table) map[string]string {
 	if len(t) == 0 {
 		return nil
 	}

@@ -50,9 +50,9 @@
 // sends to the exchange Message.Topic under the routing key Message.Type and
 // publishes the CloudEvents body with publisher confirms; its Consumer decodes
 // deliveries back into Messages and dispatches them, instrumented, to a
-// broker.Handler.
-// Application and domain code depend only on broker.Publisher /
-// broker.Handler, never on the adapter.
+// broker.Handler, recovering a panic of the handler as Requeue. Application
+// and domain code depend only on broker.Publisher / broker.Handler, never on
+// the adapter.
 //
 // # Metrics
 //
@@ -68,10 +68,6 @@
 //	    TracerProvider: tp,
 //	}, app.HandlePaid)
 //
-// A consume loop of your own, like the generated consumers, wraps its handler
-// in Instrument before passing it to Process, so the same metrics come from
-// every transport.
-//
 // Publishing is measured by the queue of events (skit_queue_* by kind).
 //
 // # Tracing
@@ -82,16 +78,14 @@
 // outbox.Handler sends the context the event was created in — is sent under a
 // CLIENT child of it.
 //
-// The consumers of the adapters, and Instrument in a consume loop of your own,
-// record the handling of every message as a CONSUMER span
-// "process <topic>". The creation context from the headers is both the parent
+// The consumers of the adapters record the handling of every message as a
+// CONSUMER span "process <topic>". The creation context from the headers is both the parent
 // and the link of that span. The OpenTelemetry messaging conventions ask for
 // the link and allow the parent for a single message, as this package
 // documents here: a request, the event it created and the handling of that
 // event are one trace under one sampling decision. A handler that processes a
 // batch would link every message's context instead. Requeue, Discard and a
-// panic mark the span failed, with error.type set to the verdict. The adapters'
-// consumers fill Message.Headers from the delivery; a consume loop of your own,
-// like the generated consumers, sets them with rabbitmq.Headers or
-// kafka.Headers, or the span starts a trace of its own.
+// panic mark the span failed, with error.type set to the verdict. The
+// consumers fill Message.Headers from the delivery, so a handler sees the
+// headers the message was sent with.
 package broker
