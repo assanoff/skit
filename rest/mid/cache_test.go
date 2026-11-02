@@ -27,6 +27,26 @@ func errHandler() rest.HandlerFunc {
 	}
 }
 
+// redirectHandler writes a 302 itself and returns rest.NoResponse.
+func redirectHandler() rest.HandlerFunc {
+	return func(ctx context.Context, r *http.Request) rest.ResponseEncoder {
+		http.Redirect(rest.GetWriter(ctx), r, "/y", http.StatusFound)
+		return rest.NoResponse{}
+	}
+}
+
+// headerCounter is a recorder that counts the WriteHeader calls.
+type headerCounter struct {
+	*httptest.ResponseRecorder
+
+	calls int
+}
+
+func (w *headerCounter) WriteHeader(code int) {
+	w.calls++
+	w.ResponseRecorder.WriteHeader(code)
+}
+
 // serve drives h through the ServeHTTP boundary (which installs the writer in
 // context) and returns the recorder.
 func serve(h rest.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
@@ -57,6 +77,19 @@ func TestCacheControlSkipsErrors(t *testing.T) {
 
 	is.Equal(rec.Code, http.StatusNotFound)
 	is.Equal(rec.Header().Get("Cache-Control"), "") // errors are not cached
+}
+
+// TestCacheControlSkipsNoResponse verifies a response the handler wrote itself
+// gets no cache headers.
+func TestCacheControlSkipsNoResponse(t *testing.T) {
+	is := is.New(t)
+
+	h := rest.ChainMiddleware(redirectHandler(), mid.CacheControl(60, "Accept-Language"))
+	rec := serve(h, httptest.NewRequest(http.MethodGet, "/x", nil))
+
+	is.Equal(rec.Code, http.StatusFound)
+	is.Equal(rec.Header().Get("Cache-Control"), "") // the handler's response is left alone
+	is.Equal(rec.Header().Get("Vary"), "")
 }
 
 // TestCacheControlNoWriter verifies a no-op when invoked off the ServeHTTP

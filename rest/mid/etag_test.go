@@ -50,3 +50,20 @@ func TestETagSkipsErrors(t *testing.T) {
 	rec := serve(h, httptest.NewRequest(http.MethodGet, "/x", nil))
 	is.Equal(rec.Header().Get("ETag"), "") // errors are not tagged
 }
+
+// TestETagSkipsNoResponse verifies a response the handler wrote itself passes
+// through: no tag, no 304, no second WriteHeader.
+func TestETagSkipsNoResponse(t *testing.T) {
+	is := is.New(t)
+
+	h := rest.ChainMiddleware(redirectHandler(), mid.ETag())
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Header.Set("If-None-Match", "*")
+	w := &headerCounter{ResponseRecorder: httptest.NewRecorder()}
+	h.ServeHTTP(w, req)
+
+	is.Equal(w.calls, 1)                 // only the handler wrote the header
+	is.Equal(w.Code, http.StatusFound)   // its status
+	is.Equal(w.Header().Get("ETag"), "") // not tagged
+	is.Equal(w.Header().Get("Location"), "/y")
+}

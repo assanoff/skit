@@ -18,13 +18,13 @@ import (
 // The tag is a strong validator computed from the encoded body, so it needs the
 // body: ETag encodes the response once and forwards the bytes (no re-encode by
 // Respond). It sets the ETag header via rest.GetWriter but never calls
-// WriteHeader. Error, nil (204), and writer-less (direct-call) responses pass
-// through untouched.
+// WriteHeader. Error, nil (204), NoResponse (the handler wrote the response
+// itself) and writer-less (direct-call) responses pass through untouched.
 func ETag() rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 			resp := next(ctx, r)
-			if resp == nil || isError(resp) {
+			if passThrough(resp) {
 				return resp
 			}
 			w := rest.GetWriter(ctx)

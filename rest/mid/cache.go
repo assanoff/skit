@@ -14,8 +14,8 @@ import (
 // when given, Vary) response header for successful responses. It is an
 // app-developer choice attached per handler or group — handle("GET /x", h.get,
 // mid.CacheControl(60)) — not global infrastructure. maxAge is in seconds; a
-// non-positive maxAge sets no Cache-Control. Error and 204 responses are left
-// uncached.
+// non-positive maxAge sets no Cache-Control. Error, 204 and NoResponse (the
+// handler wrote the response itself) responses are left uncached.
 //
 // It sets a header via rest.GetWriter but never calls WriteHeader, so Respond
 // remains the single writer of status and body and the middleware composes in
@@ -25,7 +25,7 @@ func CacheControl(maxAge int, varyHeaders ...string) rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 			resp := next(ctx, r)
-			if resp == nil || isError(resp) {
+			if passThrough(resp) {
 				return resp
 			}
 			w := rest.GetWriter(ctx)
@@ -43,9 +43,13 @@ func CacheControl(maxAge int, varyHeaders ...string) rest.MidFunc {
 	}
 }
 
-// isError reports whether a ResponseEncoder is an error response (an *errs.Error). Used
-// by the caching middleware to skip non-successful responses.
-func isError(resp rest.ResponseEncoder) bool {
-	_, ok := resp.(*errs.Error)
-	return ok
+// passThrough reports whether ETag and CacheControl leave resp untouched: nil
+// (204), rest.NoResponse (the handler wrote the response itself) and an error
+// (an *errs.Error).
+func passThrough(resp rest.ResponseEncoder) bool {
+	switch resp.(type) {
+	case nil, rest.NoResponse, *errs.Error:
+		return true
+	}
+	return false
 }
