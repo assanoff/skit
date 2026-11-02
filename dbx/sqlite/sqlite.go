@@ -22,7 +22,7 @@ const (
 	defaultBusyTimeout  = 5 * time.Second
 )
 
-// SQLite extended result codes the Classifier maps onto dbx.ErrDBDuplicatedEntry.
+// SQLite extended result codes Classify maps onto dbx.ErrDBDuplicatedEntry.
 const (
 	constraintPrimaryKey = 1555
 	constraintUnique     = 2067
@@ -51,7 +51,7 @@ type Config struct {
 }
 
 // Open opens a SQLite pool through a driver the caller registered, bound to
-// Classifier and to the sqlx bind style "sqlite3". It does not verify
+// Classify and to the sqlx bind style "sqlite3". It does not verify
 // connectivity; call dbx.StatusCheck for that. A built DSN opens every
 // transaction with BEGIN IMMEDIATE (_txlock=immediate), so a transaction that
 // reads and then writes takes the write lock up front instead of failing with
@@ -67,13 +67,13 @@ func Open(cfg Config) (*dbx.DB, error) {
 		// does, and every query sees the same one.
 		db.SetMaxIdleConns(cmp.Or(cfg.MaxIdleConns, 1))
 		db.SetMaxOpenConns(cmp.Or(cfg.MaxOpenConns, 1))
-		return dbx.New(db, "sqlite3", Classifier{}), nil
+		return dbx.New(db, "sqlite3", Classify), nil
 	}
 	if cfg.MaxOpenConns > 0 {
 		db.SetMaxOpenConns(cfg.MaxOpenConns)
 	}
 	db.SetMaxIdleConns(cmp.Or(cfg.MaxIdleConns, defaultMaxIdleConns))
-	return dbx.New(db, "sqlite3", Classifier{}), nil
+	return dbx.New(db, "sqlite3", Classify), nil
 }
 
 // inMemory reports whether dsn opens an in-memory SQLite database.
@@ -108,16 +108,13 @@ type coder interface {
 	Code() int
 }
 
-// Classifier maps SQLite extended result codes onto the dbx sentinels: a
-// unique (2067) or primary key (1555) constraint → dbx.ErrDBDuplicatedEntry.
-// It reads the code through Code() int, which modernc.org/sqlite errors have,
-// so it imports no driver; the errors of mattn/go-sqlite3 carry the code in a
-// field and pass unchanged. It wraps the driver error, so errors.As still
-// reaches it.
-type Classifier struct{}
-
-// Classify implements dbx.Classifier.
-func (Classifier) Classify(err error) error {
+// Classify is the dbx.Classifier of SQLite. It maps extended result codes onto
+// the dbx sentinels: a unique (2067) or primary key (1555) constraint →
+// dbx.ErrDBDuplicatedEntry. It reads the code through Code() int, which
+// modernc.org/sqlite errors have, so it imports no driver; the errors of
+// mattn/go-sqlite3 carry the code in a field and pass unchanged. It wraps the
+// driver error, so errors.As still reaches it.
+func Classify(err error) error {
 	c, ok := errors.AsType[coder](err)
 	if !ok {
 		return err

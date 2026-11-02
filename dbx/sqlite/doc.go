@@ -14,7 +14,7 @@
 //
 // The returned *dbx.DB runs every dbx helper with the sqlx bind style
 // "sqlite3", so named queries bind as ?. Its errors are classified by
-// Classifier: a unique (2067) or primary key (1555) constraint wraps
+// Classify: a unique (2067) or primary key (1555) constraint wraps
 // dbx.ErrDBDuplicatedEntry; the driver error stays reachable through
 // errors.As.
 //

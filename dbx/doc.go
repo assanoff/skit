@@ -69,8 +69,9 @@
 // # Errors
 //
 // A Classifier maps the errors of one engine onto the sentinels; the presets
-// ship one each, and a pool of another driver passes its own to New. Without a
-// Classifier only ErrDBNotFound is recognized. ErrDBRetryable marks an error
+// ship one each, pg.Classify and sqlite.Classify, and a pool of another driver
+// passes its own function to New. Without a Classifier only ErrDBNotFound is
+// recognized. ErrDBRetryable marks an error
 // after which the whole transaction may run again; on Postgres a deadlock
 // victim (40P01) and a serialization failure (40001).
 //

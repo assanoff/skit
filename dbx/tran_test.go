@@ -38,13 +38,11 @@ func tranDriverName() string {
 	return name
 }
 
-// errDeadlock stands for a driver error that stubClassifier marks retryable.
+// errDeadlock stands for a driver error that stubClassify marks retryable.
 var errDeadlock = errors.New("deadlock detected")
 
-// stubClassifier marks errDeadlock retryable, as dbx/pg does 40P01.
-type stubClassifier struct{}
-
-func (stubClassifier) Classify(err error) error {
+// stubClassify marks errDeadlock retryable, as dbx/pg does 40P01.
+func stubClassify(err error) error {
 	if errors.Is(err, errDeadlock) {
 		return fmt.Errorf("%w: %w", ErrDBRetryable, err)
 	}
@@ -58,7 +56,7 @@ func openTranDB(t *testing.T) *DB {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { raw.Close() })
-	return New(raw, "pgx", stubClassifier{})
+	return New(raw, "pgx", stubClassify)
 }
 
 func deadlockErr() error {

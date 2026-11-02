@@ -17,7 +17,7 @@ import (
 	"github.com/assanoff/skit/dbx"
 )
 
-// Postgres error codes the Classifier maps onto the dbx sentinels.
+// Postgres error codes Classify maps onto the dbx sentinels.
 const (
 	uniqueViolation      = "23505"
 	deadlockDetected     = "40P01"
@@ -57,7 +57,7 @@ type Config struct {
 	TracerProvider trace.TracerProvider
 }
 
-// Open opens a pool through the pgx driver, bound to Classifier. It does not
+// Open opens a pool through the pgx driver, bound to Classify. It does not
 // verify connectivity; call dbx.StatusCheck for that. Every query is recorded
 // as a span on cfg.TracerProvider. With cfg.Metrics set it registers the pool
 // metrics; a pool of the same Host and Name already registered there is an
@@ -98,7 +98,7 @@ func Open(cfg Config) (*dbx.DB, error) {
 		return nil, errors.Join(err, db.Close())
 	}
 
-	return dbx.New(db, "pgx", Classifier{}), nil
+	return dbx.New(db, "pgx", Classify), nil
 }
 
 // registerPool registers the pool metrics of db on cfg.Metrics, if set. They
@@ -121,14 +121,12 @@ type sqlStater interface {
 	SQLState() string
 }
 
-// Classifier maps Postgres SQLSTATE codes onto the dbx sentinels: 23505 (unique
-// violation) → dbx.ErrDBDuplicatedEntry, 40P01 (deadlock) and 40001
-// (serialization failure) → dbx.ErrDBRetryable. It wraps the driver error, so
-// errors.As still reaches it with its constraint and detail.
-type Classifier struct{}
-
-// Classify implements dbx.Classifier.
-func (Classifier) Classify(err error) error {
+// Classify is the dbx.Classifier of Postgres. It maps SQLSTATE codes onto the
+// dbx sentinels: 23505 (unique violation) → dbx.ErrDBDuplicatedEntry, 40P01
+// (deadlock) and 40001 (serialization failure) → dbx.ErrDBRetryable. It wraps
+// the driver error, so errors.As still reaches it with its constraint and
+// detail.
+func Classify(err error) error {
 	st, ok := errors.AsType[sqlStater](err)
 	if !ok {
 		return err

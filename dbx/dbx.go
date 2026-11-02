@@ -22,11 +22,9 @@ var (
 
 // Classifier wraps a driver error with the dbx sentinel it recognizes —
 // fmt.Errorf("%w: %w", ErrDBDuplicatedEntry, err) — or returns err unchanged.
-// The presets dbx/pg and dbx/sqlite ship one each; a pool of another driver
-// implements it itself.
-type Classifier interface {
-	Classify(err error) error
-}
+// The presets ship one each, pg.Classify and sqlite.Classify; a pool of
+// another driver brings its own function.
+type Classifier func(err error) error
 
 // Querier runs statements: a *DB on the pool, a *Tx in a transaction. Only
 // this package implements it, so no other type decides whether WithinTran
@@ -105,7 +103,7 @@ func classify(c Classifier, err error) error {
 	if c == nil {
 		return err
 	}
-	return c.Classify(err)
+	return c(err)
 }
 
 // DefaultStatusCheckTimeout bounds StatusCheck when it is called with a context

@@ -13,7 +13,7 @@ import (
 )
 
 // TestModernc runs the preset on the real modernc driver: the default driver
-// name, the bind style of named queries, and the Classifier on both unique
+// name, the bind style of named queries, and Classify on both unique
 // constraint codes.
 func TestModernc(t *testing.T) {
 	is := is.New(t)

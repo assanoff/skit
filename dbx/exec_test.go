@@ -36,16 +36,14 @@ func (execStub) within(context.Context, *slog.Logger, func(tx *Tx) error) error 
 }
 
 func (execStub) classify(err error) error {
-	return classify(dupClassifier{}, err)
+	return classify(dupClassify, err)
 }
 
-// errTaken stands for a driver error of a unique key that dupClassifier
-// marks a duplicate.
+// errTaken stands for a driver error of a unique key that dupClassify marks
+// a duplicate.
 var errTaken = errors.New("unique violation")
 
-type dupClassifier struct{}
-
-func (dupClassifier) Classify(err error) error {
+func dupClassify(err error) error {
 	if errors.Is(err, errTaken) {
 		return fmt.Errorf("%w: %w", ErrDBDuplicatedEntry, err)
 	}

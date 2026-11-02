@@ -18,12 +18,12 @@
 //	}
 //
 // The returned *dbx.DB runs every dbx helper; its errors are classified by
-// Classifier: a unique violation (23505) wraps dbx.ErrDBDuplicatedEntry, a
+// Classify: a unique violation (23505) wraps dbx.ErrDBDuplicatedEntry, a
 // deadlock (40P01) or a serialization failure (40001) wraps
 // dbx.ErrDBRetryable, on which dbx.WithinTran re-runs the transaction. The
 // driver error stays reachable through errors.As, with its constraint and
-// detail. Classifier also serves a pool opened another way, such as through
-// lib/pq: dbx.New(db, "postgres", pg.Classifier{}).
+// detail. Classify also serves a pool opened another way, such as through
+// lib/pq: dbx.New(db, "postgres", pg.Classify).
 //
 // # Metrics
 //

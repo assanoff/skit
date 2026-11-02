@@ -12,9 +12,9 @@ import (
 	"github.com/assanoff/skit/dbx/pg"
 )
 
-func TestClassifier(t *testing.T) {
+func TestClassify(t *testing.T) {
 	is := is.New(t)
-	classify := pg.Classifier{}.Classify
+	classify := pg.Classify
 
 	dup := &pgconn.PgError{Code: "23505", ConstraintName: "widgets_name_key"}
 	err := classify(fmt.Errorf("insert: %w", dup))
