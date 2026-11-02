@@ -65,6 +65,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `retry` | Generic retry with pluggable `Backoff` (exponential + jitter) and terminal-error short-circuit; the backoff shared by `httpmw`/`worker` |
 | `cron` | Cron scheduler (`robfig/cron`) as a `worker.Runnable`: spec-validated jobs, per-firing panic recovery, graceful drain |
 | `lock` | Distributed mutual exclusion behind a common `Locker`: Postgres advisory locks and single-instance Redis locks |
+| `dedup` | Idempotency like a cache: `k.Do(ctx, key, fn)` runs `fn` once per key and hands its stored success to repeats; memory and Redis stores |
 | `chx` | Optional ClickHouse helper (connect + goose migrations); pulls the ClickHouse driver only when imported |
 | `grpcgateway` | grpc-gateway REST↔gRPC transcoding as a `worker.Runnable`, sharing the app's server core |
 | `grpctest` | In-process gRPC test harness over `bufconn` running the real `grpcserver` interceptor chain |
