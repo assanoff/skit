@@ -320,7 +320,7 @@ func New(ctx context.Context, log *slog.Logger, cfg Config) (*Deps, error) {
 	// Событие пишется в очередь событий в конверте outbox: id, время, данные и
 	// трасса запроса, который его создал.
 	reg := queue.NewRegistry()
-	enc := queue.WithEncoder(outbox.Envelope())
+	enc := queue.WithEncoder(outbox.JSON)
 	err = reg.Register[orderapp.OrderCreated](EventsQueue, "order.created", enc)
 	if err != nil {
 		return nil, err

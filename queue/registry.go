@@ -13,14 +13,10 @@ import (
 // Encoder writes a scheduled value into the Payload of its task. ctx is the
 // context of Schedule, so an encoder may carry what it holds, such as the
 // trace of the producer, into the payload.
-type Encoder interface {
-	Encode(ctx context.Context, v any) ([]byte, error)
-}
+type Encoder func(ctx context.Context, v any) ([]byte, error)
 
-// jsonEncoder is the default Encoder, encoding/json.
-type jsonEncoder struct{}
-
-func (jsonEncoder) Encode(_ context.Context, v any) ([]byte, error) {
+// encodeJSON is the default Encoder, encoding/json.
+func encodeJSON(_ context.Context, v any) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("json encoder: %w", err)
@@ -87,7 +83,7 @@ func (r *Registry) Register[T any](queue, kind string, opts ...RouteOption) erro
 	case kind == "":
 		return errors.New("queue: register: kind is required")
 	}
-	rt := route{queue: queue, kind: kind, enc: jsonEncoder{}}
+	rt := route{queue: queue, kind: kind, enc: encodeJSON}
 	for _, opt := range opts {
 		opt(&rt)
 	}

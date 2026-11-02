@@ -12,7 +12,7 @@ import (
 
 // Handler returns the queue.JobFunc that publishes an event task to topic
 // through pub. The message carries the id, time, content type, data and trace
-// context of the Envelope of the task, and the kind of the task as its type;
+// context of the envelope of the task, and the kind of the task as its type;
 // the broker.Publisher of an adapter sends it under a CLIENT child of the
 // context the event was created in.
 //

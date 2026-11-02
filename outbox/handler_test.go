@@ -25,12 +25,8 @@ type created struct {
 	ID string `json:"id"`
 }
 
-// rawCodec encodes every event as the same bytes, not valid UTF-8.
-type rawCodec struct{}
-
-func (rawCodec) ContentType() string { return "application/x-raw" }
-
-func (rawCodec) Marshal(any) ([]byte, error) { return []byte{0xff, 'R'}, nil }
+// marshalRaw encodes every event as the same bytes, not valid UTF-8.
+func marshalRaw(any) ([]byte, error) { return []byte{0xff, 'R'}, nil }
 
 // recorder records the messages it is asked to publish and fails each with
 // the error of its type.
@@ -62,10 +58,10 @@ func TestHandler(t *testing.T) {
 	pub := &recorder{}
 	handle := outbox.Handler(pub, "widgets")
 
-	payload, err := outbox.Envelope().Encode(ctx, created{ID: "42"})
+	payload, err := outbox.JSON(ctx, created{ID: "42"})
 	is.NoErr(err)
 	is.NoErr(handle(ctx, queue.Task{Kind: "widget.created", Payload: payload}))
-	raw, err := outbox.Envelope(outbox.WithCodec(rawCodec{})).Encode(ctx, created{})
+	raw, err := outbox.Envelope("application/x-raw", marshalRaw)(ctx, created{})
 	is.NoErr(err)
 	is.NoErr(handle(ctx, queue.Task{Kind: "widget.raw", Payload: raw}))
 	is.True(handle(ctx, queue.Task{Kind: "widget.bad", Payload: []byte("{")}) != nil)
@@ -103,7 +99,7 @@ func TestHandlerSendsInCreationTrace(t *testing.T) {
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	ctx, request := tp.Tracer("api").Start(t.Context(), "request")
-	payload, err := outbox.Envelope().Encode(ctx, created{ID: "42"})
+	payload, err := outbox.JSON(ctx, created{ID: "42"})
 	is.NoErr(err)
 	request.End()
 	handle := outbox.Handler(tracedPublisher{tracer: tp.Tracer("broker")}, "widgets")
@@ -138,7 +134,7 @@ func TestHandlerOutcomes(t *testing.T) {
 	pg := dbtest.NewPostgres(ctx, t, dbtest.Config{})
 	q := queue.NewPG(slog.New(slog.DiscardHandler), pg.DB)
 	is.NoErr(q.EnsureSchema(ctx))
-	env, err := outbox.Envelope().Encode(ctx, created{ID: "1"})
+	env, err := outbox.JSON(ctx, created{ID: "1"})
 	is.NoErr(err)
 	for _, p := range []queue.Params{
 		{Queue: "events", Kind: "garbled", Payload: []byte("{")},

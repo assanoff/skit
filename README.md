@@ -196,14 +196,14 @@ handler publishes it to the broker.
 
 - Routing is a **wiring concern**. A `queue.Registry`, populated once at
   startup, maps each value's Go type to its queue and kind; an event goes into
-  the queue of events in an `outbox.Envelope`, and the `Mux` of that queue
+  the queue of events in an envelope (`outbox.JSON`), and the `Mux` of that queue
   publishes each kind to its topic with `outbox.Handler`. With the broker off
   the route is `queue.Drop()`: the domain write goes through, the event goes
   nowhere, and the domain does not branch.
 
   ```go
   reg := queue.NewRegistry()
-  reg.Register[widget.Created]("events", "widget.created", queue.WithEncoder(outbox.Envelope()))
+  reg.Register[widget.Created]("events", "widget.created", queue.WithEncoder(outbox.JSON))
 
   mux := queue.NewMux()
   mux.Register("widget.created", outbox.Handler(pub, "widgets"))

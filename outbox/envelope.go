@@ -11,30 +11,9 @@ import (
 	"github.com/assanoff/skit/queue"
 )
 
-// Codec encodes the data of an event. ContentType names the encoding: the
-// message goes out with it as its content type, and a consumer decodes the
-// data by it.
-type Codec interface {
-	ContentType() string
-	Marshal(v any) ([]byte, error)
-}
-
-// jsonCodec is the default Codec, encoding/json.
-type jsonCodec struct{}
-
-func (jsonCodec) ContentType() string { return "application/json" }
-
-func (jsonCodec) Marshal(v any) ([]byte, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, fmt.Errorf("json codec: %w", err)
-	}
-	return b, nil
-}
-
 // envelope is the Payload of an event task: the broker message to come, but
 // its type — the kind of the task — and its topic — the one of the Handler.
-// Data is base64 in the JSON, whatever the codec.
+// Data is base64 in the JSON, whatever its content type.
 type envelope struct {
 	ID          string            `json:"id"`
 	Time        time.Time         `json:"time"`
@@ -43,47 +22,40 @@ type envelope struct {
 	Data        []byte            `json:"data"`
 }
 
-// EnvelopeOption customizes an Envelope.
-type EnvelopeOption func(*envelopeEncoder)
-
-// WithCodec sets how the data of an event is encoded (default JSON). A service
-// usually writes its events in one format, such as protobuf.
-func WithCodec(c Codec) EnvelopeOption {
-	return func(e *envelopeEncoder) {
-		if c != nil {
-			e.codec = c
-		}
-	}
-}
-
-// Envelope returns the queue.Encoder of events: it writes an event into the
-// Payload of its task with a fresh id, the time of Schedule, the data encoded
-// by the codec and its content type, and the W3C trace context of the ctx of
-// Schedule — the context the event is created in. Register each event type
+// JSON is the queue.Encoder of events with JSON data: the Envelope of
+// encoding/json, content type application/json. Register each event type
 // with it:
 //
 //	reg.Register[widget.Created]("events", "widget.created",
-//	    queue.WithEncoder(outbox.Envelope()))
-func Envelope(opts ...EnvelopeOption) queue.Encoder {
-	e := envelopeEncoder{codec: jsonCodec{}}
-	for _, opt := range opts {
-		opt(&e)
-	}
-	return e
+//	    queue.WithEncoder(outbox.JSON))
+func JSON(ctx context.Context, v any) ([]byte, error) {
+	return encode(ctx, v, "application/json", json.Marshal)
 }
 
-// envelopeEncoder is the queue.Encoder of Envelope.
-type envelopeEncoder struct{ codec Codec }
+// Envelope returns the queue.Encoder of events with data of another format,
+// such as protobuf: marshal encodes the data, and contentType names the
+// encoding — the message goes out with it, and a consumer decodes the data by
+// it. The encoder writes an event into the Payload of its task with a fresh
+// id, the time of Schedule, the encoded data and the W3C trace context of the
+// ctx of Schedule — the context the event is created in.
+func Envelope(contentType string, marshal func(v any) ([]byte, error)) queue.Encoder {
+	return func(ctx context.Context, v any) ([]byte, error) {
+		return encode(ctx, v, contentType, marshal)
+	}
+}
 
-func (e envelopeEncoder) Encode(ctx context.Context, v any) ([]byte, error) {
-	data, err := e.codec.Marshal(v)
+// encode writes v into an envelope, its data encoded by marshal.
+func encode(
+	ctx context.Context, v any, contentType string, marshal func(v any) ([]byte, error),
+) ([]byte, error) {
+	data, err := marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("outbox envelope: %w", err)
 	}
 	b, err := json.Marshal(envelope{
 		ID:          uuid.New().String(),
 		Time:        time.Now().UTC(),
-		ContentType: e.codec.ContentType(),
+		ContentType: contentType,
 		Headers:     otel.Carrier(ctx),
 		Data:        data,
 	})

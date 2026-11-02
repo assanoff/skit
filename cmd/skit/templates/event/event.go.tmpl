@@ -22,7 +22,7 @@ const EventType = "{{.Plural}}.created" // TODO: name the real event, e.g. "{{.P
 const Topic = "{{.Plural}}"
 
 // Route sends {{.Core}}.{{.Type}} into the queue of events q on reg as the kind
-// EventType. opt writes the event: queue.WithEncoder(outbox.Envelope()) while
+// EventType. opt writes the event: queue.WithEncoder(outbox.JSON) while
 // the broker is on, queue.Drop() while it is off. Call it once at startup.
 func Route(reg *queue.Registry, q string, opt queue.RouteOption) error {
 	return reg.Register[{{.Core}}.{{.Type}}](q, EventType, opt)

@@ -30,13 +30,12 @@ func TestPublish(t *testing.T) {
 	is := is.New(t)
 	ctx := context.Background()
 	reg, mux, pub := queue.NewRegistry(), queue.NewMux(), &recorder{}
-	enc := outbox.Envelope()
-	is.NoErr(Route(reg, "events", queue.WithEncoder(enc)))
+	is.NoErr(Route(reg, "events", queue.WithEncoder(outbox.JSON)))
 	is.NoErr(Handle(mux, pub))
 	is.NoErr(reg.Check("events", mux)) // the event has its handler
 
 	in := {{.Core}}.{{.Type}}{ID: uuid.New()}
-	payload, err := enc.Encode(ctx, in)
+	payload, err := outbox.JSON(ctx, in)
 	is.NoErr(err)
 	is.NoErr(mux.Handle(ctx, queue.Task{Kind: EventType, Payload: payload}))
 

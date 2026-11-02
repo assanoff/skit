@@ -61,7 +61,7 @@ func TestBrokerDown(t *testing.T) {
 	waitBound(t, pub, got)
 
 	reg := queue.NewRegistry()
-	enc := queue.WithEncoder(outbox.Envelope())
+	enc := queue.WithEncoder(outbox.JSON)
 	is.NoErr(reg.Register[created]("events", "widget.created", enc))
 	mux := queue.NewMux()
 	is.NoErr(mux.Register("widget.created", outbox.Handler(pub, "widgets")))

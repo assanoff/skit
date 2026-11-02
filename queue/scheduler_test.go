@@ -23,7 +23,7 @@ func TestScheduler(t *testing.T) {
 	is.NoErr(reg.Register[welcome]("email", "email.welcome"))
 	is.NoErr(reg.Register[reminder]("email", "email.reminder", WithEncoder(fixed("hi"))))
 	is.NoErr(reg.Register[receipt]("email", "email.receipt", Drop()))
-	is.NoErr(reg.Register[order]("orders", "order.created", WithEncoder(failing{})))
+	is.NoErr(reg.Register[order]("orders", "order.created", WithEncoder(failing)))
 
 	boom := errors.New("boom")
 	err := dbx.WithinTran(ctx, log, q.db, func(tx *dbx.Tx) error {

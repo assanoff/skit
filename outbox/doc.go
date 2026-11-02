@@ -4,19 +4,19 @@
 // So an event is never published unless its domain write commits, and never
 // lost while the broker is down.
 //
-// The package is the bridge between the queue and the broker: Envelope writes
-// an event into the Payload of its task, Handler publishes the task, and
+// The package is the bridge between the queue and the broker: JSON writes an
+// event into the Payload of its task, Handler publishes the task, and
 // Config gives the settings of the queue of events. Storage, leases, retries,
 // dead letters, cleanup and metrics belong to the queue.
 //
 // # Wiring (once, at startup)
 //
-// Register each event type in a queue.Registry with the Envelope encoder and
+// Register each event type in a queue.Registry with the JSON encoder and
 // the Handler of its topic in the Mux of the queue of events, check them
 // against each other and run the workers of the queue:
 //
 //	reg := queue.NewRegistry()
-//	enc := queue.WithEncoder(outbox.Envelope())
+//	enc := queue.WithEncoder(outbox.JSON)
 //	if err := reg.Register[widget.Created]("events", "widget.created", enc); err != nil {
 //	    return err
 //	}
@@ -55,11 +55,11 @@
 //
 // # Envelope
 //
-// Envelope writes the event into the Payload as JSON: a fresh id, the time of
-// Schedule, the content type of the codec, the data encoded by it — base64 in
-// the JSON, whatever the codec — and the W3C trace context of the ctx of
-// Schedule. The data is JSON unless WithCodec sets another codec, such as
-// protobuf.
+// JSON writes the event into the Payload as a JSON envelope: a fresh id, the
+// time of Schedule, the content type and the data — base64 in the JSON,
+// whatever its content type — and the W3C trace context of the ctx of
+// Schedule. Its data is JSON; Envelope(contentType, marshal) encodes the data
+// in another format, such as protobuf.
 //
 // # Delivery
 //
@@ -122,7 +122,7 @@
 //
 // # Options
 //
-//   - Envelope option: WithCodec (default JSON, application/json).
+//   - Encoder: JSON (application/json), or Envelope(contentType, marshal).
 //   - Config(name): Batch 100, Timeout 5s (a publish and a batch), Poll 2s;
 //     change a field when the broker needs it.
 package outbox

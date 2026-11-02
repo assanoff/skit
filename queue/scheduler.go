@@ -39,7 +39,7 @@ func (s *Scheduler) Schedule(ctx context.Context, v any) error {
 	if rt.drop {
 		return nil
 	}
-	payload, err := rt.enc.Encode(ctx, v)
+	payload, err := rt.enc(ctx, v)
 	if err != nil {
 		return fmt.Errorf("queue schedule %s: encode: %w", rt.kind, err)
 	}

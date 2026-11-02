@@ -17,17 +17,15 @@ type (
 	receipt  struct{}
 )
 
-// fixed is an Encoder that writes the same payload for every value.
-type fixed string
-
-func (e fixed) Encode(context.Context, any) ([]byte, error) {
-	return []byte(e), nil
+// fixed is an Encoder that writes payload for every value.
+func fixed(payload string) Encoder {
+	return func(context.Context, any) ([]byte, error) {
+		return []byte(payload), nil
+	}
 }
 
 // failing is an Encoder that fails every value.
-type failing struct{}
-
-func (failing) Encode(context.Context, any) ([]byte, error) {
+func failing(context.Context, any) ([]byte, error) {
 	return nil, errors.New("encode failed")
 }
 
@@ -44,10 +42,14 @@ func TestRegister(t *testing.T) {
 	is.NoErr(err)
 	is.Equal(rt.queue, "email") // *T resolves the route of T
 	is.Equal(rt.kind, "email.welcome")
-	is.Equal(rt.enc, Encoder(jsonEncoder{})) // JSON by default
+	b, err := rt.enc(t.Context(), welcome{UserID: 7})
+	is.NoErr(err)
+	is.Equal(string(b), `{"user_id":7}`) // JSON by default
 	rt, err = reg.lookup(reminder{})
 	is.NoErr(err)
-	is.Equal(rt.enc, Encoder(fixed("hi"))) // or the Encoder of the route
+	b, err = rt.enc(t.Context(), reminder{})
+	is.NoErr(err)
+	is.Equal(string(b), "hi") // or the Encoder of the route
 
 	_, err = reg.lookup(receipt{})
 	is.True(err != nil) // an unregistered type

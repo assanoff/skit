@@ -1008,7 +1008,7 @@ Scaffolded the %[1]q event: %[4]s.%[3]s (core/%[4]s), its route and handler
 
    q := queue.NewPG(log, db); _ = q.EnsureSchema(ctx)
    reg, mux := queue.NewRegistry(), queue.NewMux()
-   _ = %[1]s.Route(reg, "events", queue.WithEncoder(outbox.Envelope())) // queue.Drop() with no broker
+   _ = %[1]s.Route(reg, "events", queue.WithEncoder(outbox.JSON)) // queue.Drop() with no broker
    _ = %[1]s.Handle(mux, pub)
    _ = reg.Check("events", mux)
    events, _ := queue.Workers(log, q, outbox.Config("events"), mux.Handle, queue.WithMetrics(metrics))
