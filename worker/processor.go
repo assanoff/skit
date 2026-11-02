@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -13,55 +14,48 @@ import (
 	"github.com/assanoff/skit/safetick"
 )
 
-// Source leases a batch of pending items for processing. Implementations must be
-// safe to run from multiple replicas concurrently — the canonical SQL backing is
-// SELECT ... FOR UPDATE SKIP LOCKED, which hands each item to exactly one caller.
-// now is the processor's wall clock for the tick (passed in so it is testable);
-// limit bounds the batch size.
-type Source[T any] interface {
-	Claim(ctx context.Context, now time.Time, limit int) ([]T, error)
+// Steps are what a Processor does with the items of its source. Claim,
+// Handle, MarkDone and MarkFailed are required; Release is optional.
+type Steps[T any] struct {
+	// Claim leases a batch of pending items for processing. It must be safe to
+	// run from multiple replicas concurrently — the canonical SQL backing is
+	// SELECT ... FOR UPDATE SKIP LOCKED, which hands each item to exactly one
+	// caller. now is the processor's wall clock for the tick (passed in so it
+	// is testable); limit bounds the batch size.
+	Claim func(ctx context.Context, now time.Time, limit int) ([]T, error)
+	// Handle processes one claimed item. A nil error means success (the item
+	// goes to MarkDone); a non-nil error routes it to MarkFailed, with
+	// terminality decided by the processor's IsTerminal classifier.
+	Handle func(ctx context.Context, item T) error
+	// MarkDone records the success of an item.
+	MarkDone func(ctx context.Context, item T, now time.Time) error
+	// MarkFailed records a failure, where terminal distinguishes a permanent
+	// failure (move to a dead state) from a retryable one (return to pending
+	// for a later tick). errMsg has already been passed through errs.Sanitize
+	// by the processor.
+	MarkFailed func(ctx context.Context, item T, errMsg string, terminal bool, now time.Time) error
+	// Release returns claimed items to their source untouched: no attempt is
+	// counted and each item keeps its place. A Processor releases the rest of
+	// a batch it stops — at an error IsHalt accepts, at BatchTimeout or when
+	// its tick is canceled. items is never empty. When nil, the rest stays
+	// claimed until the source reclaims it on its own, such as by a lease that
+	// expires.
+	Release func(ctx context.Context, items []T) error
 }
 
-// Handler processes one claimed item. A nil error means success (the item is
-// passed to Sink.MarkDone); a non-nil error routes the item to Sink.MarkFailed,
-// with terminality decided by the processor's IsTerminal classifier.
-type Handler[T any] interface {
-	Handle(ctx context.Context, item T) error
-}
-
-// Sink records the outcome of processing an item. MarkDone acknowledges success;
-// MarkFailed records a failure, where terminal distinguishes a permanent failure
-// (move to a dead state) from a retryable one (return to pending for a later
-// tick). errMsg has already been passed through errs.Sanitize by the processor.
-type Sink[T any] interface {
-	MarkDone(ctx context.Context, item T, now time.Time) error
-	MarkFailed(ctx context.Context, item T, errMsg string, terminal bool, now time.Time) error
-}
-
-// Releaser returns claimed items to their source untouched: no attempt is
-// counted and each item keeps its place. A Processor releases the rest of a
-// batch it stops — at an error IsHalt accepts, at BatchTimeout or when its tick is
-// canceled — through its Sink, when the Sink implements Releaser; otherwise the
-// rest stays claimed until the source reclaims it on its own, such as by a
-// lease that expires. items is never empty.
-type Releaser[T any] interface {
-	Release(ctx context.Context, items []T) error
-}
-
-// SourceFunc adapts a plain function to a Source.
-type SourceFunc[T any] func(ctx context.Context, now time.Time, limit int) ([]T, error)
-
-// Claim implements Source.
-func (f SourceFunc[T]) Claim(ctx context.Context, now time.Time, limit int) ([]T, error) {
-	return f(ctx, now, limit)
-}
-
-// HandlerFunc adapts a plain function to a Handler.
-type HandlerFunc[T any] func(ctx context.Context, item T) error
-
-// Handle implements Handler.
-func (f HandlerFunc[T]) Handle(ctx context.Context, item T) error {
-	return f(ctx, item)
+// missing names the first required step that is nil, or returns "".
+func (s Steps[T]) missing() string {
+	switch {
+	case s.Claim == nil:
+		return "Claim"
+	case s.Handle == nil:
+		return "Handle"
+	case s.MarkDone == nil:
+		return "MarkDone"
+	case s.MarkFailed == nil:
+		return "MarkFailed"
+	}
+	return ""
 }
 
 // ProcessorConfig configures a Processor.
@@ -77,8 +71,8 @@ type ProcessorConfig struct {
 	// or the tick was canceled meanwhile.
 	HandleTimeout time.Duration
 	// BatchTimeout stops a batch that has run this long since its claim: no
-	// further item starts, and the rest goes back to the source through the
-	// Sink as a Releaser. Set it to the lease of the source minus HandleTimeout
+	// further item starts, and the rest goes back to the source through
+	// Steps.Release. Set it to the lease of the source minus HandleTimeout
 	// and a margin, so that no item is handled past its lease. 0 = no bound.
 	BatchTimeout time.Duration
 	// IsTerminal classifies a Handle error as permanent (true) or retryable
@@ -86,7 +80,7 @@ type ProcessorConfig struct {
 	IsTerminal func(err error) bool
 	// IsHalt reports whether a Handle error stops the batch: that item is
 	// marked failed as IsTerminal says, and the rest goes back to the source
-	// untouched through the Sink as a Releaser. Have it accept the errors that
+	// untouched through Steps.Release. Have it accept the errors that
 	// mean a dependency is down, so the rest of the batch would fail the same
 	// way. When nil, no error stops the batch.
 	IsHalt func(err error) bool
@@ -131,25 +125,28 @@ func retryPanic(_ context.Context, _ any, p *safetick.PanicError) error {
 const markTimeout = 5 * time.Second
 
 // Processor is the reliable batch-processing FSM shared by the queue workers
-// and push pipelines: each tick leases a batch from the Source, runs the
-// Handler on each item, then records the outcome via the Sink (done on
-// success, failed/terminal-or-retryable on error). A panic in the
-// Handler is recovered per item and becomes its outcome through OnPanic.
+// and push pipelines: each tick claims a batch, handles each item, then
+// records its outcome (MarkDone on success, MarkFailed, terminal or
+// retryable, on error). A panic in Handle is recovered per item and becomes
+// its outcome through OnPanic.
 //
 // A Processor is not itself a Runnable; call Tick to get a TickFunc and wrap it
-// in a Loop to run it on a schedule. Run several processors over the same Source
+// in a Loop to run it on a schedule. Run several processors over the same source
 // for higher throughput — SKIP LOCKED coordinates the claims.
 type Processor[T any] struct {
-	src  Source[T]
-	h    Handler[T]
-	sink Sink[T]
-	cfg  ProcessorConfig
-	log  *slog.Logger
+	steps Steps[T]
+	cfg   ProcessorConfig
+	log   *slog.Logger
 }
 
-// NewProcessor builds a Processor. log may be nil.
-func NewProcessor[T any](log *slog.Logger, src Source[T], h Handler[T], sink Sink[T], cfg ProcessorConfig) *Processor[T] {
-	return &Processor[T]{src: src, h: h, sink: sink, cfg: cfg.withDefaults(), log: log}
+// NewProcessor builds a Processor that runs s. log may be nil. It panics when
+// a required step of s is nil: a wiring mistake, caught as the service starts.
+func NewProcessor[T any](log *slog.Logger, s Steps[T], cfg ProcessorConfig) *Processor[T] {
+	cfg = cfg.withDefaults()
+	if name := s.missing(); name != "" {
+		panic(fmt.Sprintf("worker: processor %q: Steps.%s is nil", cfg.Name, name))
+	}
+	return &Processor[T]{steps: s, cfg: cfg, log: log}
 }
 
 // Tick returns the processor's drain cycle as a TickFunc suitable for NewLoop
@@ -164,7 +161,7 @@ func (p *Processor[T]) PacedTick() PacedTickFunc { return p.drain }
 
 // process runs one full claim -> handle -> mark cycle. It returns an error only
 // when the claim itself fails (so the surrounding Loop can log it); per-item
-// failures are recorded via the Sink and abort the batch only when IsHalt
+// failures are recorded with MarkFailed and abort the batch only when IsHalt
 // accepts them.
 // A canceled tick or BatchTimeout stops the batch before its next item.
 func (p *Processor[T]) process(ctx context.Context) error {
@@ -176,7 +173,7 @@ func (p *Processor[T]) process(ctx context.Context) error {
 func (p *Processor[T]) drain(ctx context.Context) (Pace, error) {
 	start := p.cfg.Now()
 
-	items, err := p.src.Claim(ctx, start, p.cfg.BatchSize)
+	items, err := p.steps.Claim(ctx, start, p.cfg.BatchSize)
 	if err != nil {
 		return Idle, err
 	}
@@ -211,16 +208,15 @@ func (p *Processor[T]) stops(err error) bool {
 	return err != nil && p.cfg.IsHalt(err)
 }
 
-// release hands the rest of a stopped batch back to the source, when the Sink
-// is a Releaser. A failed release is logged: the rest stays claimed until the
-// source reclaims it.
+// release hands the rest of a stopped batch back to the source, when
+// Steps.Release is set. A failed release is logged: the rest stays claimed
+// until the source reclaims it.
 func (p *Processor[T]) release(ctx context.Context, rest []T) {
-	r, ok := p.sink.(Releaser[T])
-	if !ok || len(rest) == 0 {
+	if p.steps.Release == nil || len(rest) == 0 {
 		return
 	}
 	err := settle(ctx, func(c context.Context) error {
-		return r.Release(c, rest)
+		return p.steps.Release(c, rest)
 	})
 	if err != nil && p.log != nil {
 		p.log.ErrorContext(ctx, "processor release failed", "worker", p.cfg.Name, "err", err)
@@ -241,9 +237,9 @@ func (p *Processor[T]) handleOne(ctx context.Context, item T) error {
 	markErr := settle(ctx, func(c context.Context) error {
 		if handleErr != nil {
 			terminal := p.cfg.IsTerminal(handleErr)
-			return p.sink.MarkFailed(c, item, errs.Sanitize(handleErr.Error()), terminal, now)
+			return p.steps.MarkFailed(c, item, errs.Sanitize(handleErr.Error()), terminal, now)
 		}
-		return p.sink.MarkDone(c, item, now)
+		return p.steps.MarkDone(c, item, now)
 	})
 
 	if markErr != nil && p.log != nil {
@@ -265,7 +261,9 @@ func (p *Processor[T]) handle(ctx context.Context, item T) error {
 	// runs with the mark lifted and sets the trace of the item itself. The
 	// mark stays suppressed.
 	err := p.bounded(otel.Unsuppress(ctx), func(c context.Context) error {
-		return safetick.Call(func() error { return p.h.Handle(c, item) })
+		return safetick.Call(func() error {
+			return p.steps.Handle(c, item)
+		})
 	})
 	pe, ok := errors.AsType[*safetick.PanicError](err)
 	if !ok {

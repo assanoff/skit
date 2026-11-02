@@ -12,9 +12,7 @@
 //     (NewLoop) or adaptively paced (NewPacedLoop).
 //   - Pool: bounded-concurrency fan-out of one-shot jobs.
 //   - Processor[T]: a reliable claim -> handle -> ack/retry batch pipeline,
-//     built from a Source, Handler, and Sink, and run as a Loop.
-//   - Retry[T]: wraps a Handler with in-process retry (over the retry package)
-//     so transient failures are absorbed before the Sink records the outcome.
+//     built from Steps (functions) and run as a Loop.
 //
 // # Loops and pacing
 //
@@ -28,20 +26,21 @@
 // # Processors
 //
 // A Processor[T] is the reliable batch-processing FSM behind the queue workers
-// and other claim-based consumers. Each tick it leases a batch from a Source
-// (canonically SELECT ... FOR UPDATE SKIP LOCKED, so replicas can run
-// concurrently), runs the Handler on each item, then records the outcome via
-// the Sink (MarkDone on success, MarkFailed on error with terminal/retryable
-// decided by IsTerminal). An error IsHalt accepts stops the batch, and a Sink
-// that is a Releaser returns the rest to the Source
-// untouched: a dependency that is down costs one failed item per tick, not a
-// batch. A canceled tick and BatchTimeout stop the batch before its next item
-// and release the rest the same way, so no item is handled past the lease of
-// its source. Marks and releases run without the cancellation of the tick,
-// each under its own timeout: an item handled at shutdown is still
-// acknowledged. A panic in the Handler is recovered per item and logged with
-// its stack; by default the item is retried, and OnPanic can decide otherwise.
-// A Processor is not itself a Runnable: call Tick (or PacedTick) to get a tick
+// and other claim-based consumers. Its Steps are functions: each tick Claim
+// leases a batch (canonically SELECT ... FOR UPDATE SKIP LOCKED, so replicas
+// can run concurrently), Handle runs on each item, then MarkDone or MarkFailed
+// records the outcome (terminal or retryable, as IsTerminal decides). An error
+// IsHalt accepts stops the batch, and Release, when set, returns the rest to
+// the source untouched: a dependency that is down costs one failed item per
+// tick, not a batch. A canceled tick and BatchTimeout stop the batch before
+// its next item and release the rest the same way, so no item is handled past
+// the lease of its source. Marks and releases run without the cancellation of
+// the tick, each under its own timeout: an item handled at shutdown is still
+// acknowledged. A panic in Handle is recovered per item and logged with its
+// stack; by default the item is retried, and OnPanic can decide otherwise.
+// Claim, Handle, MarkDone and MarkFailed are required: NewProcessor panics
+// when one is nil. In-process retry of an item is retry.Do inside Handle. A
+// Processor is not itself a Runnable: call Tick (or PacedTick) to get a tick
 // function and wrap it in a Loop.
 //
 // # Usage
@@ -49,7 +48,14 @@
 // Wire a Processor into a Loop and supervise it (plus any other Runnables) in
 // a Group:
 //
-//	proc := worker.NewProcessor[Job](log, src, handler, sink, worker.ProcessorConfig{
+//	steps := worker.Steps[Job]{
+//	    Claim:      store.Claim,
+//	    Handle:     handle,
+//	    MarkDone:   store.MarkDone,
+//	    MarkFailed: store.MarkFailed,
+//	    Release:    store.Release, // optional
+//	}
+//	proc := worker.NewProcessor(log, steps, worker.ProcessorConfig{
 //	    Name:       "jobs",
 //	    BatchSize:  200,
 //	    IsTerminal: func(err error) bool {
@@ -119,9 +125,6 @@
 // IsHalt (nil = no error stops the batch), OnPanic (nil = a panicked item is
 // retried), Now (default
 // time.Now().UTC; override in tests).
-//
-// Retry wraps a Handler using retry.Config (Backoff + IsTerminal); the backoff
-// policy itself now lives in the retry package.
 //
 // GroupConfig: ShutdownTimeout (0 = no bound on how long Run waits for
 // Runnables to Stop).

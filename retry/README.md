@@ -170,18 +170,23 @@ its HTTP retries — the same `Backoff`, used as math rather than as a loop.
 
 ## Integration with the SDK
 
-### Wrap a worker Handler
+### Retry inside a worker Processor
 
-`worker.Retry` adds in-process retry to a `worker.Handler[T]`, absorbing
-transient errors before the Processor records the outcome:
+`retry.Do` inside `Steps.Handle` of a `worker.Processor` absorbs transient
+errors before the Processor records the outcome. The whole retry runs inside
+one lease of the item, so keep its budget well under the lease:
 
 ```go
-handler := worker.Retry[Job](retry.Config{
+cfg := retry.Config{
     Backoff:    retry.Backoff{Base: 50 * time.Millisecond, MaxAttempts: 3},
     IsTerminal: func(err error) bool { return errors.Is(err, ErrPermanent) },
-}, h)
-
-proc := worker.NewProcessor[Job](log, src, handler, sink, worker.ProcessorConfig{Name: "jobs"})
+}
+steps.Handle = func(ctx context.Context, job Job) error {
+    return retry.Do(ctx, cfg, func(ctx context.Context) error {
+        return handle(ctx, job)
+    })
+}
+proc := worker.NewProcessor(log, steps, worker.ProcessorConfig{Name: "jobs"})
 ```
 
 ### Back off a queue

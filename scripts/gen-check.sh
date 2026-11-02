@@ -35,8 +35,8 @@ add consumer payment --broker kafka
 add worker cleanup
 add worker mailer --claim
 add cron report
-add cron digest --lock postgres
-add cron sync --lock redis
+add cron digest --lock postgres --schedule "0 3 * * *"
+add cron sync --lock redis --schedule @hourly
 add event widget-created --core widget
 add event order-placed --core order
 add http-client billing

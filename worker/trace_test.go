@@ -77,32 +77,24 @@ func TestLoopTracesTicks(t *testing.T) {
 	is.Equal(errorType(spans[2]), "panic")
 }
 
-// markSink records whether the marks run suppressed.
-type markSink struct {
-	*memStore
-
-	suppressed []bool
-}
-
-func (s *markSink) MarkDone(ctx context.Context, item memItem, now time.Time) error {
-	s.suppressed = append(s.suppressed, otel.IsSuppressed(ctx))
-	return s.memStore.MarkDone(ctx, item, now)
-}
-
 // A Processor lifts the mark of a suppressed tick for each item's handler and
 // keeps it for the marks.
 func TestProcessorLiftsSuppressionForItems(t *testing.T) {
 	is := is.New(t)
 	store := newMemStore(memItem{1}, memItem{2})
-	sink := &markSink{memStore: store}
-	var handled []bool
-	p := NewProcessor[memItem](nil, store, HandlerFunc[memItem](func(ctx context.Context, _ memItem) error {
+	var handled, marked []bool
+	steps := store.steps(func(ctx context.Context, _ memItem) error {
 		handled = append(handled, otel.IsSuppressed(ctx))
 		return nil
-	}), sink, ProcessorConfig{Name: "test"})
+	})
+	steps.MarkDone = func(ctx context.Context, item memItem, now time.Time) error {
+		marked = append(marked, otel.IsSuppressed(ctx))
+		return store.markDone(ctx, item, now)
+	}
+	p := NewProcessor(nil, steps, ProcessorConfig{Name: "test"})
 
 	is.NoErr(p.Tick()(otel.Suppress(t.Context())))
 
 	is.Equal(handled, []bool{false, false})
-	is.Equal(sink.suppressed, []bool{true, true})
+	is.Equal(marked, []bool{true, true})
 }

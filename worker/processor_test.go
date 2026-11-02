@@ -14,13 +14,14 @@ import (
 // memItem is a trivial work item keyed by id.
 type memItem struct{ id int }
 
-// memStore is an in-memory Source+Sink recording outcomes for assertions.
+// memStore is an in-memory source recording outcomes for assertions.
 type memStore struct {
 	pending []memItem
 	claimed bool
 
 	done     []memItem
 	failed   []memItem
+	released []memItem
 	terminal map[int]bool
 	failMsg  map[int]string
 }
@@ -33,7 +34,18 @@ func newMemStore(items ...memItem) *memStore {
 	}
 }
 
-func (m *memStore) Claim(_ context.Context, _ time.Time, limit int) ([]memItem, error) {
+// steps runs handle over m. Release is nil, as for a source that reclaims its
+// items on its own; a test that releases sets it to m.release.
+func (m *memStore) steps(handle func(context.Context, memItem) error) Steps[memItem] {
+	return Steps[memItem]{
+		Claim:      m.claim,
+		Handle:     handle,
+		MarkDone:   m.markDone,
+		MarkFailed: m.markFailed,
+	}
+}
+
+func (m *memStore) claim(_ context.Context, _ time.Time, limit int) ([]memItem, error) {
 	if m.claimed {
 		return nil, nil // second tick: nothing left
 	}
@@ -44,25 +56,46 @@ func (m *memStore) Claim(_ context.Context, _ time.Time, limit int) ([]memItem, 
 	return m.pending, nil
 }
 
-func (m *memStore) MarkDone(_ context.Context, item memItem, _ time.Time) error {
+func (m *memStore) markDone(_ context.Context, item memItem, _ time.Time) error {
 	m.done = append(m.done, item)
 	return nil
 }
 
-func (m *memStore) MarkFailed(_ context.Context, item memItem, errMsg string, terminal bool, _ time.Time) error {
+func (m *memStore) markFailed(_ context.Context, item memItem, errMsg string, terminal bool, _ time.Time) error {
 	m.failed = append(m.failed, item)
 	m.terminal[item.id] = terminal
 	m.failMsg[item.id] = errMsg
 	return nil
 }
 
+func (m *memStore) release(_ context.Context, items []memItem) error {
+	m.released = append(m.released, items...)
+	return nil
+}
+
+// handleOK is a Handle that succeeds on every item.
+func handleOK(context.Context, memItem) error { return nil }
+
+// A required step left nil is a wiring mistake: NewProcessor panics and names
+// the step.
+func TestNewProcessorPanicsOnMissingStep(t *testing.T) {
+	is := is.New(t)
+	steps := newMemStore().steps(handleOK)
+	steps.MarkFailed = nil
+
+	defer func() {
+		is.Equal(recover(), `worker: processor "jobs": Steps.MarkFailed is nil`)
+	}()
+	NewProcessor(nil, steps, ProcessorConfig{Name: "jobs"})
+}
+
 func TestProcessorHappyPath(t *testing.T) {
 	store := newMemStore(memItem{1}, memItem{2}, memItem{3})
 	var handled []int
-	p := NewProcessor[memItem](nil, store, HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+	p := NewProcessor(nil, store.steps(func(_ context.Context, it memItem) error {
 		handled = append(handled, it.id)
 		return nil
-	}), store, ProcessorConfig{Name: "test"})
+	}), ProcessorConfig{Name: "test"})
 
 	if err := p.Tick()(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
@@ -75,41 +108,24 @@ func TestProcessorHappyPath(t *testing.T) {
 	}
 }
 
-// deadlineSink records the context its mark call receives, to assert the mark
-// gets its own timeout budget rather than the handler's.
-type deadlineSink struct {
-	markCtx context.Context
-}
-
-func (s *deadlineSink) MarkDone(ctx context.Context, _ memItem, _ time.Time) error {
-	s.markCtx = ctx
-	return nil
-}
-
-func (s *deadlineSink) MarkFailed(ctx context.Context, _ memItem, _ string, _ bool, _ time.Time) error {
-	s.markCtx = ctx
-	return nil
-}
-
+// The mark gets its own timeout budget rather than the handler's.
 func TestProcessorMarkGetsFreshTimeout(t *testing.T) {
-	src := SourceFunc[memItem](func(_ context.Context, _ time.Time, _ int) ([]memItem, error) {
-		return []memItem{{1}}, nil
-	})
-
-	var handleDeadline time.Time
-	h := HandlerFunc[memItem](func(ctx context.Context, _ memItem) error {
+	var handleDeadline, markDeadline time.Time
+	var ok bool
+	steps := newMemStore(memItem{1}).steps(func(ctx context.Context, _ memItem) error {
 		handleDeadline, _ = ctx.Deadline()
 		return nil
 	})
-
-	sink := &deadlineSink{}
-	p := NewProcessor[memItem](nil, src, h, sink, ProcessorConfig{HandleTimeout: 200 * time.Millisecond})
+	steps.MarkDone = func(ctx context.Context, _ memItem, _ time.Time) error {
+		markDeadline, ok = ctx.Deadline()
+		return nil
+	}
+	p := NewProcessor(nil, steps, ProcessorConfig{HandleTimeout: 200 * time.Millisecond})
 
 	if err := p.Tick()(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
 
-	markDeadline, ok := sink.markCtx.Deadline()
 	if !ok {
 		t.Fatal("mark ctx has no deadline")
 	}
@@ -125,12 +141,12 @@ func TestProcessorRetryableVsTerminal(t *testing.T) {
 	errTransient := errors.New("temporary network blip")
 
 	store := newMemStore(memItem{1}, memItem{2})
-	p := NewProcessor[memItem](nil, store, HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+	p := NewProcessor(nil, store.steps(func(_ context.Context, it memItem) error {
 		if it.id == 1 {
 			return errTerminal
 		}
 		return errTransient
-	}), store, ProcessorConfig{
+	}), ProcessorConfig{
 		IsTerminal: func(err error) bool { return errors.Is(err, errTerminal) },
 	})
 
@@ -153,9 +169,9 @@ func TestProcessorRetryableVsTerminal(t *testing.T) {
 
 func TestProcessorSanitizesErrorMessage(t *testing.T) {
 	store := newMemStore(memItem{1})
-	p := NewProcessor[memItem](nil, store, HandlerFunc[memItem](func(context.Context, memItem) error {
+	p := NewProcessor(nil, store.steps(func(context.Context, memItem) error {
 		return errors.New("auth failed token=supersecret")
-	}), store, ProcessorConfig{})
+	}), ProcessorConfig{})
 
 	if err := p.Tick()(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
@@ -168,10 +184,10 @@ func TestProcessorSanitizesErrorMessage(t *testing.T) {
 func TestProcessorEmptyClaimIsNoOp(t *testing.T) {
 	store := newMemStore() // nothing pending
 	called := false
-	p := NewProcessor[memItem](nil, store, HandlerFunc[memItem](func(context.Context, memItem) error {
+	p := NewProcessor(nil, store.steps(func(context.Context, memItem) error {
 		called = true
 		return nil
-	}), store, ProcessorConfig{})
+	}), ProcessorConfig{})
 
 	if err := p.Tick()(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
@@ -183,29 +199,15 @@ func TestProcessorEmptyClaimIsNoOp(t *testing.T) {
 
 func TestProcessorSurfacesClaimError(t *testing.T) {
 	wantErr := errors.New("db down")
-	src := SourceFunc[memItem](func(context.Context, time.Time, int) ([]memItem, error) {
+	steps := newMemStore().steps(handleOK)
+	steps.Claim = func(context.Context, time.Time, int) ([]memItem, error) {
 		return nil, wantErr
-	})
-	sink := newMemStore()
-	p := NewProcessor[memItem](nil, src, HandlerFunc[memItem](func(context.Context, memItem) error {
-		return nil
-	}), sink, ProcessorConfig{})
+	}
+	p := NewProcessor(nil, steps, ProcessorConfig{})
 
 	if err := p.Tick()(context.Background()); !errors.Is(err, wantErr) {
 		t.Errorf("expected claim error surfaced, got %v", err)
 	}
-}
-
-// releasingStore is a memStore that is also a Releaser.
-type releasingStore struct {
-	*memStore
-
-	released []memItem
-}
-
-func (s *releasingStore) Release(_ context.Context, items []memItem) error {
-	s.released = append(s.released, items...)
-	return nil
 }
 
 // An error IsHalt accepts stops the batch and the rest goes back; any other
@@ -215,13 +217,14 @@ func TestProcessorIsHalt(t *testing.T) {
 	errTerminal := errors.New("bad item")
 	errItem := errors.New("item failed")
 	errDown := errors.New("broker down")
-	store := &releasingStore{memStore: newMemStore(memItem{1}, memItem{2}, memItem{3}, memItem{4})}
+	store := newMemStore(memItem{1}, memItem{2}, memItem{3}, memItem{4})
 	var handled []int
-	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+	steps := store.steps(func(_ context.Context, it memItem) error {
 		handled = append(handled, it.id)
 		return map[int]error{1: errTerminal, 2: errItem, 3: errDown}[it.id]
 	})
-	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{
+	steps.Release = store.release
+	p := NewProcessor(nil, steps, ProcessorConfig{
 		BatchSize:  4,
 		IsTerminal: func(err error) bool { return errors.Is(err, errTerminal) },
 		IsHalt:     func(err error) bool { return errors.Is(err, errDown) },
@@ -236,15 +239,15 @@ func TestProcessorIsHalt(t *testing.T) {
 	is.Equal(pace, Idle)                             // a full but stopped batch does not drain again at once
 }
 
-func TestProcessorIsHaltWithoutReleaser(t *testing.T) {
+func TestProcessorIsHaltWithoutRelease(t *testing.T) {
 	is := is.New(t)
 	store := newMemStore(memItem{1}, memItem{2})
 	var handled int
-	h := HandlerFunc[memItem](func(context.Context, memItem) error {
+	steps := store.steps(func(context.Context, memItem) error {
 		handled++
 		return errors.New("down")
 	})
-	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{
+	p := NewProcessor(nil, steps, ProcessorConfig{
 		IsHalt: func(error) bool { return true },
 	})
 
@@ -255,10 +258,7 @@ func TestProcessorIsHaltWithoutReleaser(t *testing.T) {
 func TestProcessorFullBatchIsBusy(t *testing.T) {
 	is := is.New(t)
 	store := newMemStore(memItem{1}, memItem{2})
-	h := HandlerFunc[memItem](func(context.Context, memItem) error {
-		return nil
-	})
-	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{BatchSize: 2})
+	p := NewProcessor(nil, store.steps(handleOK), ProcessorConfig{BatchSize: 2})
 
 	pace, err := p.PacedTick()(t.Context())
 	is.NoErr(err)
@@ -270,13 +270,12 @@ func TestProcessorFullBatchIsBusy(t *testing.T) {
 func TestProcessorPanicRetries(t *testing.T) {
 	is := is.New(t)
 	store := newMemStore(memItem{1}, memItem{2}, memItem{3})
-	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+	p := NewProcessor(nil, store.steps(func(_ context.Context, it memItem) error {
 		if it.id == 2 {
 			panic("boom")
 		}
 		return nil
-	})
-	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{})
+	}), ProcessorConfig{})
 
 	is.NoErr(p.Tick()(t.Context()))
 	is.Equal(store.done, []memItem{{1}, {3}}) // the batch goes on past the panic
@@ -291,11 +290,11 @@ func TestProcessorOnPanic(t *testing.T) {
 	is := is.New(t)
 	errDead := errors.New("dead")
 	store := newMemStore(memItem{1}, memItem{2})
-	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+	steps := store.steps(func(_ context.Context, it memItem) error {
 		panic(it.id)
 	})
 	var seen []any
-	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{
+	p := NewProcessor(nil, steps, ProcessorConfig{
 		IsTerminal: func(err error) bool { return errors.Is(err, errDead) },
 		OnPanic: func(_ context.Context, item any, pe *safetick.PanicError) error {
 			seen = append(seen, item, pe.Value)
@@ -313,64 +312,55 @@ func TestProcessorOnPanic(t *testing.T) {
 	is.Equal(store.terminal[2], true)                   // terminal as IsTerminal says
 }
 
-// settleStore is a releasingStore that counts the marks and releases it got
-// with a done context.
-type settleStore struct {
-	*releasingStore
-
-	doneCtx int
-}
-
-func (s *settleStore) MarkDone(ctx context.Context, item memItem, now time.Time) error {
-	if ctx.Err() != nil {
-		s.doneCtx++
-	}
-	return s.memStore.MarkDone(ctx, item, now)
-}
-
-func (s *settleStore) Release(ctx context.Context, items []memItem) error {
-	if ctx.Err() != nil {
-		s.doneCtx++
-	}
-	return s.releasingStore.Release(ctx, items)
-}
-
 // A tick canceled mid-batch still marks the item it handled and releases the
 // rest instead of handling it.
 func TestProcessorCanceledMidBatch(t *testing.T) {
 	is := is.New(t)
 	ctx, cancel := context.WithCancel(t.Context())
-	store := &settleStore{releasingStore: &releasingStore{
-		memStore: newMemStore(memItem{1}, memItem{2}, memItem{3}),
-	}}
+	store := newMemStore(memItem{1}, memItem{2}, memItem{3})
 	var handled []int
-	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+	steps := store.steps(func(_ context.Context, it memItem) error {
 		handled = append(handled, it.id)
 		cancel() // shutdown while the item is handled
 		return nil
 	})
-	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{})
+	// doneCtx counts the marks and releases that got a done context.
+	doneCtx := 0
+	steps.MarkDone = func(ctx context.Context, item memItem, now time.Time) error {
+		if ctx.Err() != nil {
+			doneCtx++
+		}
+		return store.markDone(ctx, item, now)
+	}
+	steps.Release = func(ctx context.Context, items []memItem) error {
+		if ctx.Err() != nil {
+			doneCtx++
+		}
+		return store.release(ctx, items)
+	}
+	p := NewProcessor(nil, steps, ProcessorConfig{})
 
 	is.NoErr(p.Tick()(ctx))
 	is.Equal(handled, []int{1})                   // no item starts after the cancel
 	is.Equal(store.done, []memItem{{1}})          // the handled item is marked
 	is.Equal(store.released, []memItem{{2}, {3}}) // the rest goes back
-	is.Equal(store.doneCtx, 0)                    // neither on the canceled context
+	is.Equal(doneCtx, 0)                          // neither on the canceled context
 }
 
 // BatchTimeout stops the batch before its next item once it has run that long
 // since the claim, and releases the rest.
 func TestProcessorBatchTimeout(t *testing.T) {
 	is := is.New(t)
-	store := &releasingStore{memStore: newMemStore(memItem{1}, memItem{2}, memItem{3}, memItem{4})}
+	store := newMemStore(memItem{1}, memItem{2}, memItem{3}, memItem{4})
 	clock := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	var handled []int
-	h := HandlerFunc[memItem](func(_ context.Context, it memItem) error {
+	steps := store.steps(func(_ context.Context, it memItem) error {
 		handled = append(handled, it.id)
 		clock = clock.Add(time.Second) // each item takes a second
 		return nil
 	})
-	p := NewProcessor[memItem](nil, store, h, store, ProcessorConfig{
+	steps.Release = store.release
+	p := NewProcessor(nil, steps, ProcessorConfig{
 		BatchSize:    4,
 		BatchTimeout: 2 * time.Second,
 		Now:          func() time.Time { return clock },

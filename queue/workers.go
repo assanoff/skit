@@ -148,7 +148,14 @@ func newProcessor(log *slog.Logger, q *PG, cfg Config, h JobFunc, o options) *wo
 		backoff: o.backoff,
 		metrics: newTaskMetrics(o.metrics, cfg.Queue),
 	}
-	return worker.NewProcessor[leased](log, c, c, c, worker.ProcessorConfig{
+	steps := worker.Steps[leased]{
+		Claim:      c.Claim,
+		Handle:     c.Handle,
+		MarkDone:   c.MarkDone,
+		MarkFailed: c.MarkFailed,
+		Release:    c.Release,
+	}
+	return worker.NewProcessor(log, steps, worker.ProcessorConfig{
 		Name:          "queue-" + cfg.Queue,
 		BatchSize:     cfg.Batch,
 		HandleTimeout: cfg.Timeout,
@@ -208,13 +215,13 @@ type consumer struct {
 	metrics *taskMetrics
 }
 
-// Claim implements worker.Source.
+// Claim leases a batch of the tasks of the queue that are due at now.
 func (c *consumer) Claim(ctx context.Context, now time.Time, limit int) ([]leased, error) {
 	return c.q.claim(ctx, c.cfg.Queue, now, c.cfg.lease(), limit)
 }
 
-// Handle implements worker.Handler: it runs the handler of the queue and
-// records the metrics of the task. A panic is returned as a
+// Handle runs the handler of the queue on a task and records the metrics of
+// the task. A panic is returned as a
 // *safetick.PanicError, which the processor logs and passes to OnPanic.
 func (c *consumer) Handle(ctx context.Context, t leased) error {
 	start := time.Now()
@@ -223,12 +230,12 @@ func (c *consumer) Handle(ctx context.Context, t leased) error {
 	return err
 }
 
-// MarkDone implements worker.Sink: a handled task is removed.
+// MarkDone removes a handled task.
 func (c *consumer) MarkDone(ctx context.Context, t leased, _ time.Time) error {
 	return c.q.markDone(ctx, t)
 }
 
-// MarkFailed implements worker.Sink: the attempt counts, and the task dies
+// MarkFailed counts the attempt of a failed task: the task dies
 // when the error is terminal or the attempts are spent; otherwise it runs
 // again after the backoff of its attempts.
 func (c *consumer) MarkFailed(ctx context.Context, t leased, errMsg string, terminal bool, now time.Time) error {
@@ -237,7 +244,7 @@ func (c *consumer) MarkFailed(ctx context.Context, t leased, errMsg string, term
 	return c.q.markFailed(ctx, t, errMsg, dead, now, now.Add(c.backoff.Next(attempts)))
 }
 
-// Release implements worker.Releaser: the rest of a stopped batch goes back.
+// Release returns the rest of a stopped batch to the queue untouched.
 func (c *consumer) Release(ctx context.Context, rest []leased) error {
 	return c.q.release(ctx, rest)
 }
