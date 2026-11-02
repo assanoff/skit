@@ -3,8 +3,10 @@ package {{.Pkg}}
 import (
 	"context"
 	"log/slog"
-	"testing"
-	{{if .Locked}}"time"
+	{{if .Locked}}"sync/atomic"
+{{end}}	"testing"
+	{{if .Locked}}"testing/synctest"
+	"time"
 {{end}}
 	"github.com/matryer/is"
 {{if .Locked}}
@@ -13,7 +15,7 @@ import (
 
 func newTestCron() *Cron {
 	log := slog.New(slog.DiscardHandler)
-	return New(log{{if .Locked}}, stubLocker{ok: true}{{end}})
+	return New(log{{if .Locked}}, &stubLocker{ok: true}{{end}})
 }
 
 func TestRun(t *testing.T) {
@@ -28,18 +30,54 @@ func TestSchedulerBuilds(t *testing.T) {
 	is.Equal(s.Name(), Name)
 }
 {{if .Locked}}
-// stubLocker is a lock.Locker double: ok controls whether the lock is granted.
-type stubLocker struct{ ok bool }
+// stubLocker is a lock.Locker double: ok controls whether the lock is granted,
+// released counts the releases.
+type stubLocker struct {
+	ok       bool
+	released atomic.Int32
+}
 
-func (s stubLocker) TryLock(context.Context, string, time.Duration) (lock.Release, bool, error) {
-	return func() {}, s.ok, nil
+func (s *stubLocker) TryLock(context.Context, string, time.Duration) (lock.Release, bool, error) {
+	return func() { s.released.Add(1) }, s.ok, nil
 }
 
 func TestGuardedSkipsWhenLockHeld(t *testing.T) {
 	is := is.New(t)
 	log := slog.New(slog.DiscardHandler)
 
-	c := New(log, stubLocker{ok: false})      // lock always held elsewhere
-	is.NoErr(c.guarded(context.Background()))  // skips cleanly, no error
+	c := New(log, &stubLocker{ok: false})     // lock always held elsewhere
+	is.NoErr(c.guarded(context.Background())) // skips cleanly, no error
+}
+
+// A job that ends at once keeps the lock for lockHold: a replica whose tick
+// fires a moment later finds it held.
+func TestGuardedHoldsLock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		is := is.New(t)
+		locker := &stubLocker{ok: true}
+		c := New(slog.New(slog.DiscardHandler), locker)
+
+		is.NoErr(c.guarded(t.Context()))
+		synctest.Wait()
+		is.Equal(locker.released.Load(), int32(0)) // the job is done, the lock is held
+		time.Sleep(c.lockHold)
+		synctest.Wait()
+		is.Equal(locker.released.Load(), int32(1)) // released after lockHold
+	})
+}
+
+// A stopping service releases the lock at once.
+func TestGuardedReleasesOnStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		is := is.New(t)
+		locker := &stubLocker{ok: true}
+		c := New(slog.New(slog.DiscardHandler), locker)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		is.NoErr(c.guarded(ctx))
+		cancel()
+		synctest.Wait()
+		is.Equal(locker.released.Load(), int32(1)) // released before lockHold
+	})
 }
 {{end}}

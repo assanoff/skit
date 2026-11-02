@@ -15,6 +15,11 @@
 // The contract is deliberately minimal and non-blocking: TryLock either grabs
 // the lock now or reports it is held elsewhere. Callers that miss the lock skip
 // this round rather than queue — the right behavior for periodic jobs.
+//
+// A periodic job that ends quickly keeps the lock a while longer, until the
+// ticks of the other replicas are past: released at once, it lets a replica
+// whose tick fires a moment later run the job again. The template of
+// `skit add cron --lock` does so.
 package lock
 
 import (
@@ -36,8 +41,9 @@ type Locker interface {
 	//
 	// ttl bounds how long the lock survives a crashed holder: the Redis backend
 	// expires the key after ttl, while the Postgres backend ignores ttl and
-	// relies on connection death (its lock is session-scoped). Hold the lock only
-	// for the duration of the guarded work, then Release.
+	// relies on connection death (its lock is session-scoped). Hold the lock
+	// while the guarded work needs it, then Release; with Redis keep ttl above
+	// that time.
 	TryLock(ctx context.Context, key string, ttl time.Duration) (Release, bool, error)
 }
 

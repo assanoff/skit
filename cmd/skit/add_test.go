@@ -701,10 +701,25 @@ func TestAddCronPostgresLockVariant(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "dailyreport.go", src, parser.AllErrors); err != nil {
 		t.Errorf("locked cron does not parse: %v", err)
 	}
-	for _, want := range []string{"lock.Locker", "func (c *Cron) guarded(", "TryLock(", "0 3 * * *"} {
+	for _, want := range []string{"lock.Locker", "func (c *Cron) guarded(", "TryLock(", "0 3 * * *", "go releaseAfter("} {
 		if !strings.Contains(src, want) {
 			t.Errorf("postgres-lock cron missing %q:\n%s", want, src)
 		}
+	}
+}
+
+// @every counts from the start of each replica: a lock cannot make it fire
+// once per tick, so the generator refuses the pair.
+func TestAddCronLockRefusesEvery(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "github.com/me/svc")
+
+	err := addCron(&bytes.Buffer{}, dir, "", "cleanup", "@every 1m", "redis", false)
+	if err == nil || !strings.Contains(err.Error(), "@every 1m") {
+		t.Fatalf("addCron: want a refusal of @every, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal/app/crons/cleanup")); !os.IsNotExist(err) {
+		t.Errorf("refused cron must not write files: %v", err)
 	}
 }
 

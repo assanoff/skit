@@ -740,7 +740,7 @@ type addCronCommand struct {
 	Dir      string `long:"dir" default:"." description:"service root containing go.mod (default: current directory)"`
 	Module   string `long:"module" description:"module path (default: read from go.mod)"`
 	Schedule string `long:"schedule" default:"@every 1m" description:"cron spec: 5-field cron (min hour dom month dow) or an @-descriptor (@hourly, @every 1h30m)"`
-	Lock     string `long:"lock" choice:"none" choice:"postgres" choice:"redis" default:"none" description:"distributed lock so the job runs on one replica per tick: none | postgres (advisory lock) | redis (SET NX)"`
+	Lock     string `long:"lock" choice:"none" choice:"postgres" choice:"redis" default:"none" description:"distributed lock so the job runs on one replica per tick, with a five-field or @hourly-like schedule (not @every): none | postgres (advisory lock) | redis (SET NX)"`
 	NoTests  bool   `long:"no-tests" description:"skip generating the cron test"`
 	Args     struct {
 		Name string `positional-arg-name:"name" description:"cron name, e.g. cleanup or daily-report"`
@@ -753,10 +753,16 @@ func (c *addCronCommand) Execute([]string) error {
 
 // addCron generates a scheduled job into internal/app/crons/<name>. The job runs
 // on schedule via a cron.Scheduler; with lockBackend != "none" each tick is
-// gated on a lock.Locker so the job fires on one replica at a time.
+// gated on a lock.Locker so the job fires on one replica per tick. The lock
+// needs a schedule that ticks on every replica at once, so @every is refused.
 func addCron(out io.Writer, dir, module, name, schedule, lockBackend string, noTests bool) error {
 	if err := checkName(name, nil); err != nil {
 		return err
+	}
+	if lockBackend != "none" && strings.HasPrefix(schedule, "@every") {
+		return fmt.Errorf("--lock needs a schedule that ticks on every replica at once, "+
+			"five fields (\"* * * * *\") or a descriptor such as @hourly: %q counts from "+
+			"the start of each replica", schedule)
 	}
 	if dir == "" {
 		dir = "."
@@ -851,7 +857,8 @@ Scaffolded the %[1]q cron (schedule %[2]q). Next:
    // import: %[1]s "%[2]s/internal/app/crons/%[1]s"
 
    Note: without a lock this fires on EVERY replica. Use --lock postgres|redis
-   to run it on one replica per tick.
+   with a five-field or @hourly-like schedule to run it on one replica per
+   tick.
 
 3. go test ./internal/app/crons/%[1]s/...
 `, d.Pkg, d.Module)

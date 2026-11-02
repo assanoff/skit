@@ -3,6 +3,10 @@
 {{if .Locked}}//
 // It is lock-guarded, so across a fleet the job fires on at most one replica per
 // tick: each tick tries a lock.Locker and skips if another replica holds it.
+// The winner keeps the lock for lockHold even when the job ends sooner, so a
+// replica whose tick fires a moment later still finds it held. That needs a
+// schedule that ticks on every replica at once: five fields or a descriptor
+// such as @hourly, not @every, which counts from the start of each replica.
 {{end}}package {{.Pkg}}
 
 import (
@@ -28,16 +32,22 @@ const Name = "{{.Pkg}}"
 // clients, cores) as fields and set them in New.
 type Cron struct {
 	log *slog.Logger
-{{if .Locked}}	locker  lock.Locker
-	lockTTL time.Duration
+{{if .Locked}}	locker   lock.Locker
+	lockTTL  time.Duration
+	lockHold time.Duration
 {{end}}}
 
 // New builds the job.
 func New(log *slog.Logger{{if .Locked}}, locker lock.Locker{{end}}) *Cron {
 	return &Cron{
 		log: log,
-{{if .Locked}}		locker:  locker,
-		lockTTL: time.Minute, // bounds how long a crashed holder blocks others (redis); ignored by the pg backend
+{{if .Locked}}		locker: locker,
+		// lockTTL bounds how long a crashed holder blocks others (redis; the
+		// pg backend ignores it); keep it above lockHold.
+		lockTTL: time.Minute,
+		// lockHold outlasts the spread of the replicas' ticks and stays under
+		// the shortest tick of the schedule.
+		lockHold: 30 * time.Second,
 {{end}}	}
 }
 
@@ -50,7 +60,9 @@ func (c *Cron) run(ctx context.Context) error {
 {{if .Locked}}
 // guarded runs the job only if this replica wins the lock, so it fires on at
 // most one replica per tick. A tick that misses the lock is skipped (the job is
-// periodic — the next holder runs it next tick).
+// periodic — the next holder runs it next tick). The lock is kept for lockHold
+// from the win even when the job ends sooner: released at once, it would let a
+// replica whose tick fires a moment later run the job again.
 func (c *Cron) guarded(ctx context.Context) error {
 	release, ok, err := c.locker.TryLock(ctx, Name, c.lockTTL)
 	if err != nil {
@@ -60,8 +72,20 @@ func (c *Cron) guarded(ctx context.Context) error {
 		c.log.DebugContext(ctx, "cron tick skipped: lock held elsewhere", "job", Name)
 		return nil
 	}
-	defer release()
+	hold := time.After(c.lockHold)
+	defer func() { go releaseAfter(ctx, hold, release) }()
 	return c.run(ctx)
+}
+
+// releaseAfter frees the lock when hold fires, or at once when ctx ends (the
+// service stops). It runs in the background, so the run of the job is measured
+// without the hold.
+func releaseAfter(ctx context.Context, hold <-chan time.Time, release lock.Release) {
+	select {
+	case <-hold:
+	case <-ctx.Done():
+	}
+	release()
 }
 {{end}}
 // Scheduler builds the cron scheduler Runnable for this job. Add the returned
