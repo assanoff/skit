@@ -12,6 +12,8 @@ import (
 	"github.com/matryer/is"
 
 	"github.com/assanoff/skit/httpclient"
+	"github.com/assanoff/skit/httpmw"
+	"github.com/assanoff/skit/retry"
 )
 
 func TestNewPlainClientSendsRequest(t *testing.T) {
@@ -33,6 +35,32 @@ func TestNewPlainClientSendsRequest(t *testing.T) {
 	}
 	is.NoErr(httpclient.DoJSON(c, req, &out))
 	is.True(out.OK) // 2xx body decoded
+}
+
+// The retries of a call carry the key of its first attempt.
+func TestIdempotencyKeyStableAcrossRetries(t *testing.T) {
+	is := is.New(t)
+	var keys []string
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if len(keys) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+
+	c, err := httpclient.New(httpclient.Config{
+		Retry:             &httpmw.RetryConfig{Backoff: retry.Backoff{MaxAttempts: 3}},
+		IdempotencyHeader: "Idempotency-Key",
+		Base:              srv.Client().Transport,
+	})
+	is.NoErr(err)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(`{}`))
+	is.NoErr(httpclient.DoJSON(c, req, nil)) // 503, 503, 200
+	is.Equal(len(keys), 3)
+	is.True(keys[0] != "")
+	is.Equal(keys[1], keys[0]) // the retries keep the key
+	is.Equal(keys[2], keys[0])
 }
 
 func TestDoJSONNon2xxReturnsStatusError(t *testing.T) {

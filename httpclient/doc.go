@@ -7,7 +7,8 @@
 // The transport is composed from httpmw middlewares — retry (5xx/429 +
 // Retry-After), a User-Agent, an idempotency key, arbitrary headers — and, when
 // OAuth2 is configured, an OAuth2 client_credentials bearer. Composition order
-// (httpmw.Chain) puts retry outermost and auth innermost, so a retried attempt
+// (httpmw.Chain) puts the idempotency key outermost, retry below it and auth
+// innermost: every attempt of a call carries one key, and a retried attempt
 // re-attaches the current token.
 //
 // # Usage
@@ -57,7 +58,7 @@
 //   - Retry: retry 5xx/429 with Retry-After; nil disables retries.
 //   - OAuth2: client_credentials bearer; nil disables it.
 //   - UserAgent, Version, Environment: "product/version (env)" User-Agent.
-//   - IdempotencyHeader: per-request idempotency key under this header.
+//   - IdempotencyHeader: an idempotency key per call, the same for its retries.
 //   - Headers: static headers on every request.
 //   - Base: the wire transport (default http.DefaultTransport).
 //   - TracerProvider: records the client spans; nil → the global provider.

@@ -1,6 +1,7 @@
 package httpmw
 
 import (
+	"cmp"
 	"net/http"
 	"slices"
 	"uuid"
@@ -69,14 +70,16 @@ func UserAgent(product, version, env string) Middleware {
 }
 
 // IdempotencyKey returns a Middleware that sets header to a fresh UUID v4 only
-// when the caller has not already set it. Leaving an existing value intact is
-// what makes it retry-safe: a retried request carries the same key, so the
-// server dedupes repeated attempts of one logical call. A blank header defaults
-// to "Idempotency-Key".
+// when the caller has not already set it. A blank header defaults to
+// "Idempotency-Key".
+//
+// Put it outside Retry in a Chain: the key is set once, and every attempt of
+// the call carries it, so the server dedupes them. Below Retry each attempt
+// gets a key of its own. A call the caller repeats above the client keeps one
+// key only when the caller sets the header itself: an existing value is left
+// intact.
 func IdempotencyKey(header string) Middleware {
-	if header == "" {
-		header = "Idempotency-Key"
-	}
+	header = cmp.Or(header, "Idempotency-Key")
 	return func(next http.RoundTripper) http.RoundTripper {
 		return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			if r.Header.Get(header) == "" {

@@ -45,8 +45,9 @@ type Config struct {
 	// Version, Environment refine the User-Agent to "product/version (env)".
 	Version     string
 	Environment string
-	// IdempotencyHeader, when non-empty, injects a per-request idempotency key
-	// under this header (retry-safe: kept stable across retries).
+	// IdempotencyHeader, when non-empty, injects an idempotency key per call
+	// under this header, the same for all its retries. A request that already
+	// carries the header keeps its value.
 	IdempotencyHeader string
 	// Headers are static headers set on every request.
 	Headers map[string]string
@@ -80,16 +81,17 @@ func New(cfg Config) (*http.Client, error) {
 		base = oauthRT
 	}
 
-	// Outermost first: retry wraps everything; then per-request decorations.
+	// Outermost first: the idempotency key is set once per call, so every
+	// attempt of the retry below carries it; then per-request decorations.
 	var mws []httpmw.Middleware
+	if cfg.IdempotencyHeader != "" {
+		mws = append(mws, httpmw.IdempotencyKey(cfg.IdempotencyHeader))
+	}
 	if cfg.Retry != nil {
 		mws = append(mws, httpmw.Retry(*cfg.Retry))
 	}
 	if cfg.UserAgent != "" {
 		mws = append(mws, httpmw.UserAgent(cfg.UserAgent, cfg.Version, cfg.Environment))
-	}
-	if cfg.IdempotencyHeader != "" {
-		mws = append(mws, httpmw.IdempotencyKey(cfg.IdempotencyHeader))
 	}
 	for k, v := range cfg.Headers {
 		mws = append(mws, httpmw.SetHeader(k, v))
