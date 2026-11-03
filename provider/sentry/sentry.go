@@ -22,6 +22,9 @@ type Config struct {
 	DSN string
 	// Environment tags the events, e.g. "production".
 	Environment string
+	// Release names the build of the service in the events, e.g.
+	// buildinfo.Read().Version; empty leaves it to sentry-go (SENTRY_RELEASE).
+	Release string
 	// Debug enables the debug logging of the Sentry SDK.
 	Debug bool
 	// IgnoreErrors is appended to the default ignore list ("context canceled").
@@ -38,6 +41,7 @@ func Resource(cfg Config) func(ctx context.Context) (*sentry.Hub, dim.CleanupFun
 		err := sentry.Init(sentry.ClientOptions{
 			Dsn:          cfg.DSN,
 			Environment:  cfg.Environment,
+			Release:      cfg.Release,
 			Debug:        cfg.Debug,
 			IgnoreErrors: append([]string{"context canceled"}, cfg.IgnoreErrors...),
 		})

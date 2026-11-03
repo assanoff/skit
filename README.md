@@ -54,6 +54,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `auth` | `Principal` in context, credential extraction, pluggable `Verifier`, built-in JWT (HMAC/RSA/EC + JWKS via Keyfunc), `Authenticate`/`Optional`/`RequireRole` middleware |
 | `metrics` | Prometheus registry + HTTP middleware; extensible model — one shared registry, each package owns its collectors, `Register` (register-or-get) makes it conflict-free so SDK and app metrics coexist |
 | `health` | Liveness/readiness handlers for Kubernetes probes |
+| `buildinfo` | The build of the running binary (`Read`): version from VCS or a link-time stamp, revision, time, Go version; for the log, the Resource, Sentry and `GET /version` |
 | `debugsrv` | `net/http/pprof` + optional metrics/health as one `http.Handler` (`Handler`); run it standalone on a separate port (`New`, a `worker.Runnable` that is also an `http.Handler`), attach it to the app router at `Paths`, or mount pprof alone (`Pprof`) |
 | `migrate` | goose wrapper applying SQL migrations from an `fs.FS` via the Provider API (no goose global state) |
 | `httpmw` | Outbound HTTP-client middleware: `RetryTransport` retries 429/503 with `worker.Backoff` + RFC 7231 `Retry-After` |

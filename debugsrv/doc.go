@@ -62,5 +62,5 @@
 //   - Liveness: when set, served at /healthz.
 //   - Readiness: when set, served at /readyz.
 //   - Startup: when set, served at /startupz (Kubernetes startup probe).
-//   - Version: when non-nil, encoded as JSON at /version (build/version info).
+//   - Version: when non-nil, encoded as JSON at /version, e.g. buildinfo.Read().
 package debugsrv

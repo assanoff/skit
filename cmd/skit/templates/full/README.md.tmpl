@@ -37,7 +37,7 @@ return run(c.ServerOpts,
 `WithServer(addr, route sets…)` adds an HTTP server; an empty address adds none,
 so clearing `HTTP_ADDR` or `DEBUG_ADDR` turns that server off. `Install` is the
 business API with its request middleware chain; `Debug` is the technical sets —
-`Health` (`/healthz`, `/readyz`), `Metrics`, `Pprof`, `Info` (`/debug/components`).
+`Health` (`/healthz`, `/readyz`), `Metrics`, `Pprof`, `Info` (`/version`, `/debug/components`).
 Every command serves `Debug` on `DEBUG_ADDR`, so the probes work in every process —
 point the Kubernetes probes there and the same manifest fits every pod. In a
 container set `DEBUG_ADDR=:6060`; the default `localhost:6060` is not reachable by
@@ -45,6 +45,10 @@ the kubelet. To put a set on another port, edit the command's list.
 
 `GET /debug/components` reports what the process runs — the same values it logs
 at startup: `{"servers":[":8080","localhost:6060"],"workers":0,"consumers":0}`.
+`GET /version` reports the build, which `go build` stamps from git:
+`{"version":"v1.2.3","revision":"…","time":"…","go":"go1.27.2"}`. A build without
+`.git`, such as in Docker, stamps the version itself:
+`go build -ldflags "-X github.com/assanoff/skit/buildinfo.version=$(VERSION)"`.
 
 A wall-clock cron in the worker process fires once per replica — keep the worker at
 one replica or gate the job with a `lock.Locker` (`skit add cron --lock`).

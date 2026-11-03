@@ -1,15 +1,18 @@
 package cmd
 
-import "fmt"
+import (
+	"fmt"
 
-// version is overridable at build time with -ldflags "-X '{{.Module}}/internal/cmd.version=...'".
-var version = "dev"
+	"github.com/assanoff/skit/buildinfo"
+)
 
-// VersionCommand prints the build version.
+// VersionCommand prints the build: the version, the VCS revision and time,
+// and the Go version. A build without .git stamps its version with
+// -ldflags "-X github.com/assanoff/skit/buildinfo.version=...".
 type VersionCommand struct{}
 
 // Execute implements flags.Commander.
 func (VersionCommand) Execute([]string) error {
-	fmt.Println("{{.Name}}", version)
+	fmt.Println("{{.Name}}", buildinfo.Read())
 	return nil
 }

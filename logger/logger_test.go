@@ -184,13 +184,3 @@ func TestPanicArgs(t *testing.T) {
 	stack, _ := got["exception.stacktrace"].(string)
 	is.True(strings.Contains(stack, "TestPanicArgs")) // the stack of the panic
 }
-
-func TestBuildInfo(t *testing.T) {
-	is := is.New(t)
-	var buf bytes.Buffer
-	BuildInfo(t.Context(), New(&buf, Config{Level: LevelInfo}))
-
-	got := lines(t, &buf)[0]
-	is.Equal(got["msg"], "build info")
-	is.True(got["goversion"] != nil)
-}

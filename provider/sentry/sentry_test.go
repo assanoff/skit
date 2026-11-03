@@ -13,10 +13,12 @@ func TestResourceWithoutDSN(t *testing.T) {
 	is := is.New(t)
 	t.Setenv("SENTRY_DSN", "") // the SDK reads it when Config.DSN is empty
 
-	hub, cleanup, err := sentry.Resource(sentry.Config{Environment: "test"})(context.Background())
+	cfg := sentry.Config{Environment: "test", Release: "v1.2.3"}
+	hub, cleanup, err := sentry.Resource(cfg)(context.Background())
 	is.NoErr(err)
 	is.True(hub != nil)
 	is.Equal(hub.Client().Options().Environment, "test")
+	is.Equal(hub.Client().Options().Release, "v1.2.3")
 	is.NoErr(cleanup())
 }
 

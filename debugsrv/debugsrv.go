@@ -31,8 +31,8 @@ type Config struct {
 	// Startup, when set, is served at /startupz (Kubernetes startup probe). Pass
 	// health.Liveness() for an always-OK probe, or a custom check.
 	Startup http.Handler
-	// Version, when non-nil, is encoded as JSON at /version — typically a small
-	// struct or map of build info (name, version, commit, build date, env).
+	// Version, when non-nil, is encoded as JSON at /version — typically
+	// buildinfo.Read(), the build of the binary.
 	Version any
 }
 

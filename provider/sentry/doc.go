@@ -6,7 +6,7 @@
 //
 // A service made by `skit new --full` has no Sentry and does not build
 // sentry-go. Copy the parts below to add it; Sentry is on iff SENTRY_DSN is
-// set, and the events are tagged with APP_ENV.
+// set, and the events are tagged with APP_ENV and the version of the build.
 //
 // internal/app/config/opts.go — the group in ServerOpts and its type:
 //
@@ -28,6 +28,7 @@
 //	    _, cleanup, err := sentry.Resource(sentry.Config{
 //	        DSN:         c.Opts.Sentry.DSN,
 //	        Environment: c.Opts.Env,
+//	        Release:     buildinfo.Read().Version,
 //	    })(context.Background())
 //	    return cleanup, err
 //	}
@@ -45,6 +46,7 @@
 //
 //   - DSN: the project DSN; empty disables the transport.
 //   - Environment: tags the events.
+//   - Release: the build of the service, e.g. buildinfo.Read().Version.
 //   - Debug: the debug logging of the SDK.
 //   - IgnoreErrors: appended to the default ignore list ("context canceled").
 //   - FlushTimeout: bounds the flush on cleanup (default 2s).
