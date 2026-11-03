@@ -10,11 +10,12 @@ snapshot is identical to the latest one (ignoring the volatile `updated_at` /
 
 ```
 auditlog/             core: Core, Store, models, QueryFilter, Recorder, Compact, AsyncRecorder
-├── db/               Postgres implementation of Store (+ Schema/EnsureSchema)
+├── auditpg/          Postgres implementation of Store (+ Schema/EnsureSchema)
+├── audittest/        in-memory Store for tests
 ├── auditbus/         eventbus adapter — record over the in-process (or external) bus
-├── auditqueue/       durable, queue-backed Recorder + Worker
+├── auditqueue/       durable, queue-backed Recorder + its workers
 ├── auditrest/        read-side handler group (history / diff / changes)
-└── mocks/            generated Store mock (moq)
+└── internal/mocks/   generated Store mock (moq)
 ```
 
 ## Design: audit at the domain layer
@@ -100,7 +101,7 @@ for _, w := range workers {
 Mount the query endpoints on any skit router in one call:
 
 ```go
-auditrest.NewHandlers(core).Routes(r)              // or Routes(r, adminOnly)
+auditrest.NewHandlers(core).Routes(r.HandleApp)   // or Routes(r.HandleApp, adminOnly)
 ```
 
 | Method & path                                                 | Returns |
@@ -149,10 +150,20 @@ group.Add(worker.NewLoop(log, worker.LoopConfig{
 total (even downsample); `KeepRecent` always retains the newest N; `MinVersions`
 skips small histories. First and last are never removed.
 
+## Testing
+
+`audittest.NewStore()` is an in-memory `Store` with the semantics of the
+Postgres one, so a `Core` runs in tests and examples without a database:
+
+```go
+core := auditlog.NewCore(log, audittest.NewStore())
+```
+
 ## Limitations
 
-- The field-level `changes` diff compares scalar fields only; array changes and
-  removed keys are not reported. The textual `diff` (go-cmp) covers everything.
+- The field-level `changes` list a removed key with a nil new value, and an
+  added one with a nil old value; the textual `diff` (go-cmp) is for reading,
+  not parsing — its format is not stable.
 - History is returned unpaginated.
 - `auditqueue` does not guarantee per-model ordering across consumers — use a
   single consumer or `AsyncRecorder` when strict version ordering matters.

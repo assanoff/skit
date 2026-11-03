@@ -7,7 +7,7 @@
 //	tr, _ := translation.New(translation.Config{Store: store, DefaultLanguage: translation.LanguageRu,
 //	    SupportedLangs: []translation.Language{translation.LanguageRu, translation.LanguageKk}})
 //
-//	r := router.New(errorMapper, translationrest.Middleware(log, tr))
+//	r := router.New(translationrest.Middleware(log, tr))
 //
 // For the middleware to translate a response, the returned rest.ResponseEncoder must
 // expose its model(s):
@@ -23,9 +23,10 @@
 // once per request:
 //
 //	r := router.New(
-//	    localizeErrors(i18nTr),
+//	    mid.LocalizeErrors(i18nTr, i18n.LangFromContext),
 //	    translationrest.MiddlewareWithLang(log, tr, i18n.LangFromContext),
 //	)
+//	r.Use(i18nTr.Middleware()) // resolves the language once per request
 //
 // The LangFunc reads the language from the context threaded through the rest
 // chain, so the source can be the i18n middleware, an app reqctx getter, or any

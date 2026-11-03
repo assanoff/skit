@@ -116,8 +116,8 @@ func diff(curVer, prevVer []byte) (string, error) {
 	return diff, nil
 }
 
-// NormalizeDiff save line only contains the + sing and minus sign in the begiiing of the lines
-// all other lines are removed.
+// NormalizeDiff keeps only the lines of diff that start with + or -: the
+// fields that changed.
 func (c *Core) NormalizeDiff(diff string) string {
 	var result strings.Builder
 	for line := range strings.SplitSeq(diff, "\n") {

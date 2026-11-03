@@ -59,7 +59,8 @@ type job struct {
 }
 
 // NewAsyncRecorder builds an AsyncRecorder over core. It does not write anything
-// until Start is called; Record before Start (or after Stop) drops.
+// until Start is called: Record before Start buffers the entry, and Record once
+// Start has returned drops it.
 func NewAsyncRecorder(core *Core, cfg AsyncConfig) *AsyncRecorder {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 4

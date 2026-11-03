@@ -13,9 +13,9 @@ import (
 )
 
 // Recorder records an audit entry best-effort (errors are handled internally, not
-// returned). Transports (auditrest, auditgrpc, auditbus) depend on this interface
-// so the recording can be synchronous (*Core) or asynchronous (AsyncRecorder, or
-// a queue-backed recorder) without changing the call sites.
+// returned). Producers (auditbus.Register) depend on this interface so the
+// recording can be synchronous (*Core) or asynchronous (AsyncRecorder, or the
+// queue-backed auditqueue.Recorder) without changing the call sites.
 type Recorder interface {
 	Record(ctx context.Context, entry NewAuditLog)
 }
@@ -29,7 +29,7 @@ var ErrInvalidFilter = errors.New("invalid audit log query filter")
 
 // Core is the audit-log business logic: it records versioned model snapshots and
 // answers history/diff queries. It depends only on the Store interface declared
-// here; the Postgres implementation lives in the db subpackage.
+// here; the Postgres implementation lives in the auditpg subpackage.
 type Core struct {
 	log   *slog.Logger
 	store Store
@@ -62,6 +62,9 @@ func WithAutoCompact(every int, opts CompactOptions) Option {
 // Store is the persistence contract for audit log entries. A caller that needs
 // the audit write to commit atomically with its business change runs Create on
 // a Core over a store built on that transaction (auditpg.NewStore(log, tx)).
+// Save fails with dbx.ErrDBDuplicatedEntry when the model already has the
+// version, so Create retries at the next one; a model or a version that is not
+// stored is ErrNotFound.
 type Store interface {
 	Save(ctx context.Context, al AuditLog) error
 	QueryLastByModelID(ctx context.Context, modelType, modelID string) (AuditLog, error)
@@ -75,7 +78,7 @@ type Store interface {
 	// deleted. Used by Compact.
 	DeleteVersions(ctx context.Context, modelType, modelID string, versions []int) (int, error)
 	// OverThreshold lists models whose stored-version count exceeds threshold, up
-	// to limit. Used by the background Sweeper to find compaction candidates.
+	// to limit. Used by CompactBatch to find compaction candidates.
 	OverThreshold(ctx context.Context, threshold, limit int) ([]ModelRef, error)
 }
 
@@ -280,8 +283,8 @@ func (c *Core) maybeAutoCompact(ctx context.Context, entry AuditLog) {
 }
 
 // Record calls Create and logs any error instead of returning it, satisfying
-// Recorder. The transport adapters use it so an audit failure never affects the
-// response the user already received.
+// Recorder. AsyncRecorder and the auditbus subscription use it so an audit
+// failure never fails the change it records.
 func (c *Core) Record(ctx context.Context, entry NewAuditLog) {
 	if _, err := c.Create(ctx, entry); err != nil && c.log != nil {
 		c.log.ErrorContext(ctx, "auditlog: record failed",

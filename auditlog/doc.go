@@ -6,7 +6,8 @@
 // Version. Create is idempotent against no-op writes: if the new snapshot is
 // identical to the latest one (ignoring updated_at/updated_by) no new version is
 // stored. The Core depends only on the Store interface declared here; the
-// Postgres implementation lives in the auditpg subpackage.
+// Postgres implementation lives in the auditpg subpackage, an in-memory one for
+// tests in audittest.
 //
 // # Recording changes
 //
@@ -33,14 +34,15 @@
 //     Core over the business transaction).
 //   - AsyncRecorder      — in-process workers, sharded by model (per-model order),
 //     non-blocking; lost on crash.
-//   - auditqueue.Recorder — durable queue + Worker; survives crashes, smooths spikes.
+//   - auditqueue.Recorder — a task of a skit queue, written by its workers;
+//     survives crashes, smooths spikes.
 //
 // # Querying
 //
 //	last, err := core.QueryLastByModelID(ctx, "widget", id)
 //	hist, err := core.QueryHistoryByModelID(ctx, "widget", id)
 //	diff, err := core.QueryDiffByModelID(ctx, "widget", id, filter) // between two versions
-//	recs, err := core.QueryDiffAllVersionByModelID(ctx, "widget", id, filter)
+//	recs, err := core.QueryDiffAllVersionByModelID(ctx, "widget", id)
 //
 // The auditrest subpackage exposes a ready-made read-side handler group
 // (history / diff / changes) mountable on any skit router in one call:
@@ -55,13 +57,14 @@
 //   - Opportunistic, inline on write: WithAutoCompact makes Create compact the
 //     model it just wrote, once every N versions (best-effort, gated so most
 //     writes pay nothing) — often enough to keep history bounded on its own.
-//
 //   - On demand, in portions: CompactBatch compacts up to Limit models over a
 //     version threshold. Call it from an API handler, a CLI command, or a worker;
-//     loop until Result.Models is 0 to drain a backlog gently.
+//     loop until CompactResult.Models is 0 to drain a backlog gently.
 //
-//     core := auditlog.NewCore(log, store, auditlog.WithAutoCompact(100, opts)) // inline
-//     res, err := core.CompactBatch(ctx, auditlog.CompactBatchOptions{Threshold: 100, Limit: 50, Compact: opts})
+// In code:
+//
+//	core := auditlog.NewCore(log, store, auditlog.WithAutoCompact(100, opts)) // inline
+//	res, err := core.CompactBatch(ctx, auditlog.CompactBatchOptions{Threshold: 100, Limit: 50, Compact: opts})
 //
 // Scheduled compaction is wired with the worker package — auditlog ships no
 // built-in loop:
@@ -74,8 +77,8 @@
 //
 // # Concurrency
 //
-// Create is a read-modify-write (read latest version, insert version+1). The db
-// schema declares UNIQUE (model_type, model_id, version): a racing insert at the
-// same version fails with a duplicate-key error, and Create re-reads and retries
-// (bounded) so concurrent distinct changes are not lost.
+// Create is a read-modify-write (read latest version, insert version+1). The
+// auditpg schema declares UNIQUE (model_type, model_id, version): a racing
+// insert at the same version fails with a duplicate-key error, and Create
+// re-reads and retries (bounded) so concurrent distinct changes are not lost.
 package auditlog

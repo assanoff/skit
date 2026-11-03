@@ -102,7 +102,7 @@ your own `translation.Language{Code, Name}` for any other language.
 Install one app middleware; handlers just return their DTO:
 
 ```go
-r := router.New(errorMapper, translationrest.Middleware(log, tr))
+r := router.New(translationrest.Middleware(log, tr))
 ```
 
 For a response to translate, its `rest.ResponseEncoder` must expose its model(s):
@@ -153,8 +153,8 @@ tr.TranslateSlice(ctx, products, translation.LanguageKk)
 ## Validation
 
 ```go
-// Tags are well-formed (one primary, string fields):
-tr.ValidateTranslateTags(&Product{})
+// Tags are well-formed (one primary, string fields) and the key is set:
+tr.ValidateTranslateTags(&Product{ID: "123"})
 
 // All non-default languages have every translatable column (e.g. before publish):
 err := tr.CheckTranslationsExist(ctx, &Product{ID: "123", Title: "x", Description: "y"})

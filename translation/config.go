@@ -4,7 +4,7 @@ import "errors"
 
 // Config holds configuration for the Translator.
 type Config struct {
-	// Store is the translation storage backend (e.g. the postgres subpackage).
+	// Store is the translation storage backend (e.g. translationpg).
 	Store Store
 
 	// DefaultLanguage is the language the canonical content is authored in.

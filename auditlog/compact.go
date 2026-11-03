@@ -145,7 +145,7 @@ type CompactResult struct {
 
 // CompactBatch compacts one portion of the models whose version count exceeds the
 // threshold (most-versioned first), up to Limit models. It is the single reusable
-// entry point for scheduled (NewSweeper), command-line, or API-triggered runs —
+// entry point for scheduled (worker.Loop), command-line, or API-triggered runs —
 // call it repeatedly until Result.Models is 0 to drain a large backlog gently.
 func (c *Core) CompactBatch(ctx context.Context, opts CompactBatchOptions) (CompactResult, error) {
 	limit := opts.Limit

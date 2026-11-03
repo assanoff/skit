@@ -38,9 +38,7 @@ func Middleware(log *slog.Logger, t *translation.Translator, sources ...translat
 // (e.g. the code already resolved by the i18n middleware), so the language is
 // resolved once per request instead of parsed twice. Wire it as:
 //
-//	translationrest.MiddlewareWithLang(log, tr, func(r *http.Request) string {
-//	    return i18n.LangFromContext(r.Context())
-//	})
+//	translationrest.MiddlewareWithLang(log, tr, i18n.LangFromContext)
 func MiddlewareWithLang(log *slog.Logger, t *translation.Translator, lang LangFunc) rest.MidFunc {
 	return middleware(log, t, func(ctx context.Context, _ *http.Request) translation.Language {
 		return t.Match(lang(ctx))

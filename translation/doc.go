@@ -51,7 +51,7 @@
 // request language and translates the response in place, so handlers only return
 // their DTO:
 //
-//	r := router.New(errorMapper, translationrest.Middleware(log, tr))
+//	r := router.New(translationrest.Middleware(log, tr))
 //
 // A response is translated when its rest.ResponseEncoder is a Translatable (single model)
 // or a TranslatableList (collection — translated in one batch query). Translating
