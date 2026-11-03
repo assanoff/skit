@@ -1,6 +1,3 @@
-// Package consume is the consumer core of the broker adapters: it decodes a
-// delivery, runs the handler under panic recovery and records the handling as
-// a span and in the skit_broker_* metrics.
 package consume
 
 import (

@@ -1,5 +1,3 @@
-// Package runspan records a run of periodic work — a worker tick, a cron run —
-// as the root span of its own trace.
 package runspan
 
 import (

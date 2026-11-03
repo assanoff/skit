@@ -1,6 +1,3 @@
-// Package prom holds the Prometheus helpers the SDK packages share:
-// register-or-get, the bucket bounds of durations, the exemplar of a duration
-// and the metrics of the runs of periodic work.
 package prom
 
 import (

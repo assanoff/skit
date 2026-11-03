@@ -1,14 +1,3 @@
-// Package auditqueue is a durable, queue-backed auditlog.Recorder: Record enqueues
-// the audit entry onto a skit queue (one cheap INSERT on the request path)
-// and the workers of the queue (NewWorkers) drain it into the audit core. Use it when audit loss on
-// a crash is unacceptable or to smooth write spikes; for the lowest latency with
-// strict per-model ordering use auditlog.AsyncRecorder instead.
-//
-// Ordering note: the queue does not guarantee per-model order across consumers.
-// Core.Create retries on a version collision (so no row is lost), but if two
-// changes to one model are processed out of order their stored version order can
-// differ from real time. Run a single consumer, or use AsyncRecorder, when strict
-// ordering matters.
 package auditqueue
 
 import (

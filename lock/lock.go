@@ -1,25 +1,3 @@
-// Package lock provides distributed mutual exclusion for work that must run on
-// at most one replica at a time — most commonly a scheduled job (see the cron
-// package and `skit add cron`). A Locker hands out a short-lived, best-effort
-// lock keyed by a name; the holder does the work and releases it.
-//
-// Two backends implement Locker:
-//
-//   - PG (Postgres advisory locks): pg_try_advisory_lock on a dedicated
-//     connection. No external infrastructure beyond the database you already
-//     have; the lock releases automatically if the holding connection dies.
-//   - Redis (SET NX PX + a token-checked release): a TTL bounds how long a
-//     crashed holder can block others; release is fenced by a random token so
-//     one holder never frees another's lock.
-//
-// The contract is deliberately minimal and non-blocking: TryLock either grabs
-// the lock now or reports it is held elsewhere. Callers that miss the lock skip
-// this round rather than queue — the right behavior for periodic jobs.
-//
-// A periodic job that ends quickly keeps the lock a while longer, until the
-// ticks of the other replicas are past: released at once, it lets a replica
-// whose tick fires a moment later run the job again. The template of
-// `skit add cron --lock` does so.
 package lock
 
 import (

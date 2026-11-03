@@ -1,7 +1,3 @@
-// Package translationpg is the Postgres implementation of translation.Store.
-// It uses the skit dbx helpers for query logging and error translation, and
-// stores every translatable column as a row in the translations table keyed by
-// (model_name, column_name, key_id, language_id).
 package translationpg
 
 import (

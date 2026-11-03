@@ -10,6 +10,8 @@ SHOWCASE    ?= ../skit-x
 GOLANGCI    ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
 GORELEASE   ?= golang.org/x/exp/cmd/gorelease@v0.0.0-20261009195045-ca0d7ba23607
+# A report, not a gate, pinned all the same: the same list on every machine.
+DEADCODE    ?= golang.org/x/tools/cmd/deadcode@v0.52.0
 # Plain `=`, not `?=`: GNU make 3.81 (macOS) predefines LINT = lint, which `?=`
 # does not override. A local binary still works: make lint LINT=golangci-lint.
 LINT         = $(GO) run $(GOLANGCI)
@@ -114,8 +116,9 @@ fix-check: ## go fix -diff: modernizations and //go:fix inline are applied
 	$(GO) fix -diff ./...
 
 .PHONY: lint-rules
-lint-rules: ## Project rules: no else, one-line functions fit in 80 columns
+lint-rules: ## Project rules: no else, one-line functions fit in 80 columns, a doc.go in every package
 	@scripts/lint-rules.sh '^httplog/'
+	@scripts/lint-docs.sh
 
 .PHONY: gen-check
 gen-check: ## Scaffold a service with every `skit add` module and run its make check (needs buf)
@@ -128,6 +131,10 @@ collector-check: ## Validate the reference Collector config in docs/collector (n
 .PHONY: vuln
 vuln: ## Known vulnerabilities in reachable code
 	$(GO) run $(GOVULNCHECK) ./...
+
+.PHONY: deadcode
+deadcode: ## Report, not a gate: functions no test reaches — the API without tests or examples
+	$(GO) run $(DEADCODE) -test ./...
 
 .PHONY: tools
 tools: proto-tools ## Install convenience dev tools (scaffold, test output, proto)

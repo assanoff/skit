@@ -15,7 +15,7 @@ import (
 
 // Handlers is the read-side REST API for the audit log: history, diff between two
 // versions, and changed-fields across all versions. Mount it on any skit
-// router in one call with Routes; pair it with Middleware for the write side.
+// router in one call with Routes.
 type Handlers struct {
 	core *auditlog.Core
 }

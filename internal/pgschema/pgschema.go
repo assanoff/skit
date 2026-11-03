@@ -1,5 +1,3 @@
-// Package pgschema provisions the Postgres tables of the SDK storage packages
-// at startup and derives the advisory-lock keys of the SDK.
 package pgschema
 
 import (

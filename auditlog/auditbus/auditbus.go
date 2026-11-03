@@ -1,12 +1,3 @@
-// Package auditbus records audit entries from events on the in-process eventbus,
-// decoupling producers from the audit core: a producer publishes an Event on the
-// bus and Register subscribes the audit core to consume it, so a domain package
-// can request an audit write without importing auditlog.
-//
-// The same Record helper is exported for an external-bus (broker) consumer to
-// reuse: decode a delivered message into an Event and call Record. Together with
-// the auditrest middleware and a direct Core.Create call, the audit log can be
-// fed four ways — internal bus, external bus, HTTP/gRPC middleware, or directly.
 package auditbus
 
 import (
@@ -49,10 +40,9 @@ func Register(bus *eventbus.Bus, rec auditlog.Recorder) {
 	})
 }
 
-// Publish emits an audit Event on the bus for the registered consumer
-// (best-effort). Call bus.Call with the same data when the producer must abort on
-// a failed audit write. An Event that does not encode, such as one whose Payload
-// is not JSON, is an error.
+// Publish emits an audit Event on the bus for the registered recorder
+// (best-effort: the recorder handles a failed write itself). An Event that does
+// not encode, such as one whose Payload is not JSON, is an error.
 func Publish(ctx context.Context, bus *eventbus.Bus, ev Event) error {
 	d, err := eventbus.NewData(Domain, Action, ev)
 	if err != nil {

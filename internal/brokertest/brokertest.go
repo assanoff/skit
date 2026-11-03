@@ -1,7 +1,3 @@
-// Package brokertest starts the brokers of the skit tests in containers —
-// RabbitMQ and a single-node Kafka — pauses a container to stand for a broker
-// that stops answering, and packs messages in an envelope other than
-// CloudEvents.
 package brokertest
 
 import (

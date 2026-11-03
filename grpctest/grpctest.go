@@ -1,20 +1,3 @@
-// Package grpctest spins up an in-memory gRPC server for tests, the gRPC
-// counterpart of apitest. It runs a real grpcserver.Server — with the full skit
-// interceptor chain (recovery, tracing, logging, and the errs.Error -> gRPC
-// status mapping) — over an in-process bufconn listener, and hands back a
-// *grpc.ClientConn dialed to it. No TCP port is bound, so tests are hermetic and
-// free of port-conflict flakiness.
-//
-// Because the real interceptors run, an integration test asserts true gRPC
-// status codes (status.Code(err)) end to end, which a direct handler call
-// cannot: calling a handler method returns the raw *errs.Error, before the
-// errormap interceptor converts it to a status.
-//
-// Usage:
-//
-//	srv := grpctest.New(t, grpcserver.Config{}, []grpcserver.Service{handler})
-//	client := widgetv1.NewWidgetServiceClient(srv.Conn)
-//	resp, err := client.GetWidget(ctx, &widgetv1.GetWidgetRequest{Id: id})
 package grpctest
 
 import (

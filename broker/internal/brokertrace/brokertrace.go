@@ -1,4 +1,3 @@
-// Package brokertrace records the send span of the broker adapters.
 package brokertrace
 
 import (
