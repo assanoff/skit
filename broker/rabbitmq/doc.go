@@ -66,6 +66,15 @@
 // message that no binding matches without an error, so the event types are
 // part of the contract of the bindings.
 //
+// A Topic of DefaultExchange ("amq.default", the name the management API of
+// RabbitMQ gives it) sends a message to the default exchange: it goes straight
+// to the queue its routing key names, without a binding. Delivered from there,
+// the message has an empty Topic.
+//
+// A consumer puts the routing key of a delivery in Message.Headers under
+// RoutingKeyHeader. A publisher derives its own key and sends that header on
+// as an AMQP header.
+//
 // # Envelope
 //
 // WithEnvelope sets the broker.Envelope of a publisher and of a consumer, the
@@ -94,8 +103,9 @@
 //     WithEnvelope.
 //   - Consumer: NewConsumer(log, conn, ConsumerConfig, handler, opts...).
 //     Option: WithEnvelope. ConsumerConfig
-//     fields: Queue (required), Exchange (declared as a durable topic
-//     exchange), RoutingKeys (default ["#"] when Exchange is set), Concurrency
+//     fields: Queue (required), Exchange (declared as a durable exchange of
+//     ExchangeKind), ExchangeKind (topic by default; direct, fanout, headers),
+//     RoutingKeys (default ["#"] when Exchange is set), Concurrency
 //     (default 1), Name (default Queue), Metrics (the skit_broker_* registry;
 //     nil — off), TracerProvider (nil → the global provider). A delivery the
 //     envelope rejects is discarded (nack without requeue, so a dead-letter exchange of

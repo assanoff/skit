@@ -24,6 +24,11 @@ const scope = "github.com/assanoff/skit/broker/rabbitmq"
 // AMQP carries it in the content_type property.
 const contentTypeHeader = "content-type"
 
+// DefaultExchange names the default exchange of RabbitMQ, as its management API
+// does: a message with this Topic goes to the queue its routing key names,
+// without a binding.
+const DefaultExchange = "amq.default"
+
 // typeKey routes a message by its event type, the default routing key.
 func typeKey(m broker.Message) string { return m.Type }
 
@@ -92,7 +97,8 @@ func NewPublisher(conn *Conn, cfg PublisherConfig, opts ...PublisherOption) (*Pu
 
 // Publish sends m to the exchange m.Topic under its routing key as a
 // persistent message packed by the envelope, then blocks on the broker's
-// publisher confirmation. The span "send <exchange>" covers the send and the
+// publisher confirmation. A Topic of DefaultExchange sends it to the default
+// exchange. The span "send <exchange>" covers the send and the
 // confirmation; without a trace context in m.Headers it is the creation
 // context of the message and goes out in its headers.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
@@ -138,11 +144,15 @@ func (p *Publisher) send(ctx context.Context, m broker.Message, routingKey strin
 	maps.Copy(wire, m.Headers)
 	maps.Copy(wire, envHeaders)
 	table, contentType := amqpHeaders(wire)
+	exchange := m.Topic
+	if exchange == DefaultExchange {
+		exchange = ""
+	}
 
 	confirms, err := p.pub.PublishWithDeferredConfirmWithContext(
 		ctx, body,
 		[]string{routingKey},
-		rmq.WithPublishOptionsExchange(m.Topic),
+		rmq.WithPublishOptionsExchange(exchange),
 		rmq.WithPublishOptionsContentType(contentType),
 		rmq.WithPublishOptionsPersistentDelivery,
 		rmq.WithPublishOptionsHeaders(table),

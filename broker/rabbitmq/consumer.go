@@ -17,14 +17,22 @@ import (
 	"github.com/assanoff/skit/broker/internal/consume"
 )
 
+// RoutingKeyHeader is the header a Consumer puts the routing key of a delivery
+// in. A publisher derives a key of its own (WithRoutingKey) and sends this
+// header on as an AMQP header, like any other header of the message.
+const RoutingKeyHeader = "routing-key"
+
 // ConsumerConfig configures a Consumer.
 type ConsumerConfig struct {
 	// Queue is the queue to consume from (declared durable unless it already
 	// exists). Required.
 	Queue string
 	// Exchange to bind the queue to. When set, the exchange is declared as a
-	// durable topic exchange and the queue is bound with RoutingKeys.
+	// durable exchange of ExchangeKind and the queue is bound with RoutingKeys.
 	Exchange string
+	// ExchangeKind is the kind of the exchange: topic (default), direct,
+	// fanout or headers.
+	ExchangeKind string
 	// RoutingKeys bind the queue to the exchange (default ["#"] when Exchange
 	// is set but no keys are given).
 	RoutingKeys []string
@@ -80,7 +88,7 @@ func NewConsumer(log *slog.Logger, conn *Conn, cfg ConsumerConfig, h broker.Hand
 		rmqOpts = append(
 			rmqOpts,
 			rmq.WithConsumerOptionsExchangeName(cfg.Exchange),
-			rmq.WithConsumerOptionsExchangeKind("topic"),
+			rmq.WithConsumerOptionsExchangeKind(cmp.Or(cfg.ExchangeKind, "topic")),
 			rmq.WithConsumerOptionsExchangeDeclare,
 			rmq.WithConsumerOptionsExchangeDurable,
 		)
@@ -155,7 +163,7 @@ func (c *Consumer) close() {
 func (c *Consumer) dispatch(ctx context.Context, d rmq.Delivery) rmq.Action {
 	action := consume.Process(ctx, c.log, c.cfg.Name, c.env, consume.Delivery{
 		Body:    d.Body,
-		Headers: headers(d.Headers, d.ContentType),
+		Headers: headers(d.Headers, d.ContentType, d.RoutingKey),
 		Topic:   d.Exchange,
 	}, c.handler)
 	return toAction(action)
@@ -173,15 +181,16 @@ func toAction(a broker.Action) rmq.Action {
 	}
 }
 
-// headers projects the header table and the content_type property of an AMQP
-// delivery to the headers the envelope reads and broker.Message.Headers,
-// dropping non-string values (envelope and trace headers are strings), so the
-// consumer span continues the trace the message was created in.
-func headers(t amqp.Table, contentType string) map[string]string {
-	if len(t) == 0 && contentType == "" {
+// headers projects the header table, the content_type property and the routing
+// key of an AMQP delivery to the headers the envelope reads and
+// broker.Message.Headers, dropping non-string values (envelope and trace
+// headers are strings), so the consumer span continues the trace the message
+// was created in.
+func headers(t amqp.Table, contentType, routingKey string) map[string]string {
+	if len(t) == 0 && contentType == "" && routingKey == "" {
 		return nil
 	}
-	out := make(map[string]string, len(t)+1)
+	out := make(map[string]string, len(t)+2)
 	for k, v := range t {
 		if s, ok := v.(string); ok {
 			out[k] = s
@@ -189,6 +198,9 @@ func headers(t amqp.Table, contentType string) map[string]string {
 	}
 	if contentType != "" {
 		out[contentTypeHeader] = contentType
+	}
+	if routingKey != "" {
+		out[RoutingKeyHeader] = routingKey
 	}
 	return out
 }

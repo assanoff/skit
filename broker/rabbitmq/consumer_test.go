@@ -17,15 +17,16 @@ func TestToAction(t *testing.T) {
 	is.Equal(toAction(broker.Discard), rmq.NackDiscard)
 }
 
-// The headers of a delivery are its string header values and its content
-// type, under content-type.
+// The headers of a delivery are its string header values, its content type,
+// under content-type, and its routing key, under routing-key.
 func TestHeaders(t *testing.T) {
 	is := is.New(t)
-	is.Equal(headers(nil, ""), map[string]string(nil))
-	got := headers(amqp.Table{"traceparent": "00-abc", "x-retries": int32(2)}, "application/json")
+	is.Equal(headers(nil, "", ""), map[string]string(nil))
+	got := headers(amqp.Table{"traceparent": "00-abc", "x-retries": int32(2)}, "application/json", "widget.created")
 	is.Equal(got, map[string]string{
 		"traceparent":  "00-abc", // non-strings are dropped
 		"content-type": "application/json",
+		"routing-key":  "widget.created",
 	})
 }
 

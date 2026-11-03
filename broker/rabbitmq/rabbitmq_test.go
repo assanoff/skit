@@ -57,7 +57,7 @@ func TestPublishConsume(t *testing.T) {
 	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "test"})
 	is.NoErr(err)
 	t.Cleanup(func() { _ = pub.Close() })
-	waitBound(t, pub, got)
+	waitBound(t, pub, "widgets", got)
 	customKey := func(broker.Message) string { return "custom" }
 	custom, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "test"},
 		rabbitmq.WithRoutingKey(customKey))
@@ -115,7 +115,7 @@ func TestPublishConsume(t *testing.T) {
 		rabbitmq.WithEnvelope(brokertest.Raw{}))
 	is.NoErr(err)
 	t.Cleanup(func() { _ = rawPub.Close() })
-	waitBound(t, rawPub, rawGot)
+	waitBound(t, rawPub, "widgets", rawGot)
 
 	raw := broker.Message{
 		ID: "3", Type: "widget.raw", Topic: "widgets",
@@ -137,6 +137,70 @@ func TestPublishConsume(t *testing.T) {
 	is.Equal(receive(t, got).ID, after.ID)
 }
 
+// TestDefaultExchange sends a message to the default exchange: it goes to the
+// queue its routing key names, which no exchange binds. A direct exchange
+// matches the key as is, so a binding with a wildcard takes only that very key.
+// A consumer sees the routing key of a delivery under RoutingKeyHeader.
+func TestDefaultExchange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires docker")
+	}
+
+	is := is.New(t)
+	ctx := t.Context()
+	_, cfg := brokertest.RabbitMQ(ctx, t)
+	conn, err := rabbitmq.Dial(cfg)
+	is.NoErr(err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	queued := make(chan broker.Message, 64)
+	start(t, conn, rabbitmq.ConsumerConfig{Queue: "widgets.queued"}, queued)
+	direct := make(chan broker.Message, 64)
+	start(t, conn, rabbitmq.ConsumerConfig{
+		Queue:        "widgets.direct",
+		Exchange:     "widgets.direct",
+		ExchangeKind: "direct",
+		RoutingKeys:  []string{"ping", "widget.*"},
+	}, direct)
+
+	toQueue := func(broker.Message) string { return "widgets.queued" }
+	queuePub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "test"},
+		rabbitmq.WithRoutingKey(toQueue))
+	is.NoErr(err)
+	t.Cleanup(func() { _ = queuePub.Close() })
+	waitBound(t, queuePub, rabbitmq.DefaultExchange, queued)
+	pub, err := rabbitmq.NewPublisher(conn, rabbitmq.PublisherConfig{Source: "test"})
+	is.NoErr(err)
+	t.Cleanup(func() { _ = pub.Close() })
+	waitBound(t, pub, "widgets.direct", direct)
+
+	is.NoErr(queuePub.Publish(ctx, broker.Message{ID: "1", Type: "widget.created", Topic: rabbitmq.DefaultExchange}))
+	m := receive(t, queued)
+	is.Equal(m.ID, "1")
+	is.Equal(m.Topic, "") // the default exchange has no name
+	is.Equal(m.Headers[rabbitmq.RoutingKeyHeader], "widgets.queued")
+
+	is.NoErr(pub.Publish(ctx, broker.Message{ID: "2", Type: "widget.created", Topic: "widgets.direct"})) // dropped
+	is.NoErr(pub.Publish(ctx, broker.Message{ID: "3", Type: "widget.*", Topic: "widgets.direct"}))
+	m = receive(t, direct)
+	is.Equal(m.ID, "3")
+	is.Equal(m.Topic, "widgets.direct")
+	is.Equal(m.Headers[rabbitmq.RoutingKeyHeader], "widget.*")
+}
+
+// start runs a consumer of cfg that sends every message to got until the test
+// ends.
+func start(t *testing.T, conn *rabbitmq.Conn, cfg rabbitmq.ConsumerConfig, got chan<- broker.Message) {
+	t.Helper()
+	cons, err := rabbitmq.NewConsumer(slog.New(slog.DiscardHandler), conn, cfg, collect(got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cons.Start(t.Context()) }()
+	t.Cleanup(func() { <-done })
+}
+
 // collect returns a handler that sends every message to got.
 func collect(got chan<- broker.Message) broker.Handler {
 	return func(_ context.Context, m broker.Message) broker.Action {
@@ -145,12 +209,12 @@ func collect(got chan<- broker.Message) broker.Handler {
 	}
 }
 
-// waitBound publishes pings until one comes back: the consumer declares its
-// queue and binding when it starts, and until then a message is unroutable
-// and dropped.
-func waitBound(t *testing.T, pub *rabbitmq.Publisher, got <-chan broker.Message) {
+// waitBound publishes pings to topic until one comes back: the consumer
+// declares its queue and binding when it starts, and until then a message is
+// unroutable and dropped.
+func waitBound(t *testing.T, pub *rabbitmq.Publisher, topic string, got <-chan broker.Message) {
 	t.Helper()
-	ping := broker.Message{Type: "ping", Topic: "widgets"}
+	ping := broker.Message{Type: "ping", Topic: topic}
 	for range 50 {
 		// Before the exchange exists the broker nacks the ping.
 		_ = pub.Publish(t.Context(), ping)
