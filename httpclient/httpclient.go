@@ -36,7 +36,8 @@ type Config struct {
 	// Timeout is the per-request client timeout (default DefaultTimeout). It
 	// bounds the whole call including retries.
 	Timeout time.Duration
-	// Retry, when non-nil, wraps the transport in retry (5xx/429 + Retry-After).
+	// Retry, when non-nil, wraps the transport in retry: 429 and 503 by
+	// default (RetryConfig.Statuses), honoring Retry-After.
 	Retry *httpmw.RetryConfig
 	// OAuth2, when non-nil, adds a client_credentials bearer token.
 	OAuth2 *OAuth2Config

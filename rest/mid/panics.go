@@ -20,8 +20,8 @@ import (
 // detail-free Internal error, so the stack never reaches the client even when
 // used alone. Place it innermost of the application middleware (closest to the
 // handler) so the recovered error propagates back out through the rest of the
-// chain. It complements, not replaces, a transport-level panic recovery (e.g.
-// httplog) that guards raw handlers and other transport middleware.
+// chain. It complements, not replaces, the transport-level panic recovery
+// (middleware.Panics) that guards raw handlers and other transport middleware.
 func Panics(log *slog.Logger) rest.MidFunc {
 	return func(next rest.HandlerFunc) rest.HandlerFunc {
 		return func(ctx context.Context, r *http.Request) (resp rest.ResponseEncoder) {

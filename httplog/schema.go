@@ -186,7 +186,9 @@ var (
 	}
 )
 
-// ReplaceAttr returns transforms standard slog attribute names to the schema format.
+// ReplaceAttr renames the base slog attributes — time, level, message,
+// source — to the names of the schema; pass it as the ReplaceAttr of
+// slog.HandlerOptions.
 func (s *Schema) ReplaceAttr(groups []string, a slog.Attr) slog.Attr {
 	if len(groups) > 0 {
 		return a

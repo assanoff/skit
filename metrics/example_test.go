@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -11,8 +14,36 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/assanoff/skit/metrics"
+	"github.com/assanoff/skit/rest/router"
 	"github.com/assanoff/skit/worker"
 )
+
+// The process builds one Metrics. Its Middleware records the HTTP server
+// metrics of the group of business routes, labeled by the route template;
+// Handler serves every metric of the registry to the scraper.
+func Example() {
+	m := metrics.New()
+
+	r := router.New()
+	r.Handle("GET /metrics", m.Handler())
+	api := r.With(m.Middleware()) // after middleware.Trace in a service
+	api.HandleFunc("GET /widgets/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/widgets/42", nil))
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/widgets/7", nil))
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for line := range strings.Lines(w.Body.String()) {
+		if strings.HasPrefix(line, "skit_http_server_requests_total{") {
+			fmt.Print(line)
+		}
+	}
+	// Output:
+	// skit_http_server_requests_total{http_request_method="GET",http_response_status_code="200",http_route="/widgets/{id}"} 2
+}
 
 // orderMetrics are the metrics of a domain package, core/order/metrics.go in a
 // service.

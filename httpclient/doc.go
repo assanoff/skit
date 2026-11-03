@@ -4,12 +4,12 @@
 // package builds one of these in its constructor, then its methods assemble
 // requests and decode responses through DoJSON.
 //
-// The transport is composed from httpmw middlewares — retry (5xx/429 +
-// Retry-After), a User-Agent, an idempotency key, arbitrary headers — and, when
-// OAuth2 is configured, an OAuth2 client_credentials bearer. Composition order
-// (httpmw.Chain) puts the idempotency key outermost, retry below it and auth
-// innermost: every attempt of a call carries one key, and a retried attempt
-// re-attaches the current token.
+// The transport is composed from httpmw middlewares — retry (429 and 503 by
+// default, honoring Retry-After), a User-Agent, an idempotency key, arbitrary
+// headers — and, when OAuth2 is configured, an OAuth2 client_credentials
+// bearer. Composition order (httpmw.Chain) puts the idempotency key outermost,
+// retry below it and auth innermost: every attempt of a call carries one key,
+// and a retried attempt re-attaches the current token.
 //
 // # Usage
 //
@@ -55,7 +55,8 @@
 //   - Name: the client label of the metrics (default "default").
 //   - Metrics: the registry of the request metrics; nil disables them.
 //   - Timeout: per-request timeout, retries included (default DefaultTimeout).
-//   - Retry: retry 5xx/429 with Retry-After; nil disables retries.
+//   - Retry: retry 429 and 503 (RetryConfig.Statuses), honoring Retry-After;
+//     nil disables retries.
 //   - OAuth2: client_credentials bearer; nil disables it.
 //   - UserAgent, Version, Environment: "product/version (env)" User-Agent.
 //   - IdempotencyHeader: an idempotency key per call, the same for its retries.

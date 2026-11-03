@@ -21,6 +21,27 @@
 //	}
 //	resp, err := client.Get("https://upstream/api")
 //
+// # Middleware
+//
+// A Middleware wraps an http.RoundTripper; Chain composes several over a base
+// transport (http.DefaultTransport when nil), the first outermost:
+//
+//	client := &http.Client{Transport: httpmw.Chain(nil,
+//		httpmw.IdempotencyKey(""), // one key for all the attempts of a call
+//		httpmw.Retry(cfg),
+//		httpmw.UserAgent("billing", version, env), // set on each attempt
+//		httpmw.SetHeader("X-Tenant", tenant),
+//	)}
+//
+// The middleware of the package:
+//
+//   - Retry(cfg): RetryTransport as a Middleware.
+//   - IdempotencyKey(header): a fresh UUID under header (default
+//     "Idempotency-Key") unless the request carries one; outside Retry, so the
+//     attempts share it.
+//   - UserAgent(product, version, env): "product/version (env)".
+//   - SetHeader(key, value): a static header on every request.
+//
 // # Config
 //
 // RetryConfig fields:

@@ -45,7 +45,8 @@
 //     gauges by queue — the WithMetrics option of Workers. The events of
 //     outbox are the tasks of their queue: by kind, the event type.
 //   - broker: skit_broker_consumed_total by consumer and action,
-//     skit_broker_handle_duration_seconds by consumer — Instrument.
+//     skit_broker_handle_duration_seconds by consumer — the Metrics of the
+//     consumer config of an adapter.
 //   - worker: skit_worker_ticks_total by worker and result,
 //     skit_worker_tick_duration_seconds and
 //     skit_worker_last_success_timestamp_seconds by worker —

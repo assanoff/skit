@@ -47,20 +47,20 @@
 //
 // # Usage
 //
-//	func getWidget(ctx context.Context, r *http.Request) rest.ResponseEncoder {
+//	func createWidget(ctx context.Context, r *http.Request) rest.ResponseEncoder {
 //		var in CreateWidget
 //		if err := rest.Decode(r, &in); err != nil {
-//			return err.(*errs.Error) // InvalidArgument -> 400
+//			return errs.From(err) // InvalidArgument -> 400
 //		}
-//		w, err := store.Find(ctx, in.ID)
+//		w, err := core.Create(ctx, in.Name)
 //		if err != nil {
-//			return errs.New(errs.NotFound, err) // -> 404
+//			return errs.From(err) // the code of the core error, else Internal -> 500
 //		}
-//		return rest.JSON(w) // -> 200 application/json
+//		return rest.JSONStatus(w, http.StatusCreated) // -> 201 application/json
 //	}
 //
 //	// Compose cross-cutting behavior, outermost first:
-//	h := rest.ChainMiddleware(getWidget, authMid, logMid)
+//	h := rest.ChainMiddleware(createWidget, authMid, logMid)
 //	resp := h(ctx, r)
 //	_ = rest.Respond(ctx, w, resp)
 //
@@ -90,8 +90,7 @@
 //     already wrote the response — redirect, stream, hijack).
 //   - Param: read a path parameter (thin wrapper over http.Request.PathValue).
 //
-// To supervise the router as a server, wrap it with httpserver (or the
-// server package's HTTP brick, Name "rest-server") so it runs and drains under a
-// worker.Group alongside the gRPC and status servers — REST has no server type
-// of its own; it is just an http.Handler.
+// To supervise the router as a server, wrap it with httpserver so it runs and
+// drains under a worker.Group alongside the gRPC and status servers — REST has
+// no server type of its own; it is just an http.Handler.
 package rest

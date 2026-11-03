@@ -46,6 +46,9 @@
 //     the trust boundary, whose span starts a new trace linked to the caller's.
 //   - SetRoute(r, route): name the server span after route, for a handler that
 //     routes by itself below Trace (a grpc-gateway mux mounted on a prefix).
+//   - Route(r), Method(r): the route template and the method as the span, the
+//     access log and the HTTP metrics label a request: the route SetRoute
+//     recorded, else the pattern that matched; a standard method, else _OTHER.
 //   - AccessLog(log): emit one structured line per request using OpenTelemetry
 //     HTTP semantic-convention field names. A nil log skips logging.
 //   - Timeout(d): cancel the request context after d; a non-positive d disables

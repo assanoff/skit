@@ -53,14 +53,23 @@
 //
 // # Options
 //
-//   - Level: the lowest level recorded (default info).
-//   - Schema: SchemaOTEL (default), SchemaECS or SchemaGCP; Concise(true) for
-//     the essential fields only.
-//   - RecoverPanics: turn a panic into a 500 (default on).
+// A nil Options takes the defaults below. A non-nil one is taken as it is:
+// only LogBodyContentTypes and LogBodyMaxLen fall back to theirs, and a nil
+// Schema to SchemaOTEL.
+//
+//   - Level: the lowest level recorded (info).
+//   - Schema: SchemaOTEL, SchemaECS or SchemaGCP; Concise(true) for the
+//     essential fields only.
+//   - RecoverPanics: turn a panic into a 500 (on).
 //   - Skip: a predicate to leave a request out.
-//   - LogRequestHeaders, LogResponseHeaders: the headers to record (default
-//     Content-Type and Origin, and Content-Type).
+//   - LogRequestHeaders, LogResponseHeaders: the headers to record
+//     (Content-Type and Origin, and Content-Type).
 //   - LogRequestBody, LogResponseBody, LogBodyContentTypes, LogBodyMaxLen: the
-//     bodies to record, their content types and length (default 1024 bytes).
-//   - LogExtraAttrs: more attributes from the request, its body and status.
+//     bodies to record, their content types and length (1024 bytes).
+//   - LogExtraAttrs: more attributes from the request, its body and status;
+//     CURL turns the request into a curl command.
+//
+// Schema.ReplaceAttr, as the ReplaceAttr of the slog handler of the service,
+// renames the base fields of every record — time, level, message, source — to
+// the names of the schema, so the other records share them with the access log.
 package httplog

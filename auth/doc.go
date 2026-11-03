@@ -52,12 +52,24 @@
 //
 // # Middleware
 //
-//   - Authenticate — extract, verify, and require a token (401 on failure).
-//   - Optional — verify when present, never reject; an invalid token is ignored.
-//   - RequireAuthenticated — reject requests with no Principal (place after
-//     Optional).
-//   - RequireRole — 401 when unauthenticated, 403 when authenticated without a
-//     required role.
+// Each guard comes in two forms: net/http middleware for a raw handler, and a
+// rest.MidFunc (the App suffix) for a typed route, which returns the rejection
+// as an *errs.Error for rest.Respond to encode:
+//
+//   - Authenticate / AuthenticateApp — extract, verify, and require a token
+//     (401 on failure).
+//   - Optional / OptionalApp — verify when present, never reject; an invalid
+//     token is ignored.
+//   - RequireAuthenticated / RequireAuthenticatedApp — reject requests with no
+//     Principal (place after Optional).
+//   - RequireRole / RequireRoleApp — 401 when unauthenticated, 403 when
+//     authenticated without a required role.
+//
+// Guard seals AuthenticateApp and RequireRoleApp into one rest.MidFunc, the
+// usual guard of a typed route. It is nil, a public route, when the verifier
+// is nil, so a service builds it unconditionally:
+//
+//	handle("POST /widgets", h.create, auth.Guard(v, "admin"))
 //
 // # JWTConfig
 //
