@@ -47,8 +47,9 @@ type ConsumerConfig struct {
 }
 
 // Consumer consumes records from Kafka, unpacks them with its envelope and
-// dispatches them to a broker.Handler. It implements worker.Runnable: Start blocks until the context
-// is canceled (or Stop is called), then drains its readers.
+// dispatches them to a broker.Handler. It implements worker.Runnable: Start
+// blocks until the context is canceled (or Stop is called), then drains its
+// readers.
 type Consumer struct {
 	log     *slog.Logger
 	brokers []string

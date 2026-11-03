@@ -50,8 +50,8 @@ type ConsumerConfig struct {
 }
 
 // Consumer consumes messages from RabbitMQ, unpacks them with its envelope and
-// dispatches them to a broker.Handler. It implements worker.Runnable: Start blocks until the context
-// is canceled (or Stop is called), then drains.
+// dispatches them to a broker.Handler. It implements worker.Runnable: Start
+// blocks until the context is canceled (or Stop is called), then drains.
 type Consumer struct {
 	log     *slog.Logger
 	cfg     ConsumerConfig

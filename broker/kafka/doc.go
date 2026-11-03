@@ -41,14 +41,9 @@
 // Every publish is a span "send <topic>" with messaging.system kafka and the
 // message key; a message without a trace context in its headers gets the
 // PRODUCER span as its creation context, one that carries it is sent under a
-// CLIENT child of it. NewPublisher takes the brokers in Config, the
-// CloudEvents source and the TracerProvider in PublisherConfig, and the
-// options WithPartitionKey and WithEnvelope.
-//
-// NewConsumer takes the brokers in Config and the Topic, Group, Concurrency,
-// Name (default Group), Metrics and TracerProvider in ConsumerConfig. It records
-// every attempt at a record as a CONSUMER span "process <topic>" in the trace
-// the message was created in and in skit_broker_* (see broker).
+// CLIENT child of it. A consumer records every attempt at a record as a
+// CONSUMER span "process <topic>" in the trace the message was created in and
+// in skit_broker_* (see broker).
 //
 // # Envelope
 //
@@ -56,4 +51,18 @@
 // same on both sides of a stream; the headers of the envelope, content-type
 // among them, travel as record headers. A consumer commits a record its
 // envelope rejects, with a warning.
+//
+// # Config
+//
+//   - Config: Brokers, the bootstrap list; the publisher and every reader of a
+//     consumer dial them on their own.
+//   - Publisher: NewPublisher(cfg, PublisherConfig, opts...). PublisherConfig
+//     fields: Source (required; the CloudEvents source stamped on messages
+//     that carry none), TracerProvider (nil → the global provider). Options:
+//     WithPartitionKey, WithEnvelope.
+//   - Consumer: NewConsumer(log, cfg, ConsumerConfig, handler, opts...).
+//     Option: WithEnvelope. ConsumerConfig fields: Topic and Group
+//     (required), Concurrency (readers in the group, default 1), Name
+//     (default Group), Metrics (the skit_broker_* registry; nil — off),
+//     TracerProvider (nil → the global provider).
 package kafka

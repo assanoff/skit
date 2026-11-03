@@ -1,13 +1,12 @@
 // Package broker abstracts an event broker behind transport-agnostic Publisher
-// and Consumer contracts.
+// and Handler contracts.
 //
 // Messages travel the wire packed by an Envelope, CloudEvents v1.0
 // structured-mode JSON by default, so every transport (e.g. broker/rabbitmq)
 // speaks the same shape and consumers can dedupe on the CloudEvents id. The
-// interfaces
-// here have no transport dependencies, so the same producer/consumer code can
-// ship over RabbitMQ, Kafka, NATS, or a WebSocket gateway by swapping the
-// adapter behind Publisher.
+// package has no transport dependencies, so the same producer and consumer
+// code ships over RabbitMQ, Kafka or a transport of your own by swapping the
+// adapter.
 //
 // # The abstraction
 //
@@ -55,8 +54,9 @@
 //
 // A concrete adapter implements Publisher (and, for consumers, worker.Runnable)
 // in a sub-package. broker/rabbitmq is the reference adapter: its Publisher
-// sends to the exchange Message.Topic under the routing key Message.Type and
-// publishes the CloudEvents body with publisher confirms; its Consumer decodes
+// sends to the exchange Message.Topic under the routing key Message.Type (by
+// default; rabbitmq.WithRoutingKey) and publishes the CloudEvents body with
+// publisher confirms; its Consumer decodes
 // deliveries back into Messages and dispatches them, instrumented, to a
 // broker.Handler, recovering a panic of the handler as Requeue. Application
 // and domain code depend only on broker.Publisher / broker.Handler, never on
@@ -87,8 +87,8 @@
 // CLIENT child of it.
 //
 // The consumers of the adapters record the handling of every message as a
-// CONSUMER span "process <topic>". The creation context from the headers is both the parent
-// and the link of that span. The OpenTelemetry messaging conventions ask for
+// CONSUMER span "process <topic>". The creation context from the headers is
+// both the parent and the link of that span. The OpenTelemetry messaging conventions ask for
 // the link and allow the parent for a single message, as this package
 // documents here: a request, the event it created and the handling of that
 // event are one trace under one sampling decision. A handler that processes a

@@ -102,13 +102,12 @@
 //     TracerProvider (nil → the global provider). Options: WithRoutingKey,
 //     WithEnvelope.
 //   - Consumer: NewConsumer(log, conn, ConsumerConfig, handler, opts...).
-//     Option: WithEnvelope. ConsumerConfig
-//     fields: Queue (required), Exchange (declared as a durable exchange of
-//     ExchangeKind), ExchangeKind (topic by default; direct, fanout, headers),
-//     RoutingKeys (default ["#"] when Exchange is set), Concurrency
-//     (default 1), Name (default Queue), Metrics (the skit_broker_* registry;
-//     nil — off), TracerProvider (nil → the global provider). A delivery the
-//     envelope rejects is discarded (nack without requeue, so a dead-letter exchange of
-//     the queue receives it); a panicking handler is recovered and the delivery
-//     is requeued.
+//     Option: WithEnvelope. ConsumerConfig fields: Queue (required), Exchange
+//     (declared as a durable exchange of ExchangeKind), ExchangeKind (topic by
+//     default; direct, fanout, headers), RoutingKeys (default ["#"] when
+//     Exchange is set), Concurrency (default 1), Name (default Queue), Metrics
+//     (the skit_broker_* registry; nil — off), TracerProvider (nil → the
+//     global provider). A delivery the envelope rejects is discarded (nack
+//     without requeue, so a dead-letter exchange of the queue receives it); a
+//     panicking handler is recovered and the delivery is requeued.
 package rabbitmq

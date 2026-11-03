@@ -23,8 +23,9 @@ import (
 const scope = "github.com/assanoff/skit/broker/kafka"
 
 // Publisher publishes broker.Messages to Kafka packed by its envelope,
-// CloudEvents v1.0 structured-mode JSON by default. It writes with RequireAll acks, so Publish returns nil
-// only after every in-sync replica has the record — at-least-once delivery.
+// CloudEvents v1.0 structured-mode JSON by default. It writes with RequireAll
+// acks, so Publish returns nil only after every in-sync replica has the record
+// — at-least-once delivery.
 type Publisher struct {
 	w            *kgo.Writer
 	source       string
@@ -95,8 +96,9 @@ func NewPublisher(cfg Config, pcfg PublisherConfig, opts ...PublisherOption) (*P
 
 // Publish sends m to the Kafka topic m.Topic, under its partition key, as a
 // record packed by the envelope and blocks until the brokers acknowledge it.
-// The span "send <topic>" covers the write; without a trace context in m.Headers it is the creation
-// context of the message and goes out in its headers. A record over the size
+// The span "send <topic>" covers the write; without a trace context in
+// m.Headers it is the creation context of the message and goes out in its
+// headers. A record over the size
 // limit fails with a broker.Permanent error.
 func (p *Publisher) Publish(ctx context.Context, m broker.Message) error {
 	if m.Topic == "" {
