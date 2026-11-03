@@ -52,9 +52,10 @@ func (p *Pool) Running() int {
 }
 
 // Submit blocks until a slot is free, then launches job on its own goroutine.
-// The job receives a context that is canceled either when the submission ctx is
-// canceled or when Shutdown is called, whichever comes first. It returns a key
-// that can be passed to Cancel to stop that single job early.
+// The job receives a context with the values and the deadline of ctx but not
+// its cancellation: the caller of Submit returning does not stop the job,
+// Cancel and Shutdown do. It returns a key that can be passed to Cancel to stop
+// that single job early.
 func (p *Pool) Submit(ctx context.Context, job JobFn) (string, error) {
 	// Prefer the shutdown signal so a draining pool rejects new work promptly.
 	select {

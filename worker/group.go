@@ -36,10 +36,10 @@ func NewGroup(log *slog.Logger, cfg GroupConfig) *Group {
 	return &Group{log: log, shutdownTimeout: cfg.ShutdownTimeout}
 }
 
-// Add registers one or more Runnables, skipping any nil entries — so addr-gated
-// constructors that return nil for a disabled brick (e.g. server.REST,
-// server.Enabled) can be passed straight through without the caller filtering
-// them first. Not safe to call once Run has started.
+// Add registers one or more Runnables, skipping any nil entries — so a
+// constructor that returns nil for a disabled component can be passed straight
+// through without the caller filtering it first. Not safe to call once Run has
+// started.
 func (g *Group) Add(r ...Runnable) {
 	for _, x := range r {
 		if x != nil {

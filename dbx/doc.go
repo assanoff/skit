@@ -71,9 +71,9 @@
 // A Classifier maps the errors of one engine onto the sentinels; the presets
 // ship one each, pg.Classify and sqlite.Classify, and a pool of another driver
 // passes its own function to New. Without a Classifier only ErrDBNotFound is
-// recognized. ErrDBRetryable marks an error
-// after which the whole transaction may run again; on Postgres a deadlock
-// victim (40P01) and a serialization failure (40001).
+// recognized. ErrDBRetryable marks an error after which the whole transaction
+// may run again; on Postgres a deadlock victim (40P01) and a serialization
+// failure (40001).
 //
 // # Querying
 //
@@ -151,6 +151,16 @@
 // Bind a lone UUID argument the same way: dbx.UUID(id). UUID binds through its
 // string form, so on Postgres-only paths prefer uuid.UUID: a []UUID in ANY
 // encodes about ten times slower.
+//
+// # Slice columns
+//
+// database/sql scans no Postgres array (text[], int8[]) into a Go slice. A
+// slice-valued column is JSONB instead, and its field in the row struct a
+// JSONSlice[T]: it binds as JSON and scans back, a nil slice written as [].
+//
+//	type dbAdvert struct {
+//	    Photos dbx.JSONSlice[string] `db:"photos"`
+//	}
 //
 // # Bulk writes
 //

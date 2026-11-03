@@ -1,8 +1,8 @@
-// Package worker unifies the background-execution patterns found across the
-// reference services into one small vocabulary.
+// Package worker runs the background work of a service: supervised
+// components, recurring loops, bounded fan-out and claim-based batches.
 //
-// Instead of every service hand-rolling its own run loops, supervisors, and
-// retry math, worker provides a handful of composable pieces:
+// Instead of every service hand-rolling its own run loops and supervisors,
+// worker provides a handful of composable pieces:
 //
 //   - Runnable: anything the app supervises (HTTP/gRPC servers, consumers,
 //     loops). RunnableFunc adapts a plain start function into one.
@@ -81,7 +81,7 @@
 //	    },
 //	})
 //	if err := g.Run(ctx); err != nil {
-//	    log.Error("group stopped", "err", err)
+//	    log.ErrorContext(ctx, "group stopped", "err", err)
 //	}
 //
 // For discrete fan-out work, submit jobs to a Pool:
@@ -123,8 +123,7 @@
 // ProcessorConfig: Name (default "processor"), BatchSize (default 100),
 // HandleTimeout, BatchTimeout, IsTerminal (nil = all failures retryable),
 // IsHalt (nil = no error stops the batch), OnPanic (nil = a panicked item is
-// retried), Now (default
-// time.Now().UTC; override in tests).
+// retried), Now (default time.Now().UTC; override in tests).
 //
 // GroupConfig: ShutdownTimeout (0 = no bound on how long Run waits for
 // Runnables to Stop).

@@ -11,7 +11,8 @@
 //	//go:embed *.sql
 //	var migrationsFS embed.FS
 //
-//	m, err := migrate.New(db.DB, migrationsFS)
+//	// db is a *dbx.DB; db.DB.DB is its *sql.DB.
+//	m, err := migrate.New(db.DB.DB, migrationsFS)
 //	if err != nil {
 //	    return err
 //	}
@@ -22,8 +23,8 @@
 //
 // New takes a *sql.DB opened with a driver matching the dialect (Postgres by
 // default, e.g. a pgx connection; another one via WithDialect). It does not
-// take ownership of db; Close releases only the provider, never the handle.
-// Use fs.Sub if the migrations live in a subdirectory of the embedded FS.
+// take ownership of db: Close never closes the handle. Use fs.Sub if the
+// migrations live in a subdirectory of the embedded FS.
 //
 // # Operations
 //

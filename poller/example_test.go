@@ -2,6 +2,7 @@ package poller_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -53,4 +54,29 @@ func ExamplePoller_Poll() {
 	// Output:
 	// 0
 	// 470.5
+}
+
+// A failed poll leaves the cached value as it was; the WithOnError handler gets
+// the error, to count it or to alert.
+func ExampleWithOnError() {
+	down := true
+	p := poller.New(nil, "default", func(context.Context) (string, error) {
+		if down {
+			return "", errors.New("flags: source is down")
+		}
+		return "remote", nil
+	}, poller.Config{Name: "flags"}, poller.WithOnError(func(err error) {
+		fmt.Println("poll:", err)
+	}))
+
+	ctx := context.Background()
+	p.Poll(ctx)
+	fmt.Println(p.Current())
+	down = false
+	p.Poll(ctx)
+	fmt.Println(p.Current())
+	// Output:
+	// poll: flags: source is down
+	// default
+	// remote
 }

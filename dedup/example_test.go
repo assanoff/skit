@@ -15,6 +15,30 @@ import (
 	"github.com/assanoff/skit/dedup"
 )
 
+// An error of fn is not stored: it frees the key, and the repeat runs fn
+// again. The first success is stored and handed to the repeats after it.
+func Example() {
+	k := dedup.NewMemory(dedup.WithTTL(time.Hour))
+	ctx := context.Background()
+
+	attempt := 0
+	charge := func(context.Context) (string, error) {
+		attempt++
+		if attempt == 1 {
+			return "", errors.New("payments: timeout")
+		}
+		return fmt.Sprintf("charge-%d", attempt), nil
+	}
+	for range 3 {
+		id, err := k.Do(ctx, "charge/42", charge)
+		fmt.Printf("%q %v\n", id, err)
+	}
+	// Output:
+	// "" payments: timeout
+	// "charge-2" <nil>
+	// "charge-2" <nil>
+}
+
 // The second call with the same key gets the stored result; fn runs once.
 func ExampleKeeper_Do() {
 	k := dedup.NewMemory()
