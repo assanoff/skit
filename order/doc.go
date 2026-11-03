@@ -25,7 +25,7 @@
 //	col := columns[by.Field] // a store-local field -> column map
 //	clause := " ORDER BY " + col + " " + by.Direction + ", id " + by.Direction
 //
-// Pair it with page (offset) or query for paginated listings. Cursor (keyset)
-// pagination fixes its own order to match the cursor key, so order.By applies to
-// offset queries.
+// Pair it with page (offset) and rest.Result for paginated listings. Cursor
+// (keyset) pagination fixes its own order to match the cursor key, so order.By
+// applies to offset queries.
 package order

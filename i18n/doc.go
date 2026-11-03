@@ -36,9 +36,13 @@
 //
 // # Language resolution
 //
-// Match picks the best supported language for an Accept-Language header value,
-// returning DefaultLang when nothing matches. Middleware calls Match and stores
-// the result via WithLang; LangFromContext reads it back downstream. New always
+// Middleware stores the language the request asks for (RequestLang: the
+// X-Language header, else the first Accept-Language tag, as a base code —
+// "kk-KZ" reads "kk") via WithLang; LangFromContext reads it back downstream.
+// The language is not limited to the catalogs: a lookup in a language without
+// one falls back to DefaultLang, and the translation package maps it to its
+// own languages. Match picks the best supported language for an
+// Accept-Language value, DefaultLang when nothing matches. New always
 // registers a localizer for the default language even if no catalog file
 // declares it.
 package i18n

@@ -1,7 +1,7 @@
 // Package errs provides a single, transport-agnostic error type with stable
-// codes, an HTTP (and later gRPC) status mapping, errors of invalid input
-// fields, and automatic redaction of secrets in user-facing messages. It
-// depends on the standard library only.
+// codes, their HTTP statuses (grpcserver maps them to gRPC codes), errors of
+// invalid input fields, and automatic redaction of secrets in user-facing
+// messages. It depends on the standard library only.
 //
 // An *Error carries a machine-readable Code, an optional Title, a human
 // Message (the "detail"), and optional Args used for i18n. It implements the

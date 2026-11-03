@@ -5,19 +5,19 @@
 // New and NewWithHandler return a plain *slog.Logger, so the same logger is
 // used everywhere — HTTP/gRPC handlers, business code, background workers and
 // SDK packages — and third-party code logs through the same handler.
-// BuildInfo logs the binary's embedded VCS/build metadata at startup.
 //
 // # Usage
 //
 // Build one logger at startup and inject it:
 //
+//	b := buildinfo.Read()
 //	log := logger.New(os.Stdout, logger.Config{
-//		Service:   "myapp", // service.name
-//		Version:   version, // service.version — the build version
+//		Service:   "myapp",   // service.name
+//		Version:   b.Version, // service.version — the build version
 //		Level:     logger.LevelInfo,
 //		AddSource: true,
 //	})
-//	log.InfoContext(ctx, "service started", "addr", ":8080")
+//	log.InfoContext(ctx, "service started", "addr", ":8080", "build", b)
 //
 //	access := log.With("logger", "access") // child tagged logger=access
 //	access.InfoContext(ctx, "request", "method", "GET", "path", "/")
@@ -43,7 +43,7 @@
 //
 //	stdout := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logger.LevelInfo})
 //	h := slog.NewMultiHandler(stdout, sentryHandler) // sentryHandler.Enabled gates ERROR+
-//	log := logger.NewWithHandler(h, logger.Config{Service: "myapp", Version: version})
+//	log := logger.NewWithHandler(h, logger.Config{Service: "myapp", Version: b.Version})
 //
 // # Side-effect hooks (Events)
 //

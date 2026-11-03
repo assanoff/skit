@@ -134,7 +134,9 @@ vuln: ## Known vulnerabilities in reachable code
 
 .PHONY: deadcode
 deadcode: ## Report, not a gate: functions no test reaches — the API without tests or examples
-	$(GO) run $(DEADCODE) -test ./...
+	@# An example without // Output: never runs, so it is in the report itself:
+	@# drop it. grep finding nothing left is no error.
+	$(GO) run $(DEADCODE) -test ./... | grep -v 'unreachable func: Example' || true
 
 .PHONY: tools
 tools: proto-tools ## Install convenience dev tools (scaffold, test output, proto)
