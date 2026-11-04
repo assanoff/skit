@@ -2,7 +2,14 @@ package closer
 
 import (
 	"errors"
+	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/matryer/is"
 )
 
 func TestCloseSyncRunsLIFO(t *testing.T) {
@@ -49,5 +56,46 @@ func TestAddAfterCloseIsIgnored(t *testing.T) {
 	_ = cl.CloseSync()
 	if ran {
 		t.Fatal("handler added after close should not run")
+	}
+}
+
+func TestGlobalCloseRunsAll(t *testing.T) {
+	is := is.New(t)
+	var closed atomic.Int32
+	AddNamed("db", func() error { closed.Add(1); return nil })
+	Add(func() error { closed.Add(1); return nil })
+
+	is.NoErr(Close())
+	is.Equal(closed.Load(), int32(2)) // the named and the plain handler ran
+}
+
+func TestWaitReturnsOnSignal(t *testing.T) {
+	is := is.New(t)
+	// The channel of the test keeps SIGUSR1 from killing the process before
+	// NewWithWait listens for it.
+	keep := make(chan os.Signal, 1)
+	signal.Notify(keep, syscall.SIGUSR1)
+	defer signal.Stop(keep)
+
+	cl := NewWithWait(syscall.SIGUSR1)
+	done := make(chan struct{})
+	go func() {
+		cl.Wait()
+		close(done)
+	}()
+
+	// The signal repeats: one sent before NewWithWait listens is lost.
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	timeout := time.After(5 * time.Second)
+	for {
+		is.NoErr(syscall.Kill(os.Getpid(), syscall.SIGUSR1))
+		select {
+		case <-done:
+			return
+		case <-tick.C:
+		case <-timeout:
+			t.Fatal("Wait did not return on SIGUSR1")
+		}
 	}
 }

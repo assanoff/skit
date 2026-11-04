@@ -54,6 +54,14 @@ func TestSchedulerRunsAndStops(t *testing.T) {
 	is.True(runs.Load() >= 2) // fired at least twice in ~350ms at 100ms cadence
 }
 
+func TestSchedulerNameAndStop(t *testing.T) {
+	is := is.New(t)
+	s := New(nil, Config{Name: "billing"})
+
+	is.Equal(s.Name(), "billing")
+	is.NoErr(s.Stop(context.Background())) // the context of Start stops it
+}
+
 func TestSchedulerRecoversPanic(t *testing.T) {
 	is := is.New(t)
 	var after, panics atomic.Int32

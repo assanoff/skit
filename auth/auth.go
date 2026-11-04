@@ -31,6 +31,8 @@ func (p *Principal) HasAnyRole(roles ...string) bool {
 	return slices.ContainsFunc(roles, p.HasRole)
 }
 
+//go:generate go run github.com/matryer/moq@v0.8.1 -out internal/mocks/verifier.go -pkg mocks . Verifier
+
 // Verifier turns a raw credential (e.g. a bearer token) into a Principal.
 // Implementations must return a non-nil error for any invalid credential.
 type Verifier interface {

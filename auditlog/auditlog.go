@@ -57,7 +57,7 @@ func WithAutoCompact(every int, opts CompactOptions) Option {
 	}
 }
 
-//go:generate go run github.com/matryer/moq@latest -out internal/mocks/auditlogdb.go -pkg mocks . Store
+//go:generate go run github.com/matryer/moq@v0.8.1 -out internal/mocks/auditlogdb.go -pkg mocks . Store
 
 // Store is the persistence contract for audit log entries. A caller that needs
 // the audit write to commit atomically with its business change runs Create on

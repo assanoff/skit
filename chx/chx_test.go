@@ -36,7 +36,8 @@ type kv struct {
 }
 
 // TestMigrateAndRoundTrip applies a migration from an in-memory FS, then
-// batch-inserts two rows and selects them back from a real ClickHouse.
+// batch-inserts two rows and selects them back from a real ClickHouse; a
+// third row goes in with Exec and all come back through Query.
 func TestMigrateAndRoundTrip(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test requires docker")
@@ -70,6 +71,27 @@ DROP TABLE kv;
 	var got []kv
 	is.NoErr(cl.Select(ctx, &got, "SELECT k, v FROM kv ORDER BY k"))
 	is.Equal(got, []kv{{K: "a", V: 1}, {K: "b", V: 2}})
+
+	is.NoErr(cl.Exec(ctx, "INSERT INTO kv VALUES (?, ?)", "c", int64(3)))
+	rows, err := cl.Query(ctx, "SELECT k FROM kv ORDER BY k")
+	is.NoErr(err)
+	var keys []string
+	for rows.Next() {
+		var k string
+		is.NoErr(rows.Scan(&k))
+		keys = append(keys, k)
+	}
+	is.NoErr(rows.Err())
+	is.NoErr(rows.Close())
+	is.Equal(keys, []string{"a", "b", "c"}) // the row of Exec is there
+
+	is.NoErr(cl.Conn().Ping(ctx)) // the native connection is the live one
+}
+
+func TestName(t *testing.T) {
+	is := is.New(t)
+	var cl Client
+	is.Equal(cl.Name(), "ClickHouse")
 }
 
 // startClickHouse runs a ClickHouse container for the test and returns the
