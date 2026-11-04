@@ -34,8 +34,8 @@ var moduleVersion = sync.OnceValue(func() string {
 
 // Tracer returns the tracer an SDK package records its spans with. scope is
 // the package import path; the tracer carries the skit module version and the
-// semconv schema URL. A nil tp means the global provider: a tracer taken from it
-// before the SDK is installed switches to the SDK once it is, so a component
+// semconv schema URL. A nil tp means the global provider: a tracer taken from
+// it before the SDK is installed switches to the SDK once it is, so a component
 // takes its tracer once, in its constructor.
 func Tracer(tp trace.TracerProvider, scope string) trace.Tracer {
 	tp = cmp.Or(tp, otel.GetTracerProvider())

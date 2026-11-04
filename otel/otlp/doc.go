@@ -17,8 +17,8 @@
 //     error.
 //   - OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: the
 //     collector, by default localhost:4317. An http:// scheme disables TLS.
-//   - OTEL_EXPORTER_OTLP_HEADERS, _TIMEOUT, _COMPRESSION, _CERTIFICATE and their
-//     _TRACES_ variants: read by the exporter as is.
+//   - OTEL_EXPORTER_OTLP_HEADERS, _TIMEOUT, _COMPRESSION, _CERTIFICATE and
+//     their _TRACES_ variants: read by the exporter as is.
 //   - OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: only
 //     grpc is supported; another value is an error. Unset means grpc, while the
 //     specification defaults to http/protobuf.

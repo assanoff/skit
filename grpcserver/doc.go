@@ -51,7 +51,8 @@
 //	group.Add(srv)       // worker.Runnable: Start binds the listener, Stop drains
 //
 // In tests, Serve runs the server on a caller-provided listener (e.g. a bufconn
-// listener) instead of binding a TCP port.
+// listener) instead of binding a TCP port; grpctest does so and hands back a
+// client connection.
 //
 // # Config
 //
@@ -68,6 +69,10 @@
 //
 // # Options
 //
-//   - WithUnaryInterceptors(in...): appends application interceptors, applied
-//     after the built-in ones (closest to the handler).
+//   - WithUnaryInterceptors(in...), WithStreamInterceptors(in...): append
+//     application interceptors, applied after the built-in ones (closest to
+//     the handler); an *errs.Error they return reaches the client as a status.
+//   - WithProtoValidate(): validates every request against the buf.validate
+//     rules of its .proto before the handler runs; a violation is
+//     InvalidArgument.
 package grpcserver

@@ -83,7 +83,7 @@ func WithStreamInterceptors(in ...grpc.StreamServerInterceptor) Option {
 	return func(o *options) { o.streamExtra = append(o.streamExtra, in...) }
 }
 
-// New builds a Server. Register services via ServiceRegistrar before Start.
+// New builds a Server. Register the services with Install before Start.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Server {
 	var o options
 	for _, opt := range opts {

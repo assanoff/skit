@@ -83,7 +83,9 @@
 //     empty fields are not written.
 //   - Sampler: overrides the sampler from the environment; tests set it.
 //   - Exporter: otlp.NewExporter in a process, tracetest in tests; nil → no
-//     export.
+//     export. Shutdown flushes the spans to the exporter and shuts it down,
+//     and tracetest.InMemoryExporter forgets its spans then: the example keeps
+//     them behind a Shutdown of its own.
 //   - Metrics: the registry for target_info and skit_otel_*; nil → no
 //     metrics. Tests leave it nil.
 //   - Global: install the provider, the propagator (W3C TraceContext only) and

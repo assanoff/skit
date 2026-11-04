@@ -37,9 +37,9 @@
 //
 // # Suppressing background traces
 //
-// Background tick loops — pollers, queue workers, cleaners — run every
-// few seconds with no request behind them, so each poll query would export its
-// own single-span trace and bury the traces that describe real traffic. Wrap the
+// Background tick loops — pollers, queue workers, cleaners — run every few
+// seconds with no request behind them, so each poll query would export its own
+// single-span trace and bury the traces that describe real traffic. Wrap the
 // tick context in Suppress and the sampler drops those spans outright:
 //
 //	ctx = otel.Suppress(ctx)       // once per tick
@@ -54,8 +54,9 @@
 // # Propagation
 //
 // Propagator is W3C TraceContext only: baggage never leaves the process. For
-// out-of-band transports (e.g. the envelope of an outbox event), Carrier serializes
-// the trace context to a string map and ExtractFromCarrier restores it:
+// out-of-band transports (e.g. the envelope of an outbox event), Carrier
+// serializes the trace context to a string map and ExtractFromCarrier restores
+// it:
 //
 //	headers := otel.Carrier(ctx)                // store on a message
 //	ctx = otel.ExtractFromCarrier(ctx, headers) // restore in a consumer

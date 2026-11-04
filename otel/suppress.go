@@ -5,14 +5,15 @@ import "context"
 // suppressKey is the context key of the Suppress mark.
 type suppressKey struct{}
 
-// Suppress marks ctx as "do not trace anything started from here". Spans started
-// with a suppressed context — and their children — are dropped by the sampler
-// otel/setup installs: they are neither recorded nor exported, so the cost is
-// one context value and one non-recording span per call.
+// Suppress marks ctx as "do not trace anything started from here". Spans
+// started with a suppressed context — and their children — are dropped by the
+// sampler otel/setup installs: they are neither recorded nor exported, so the
+// cost is one context value and one non-recording span per call.
 //
-// Intended for background tick loops (pollers, queue workers, cleaners). Their poll/lease/cleanup queries fire every few seconds, carry no
-// parent span, and would each surface in the trace UI as a separate single-span
-// trace — thousands a day of "SELECT … FOR UPDATE SKIP LOCKED returned nothing",
+// Intended for background tick loops (pollers, queue workers, cleaners). Their
+// poll/lease/cleanup queries fire every few seconds, carry no parent span, and
+// would each surface in the trace UI as a separate single-span trace —
+// thousands a day of "SELECT … FOR UPDATE SKIP LOCKED returned nothing",
 // crowding out the traces that describe real traffic.
 //
 // Suppression is inherited by every context derived from a suppressed one, so
