@@ -232,6 +232,12 @@ handler publishes it to the broker.
   a child span — so producing a widget and recording its audit row are one
   trace.
 
+Two runnable scenarios with their READMEs live in `examples/`:
+[`examples/outbox-dbx`](examples/outbox-dbx) — a store on `dbx` that writes an
+order and its event in one transaction, and the workers that publish it to
+RabbitMQ; [`examples/rabbitmq`](examples/rabbitmq) — a domain that knows only
+`broker`, with RabbitMQ in the assembly alone.
+
 The `skit-x` showcase wires it end-to-end: creating a widget schedules
 `widget.Created` into the queue of events, its workers publish it to RabbitMQ,
 and the `widgetaudit` consumer records it while continuing the producer's trace
