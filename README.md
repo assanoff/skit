@@ -68,6 +68,7 @@ CRUD app that imports this SDK from GitHub and exercises every package end-to-en
 | `lock` | Distributed mutual exclusion behind a common `Locker`: Postgres advisory locks and single-instance Redis locks |
 | `dedup` | Idempotency like a cache: `k.Do(ctx, key, fn)` runs `fn` once per key and hands its stored success to repeats; memory and Redis stores |
 | `partition` | Range partitions of Postgres tables by time: `k.Maintain(ctx)` creates the partitions of the current and the next days or months and drops the ones past the retention; one transaction, safe on every replica |
+| `settings` | Settings an admin changes at run time: one JSON document of a type `T` per name in Postgres, `s.Current()` from memory on every replica, `s.Save(ctx, v)` from the admin; reread on an interval as a `worker.Runnable` |
 | `chx` | Optional ClickHouse helper (connect + goose migrations); pulls the ClickHouse driver only when imported |
 | `grpcgateway` | grpc-gateway REST↔gRPC transcoding as a `worker.Runnable`, sharing the app's server core |
 | `grpctest` | In-process gRPC test harness over `bufconn` running the real `grpcserver` interceptor chain |

@@ -1,5 +1,5 @@
 // Package poller maintains a single "current value" that is refreshed by
-// periodically calling a Getter.
+// periodically calling a FetchFunc.
 //
 // It is the read-side counterpart to worker.Loop: instead of performing work on
 // each tick, it caches the latest successfully fetched value so hot paths can
@@ -11,10 +11,10 @@
 // otel.Suppress, so they export no traces; a direct Poll keeps the trace of its
 // caller.
 //
-// The Getter gets the run context (bounded by PollTimeout, when set) and must
-// return once it is canceled: Start does not return before the running Getter
-// does, so a Getter that ignores its context holds the shutdown of the group up
-// to its ShutdownTimeout.
+// The FetchFunc gets the run context (bounded by PollTimeout, when set) and
+// must return once it is canceled: Start does not return before the running
+// fetch does, so a FetchFunc that ignores its context holds the shutdown of the
+// group up to its ShutdownTimeout.
 //
 // # Usage
 //
@@ -37,7 +37,7 @@
 //
 //   - Name: identifies the poller in logs (default "poller").
 //   - Interval: time between polls (default 1s).
-//   - PollTimeout: bounds each Getter call (0 = inherit the run context).
+//   - PollTimeout: bounds each fetch (0 = inherit the run context).
 //
 // # Options
 //

@@ -72,10 +72,10 @@ func testPollerStopsDuringPoll(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- p.Start(ctx) }()
 
-	synctest.Wait() // the first poll is in flight, blocked in the Getter
+	synctest.Wait() // the first poll is in flight, blocked in the fetch
 	cancel()
 	is.True(errors.Is(<-done, context.Canceled))  // Start returns on cancel
-	is.True(errors.Is(pollErr, context.Canceled)) // the Getter sees it
+	is.True(errors.Is(pollErr, context.Canceled)) // the fetch sees it
 	is.Equal(p.Current(), "initial")              // the value stays
 	is.NoErr(p.Stop(t.Context()))
 }
@@ -119,7 +119,7 @@ func TestPollerPollCanceledContext(t *testing.T) {
 	cancel()
 	p.Poll(ctx)
 
-	is.True(errors.Is(pollErr, context.Canceled)) // the cancellation reaches the Getter
+	is.True(errors.Is(pollErr, context.Canceled)) // the cancellation reaches the fetch
 	is.Equal(p.Current(), "initial")              // the value stays
 }
 

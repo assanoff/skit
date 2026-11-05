@@ -11,9 +11,9 @@ import (
 	"github.com/assanoff/skit/safetick"
 )
 
-// Getter fetches the next value. It is called on each tick (and synchronously by
-// Poll). A returned error leaves the current value unchanged.
-type Getter[T any] func(ctx context.Context) (T, error)
+// FetchFunc fetches the next value. It is called on each tick (and
+// synchronously by Poll). A returned error leaves the current value unchanged.
+type FetchFunc[T any] func(ctx context.Context) (T, error)
 
 // Config configures a Poller.
 type Config struct {
@@ -21,7 +21,7 @@ type Config struct {
 	Name string
 	// Interval between polls (defaults to 1s if non-positive).
 	Interval time.Duration
-	// PollTimeout bounds each Getter call (0 = inherit the run context).
+	// PollTimeout bounds each fetch (0 = inherit the run context).
 	PollTimeout time.Duration
 }
 
@@ -45,11 +45,11 @@ func WithOnPanic(h safetick.PanicHandler) Option {
 	return func(o *options) { o.onPanic = h }
 }
 
-// Poller caches the latest value returned by its Getter, refreshing it on a
+// Poller caches the latest value returned by its FetchFunc, refreshing it on a
 // fixed interval. Reads via Current are safe for concurrent use.
 type Poller[T any] struct {
 	cfg     Config
-	getter  Getter[T]
+	fetch   FetchFunc[T]
 	log     *slog.Logger
 	onError func(error)
 	onPanic safetick.PanicHandler
@@ -60,7 +60,7 @@ type Poller[T any] struct {
 
 // New builds a Poller seeded with initial, which Current returns until the first
 // successful poll. log may be nil.
-func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config, opts ...Option) *Poller[T] {
+func New[T any](log *slog.Logger, initial T, fetch FetchFunc[T], cfg Config, opts ...Option) *Poller[T] {
 	cfg.Name = cmp.Or(cfg.Name, "poller")
 	// Not cmp.Or: a negative Interval would panic in time.NewTicker.
 	if cfg.Interval <= 0 {
@@ -72,7 +72,7 @@ func New[T any](log *slog.Logger, initial T, getter Getter[T], cfg Config, opts 
 	}
 	return &Poller[T]{
 		cfg:     cfg,
-		getter:  getter,
+		fetch:   fetch,
 		log:     log,
 		onError: o.onError,
 		onPanic: o.onPanic,
@@ -87,7 +87,7 @@ func (p *Poller[T]) Name() string { return p.cfg.Name }
 // implements worker.Runnable: Start blocks until shutdown. The polls run under
 // otel.Suppress, so they export no traces; a direct Poll keeps the trace of its
 // caller. A poll in flight at shutdown gets the canceled ctx, and Start returns
-// once its Getter does.
+// once its fetch does.
 func (p *Poller[T]) Start(ctx context.Context) error {
 	// A poll has no request behind it; each would export a trace of its own.
 	ctx = otel.Suppress(ctx)
@@ -111,8 +111,8 @@ func (p *Poller[T]) Stop(context.Context) error { return nil }
 
 // Poll fetches once, synchronously, and updates the current value on success.
 // On error the value is left unchanged and the WithOnError handler (if set) is
-// invoked. A panic in the Getter is recovered so a single bad poll cannot crash
-// the supervisor.
+// invoked. A panic in the FetchFunc is recovered so a single bad poll cannot
+// crash the supervisor.
 func (p *Poller[T]) Poll(ctx context.Context) {
 	defer safetick.RecoverTick(ctx, p.log, p.cfg.Name, p.onPanic)
 
@@ -123,7 +123,7 @@ func (p *Poller[T]) Poll(ctx context.Context) {
 		defer cancel()
 	}
 
-	next, err := p.getter(pollCtx)
+	next, err := p.fetch(pollCtx)
 	if err != nil {
 		if p.onError != nil {
 			p.onError(err)
