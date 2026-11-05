@@ -2,7 +2,7 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -69,7 +69,7 @@ func Test_{{.Type}}(t *testing.T) {
 		body, err := json.Marshal(map[string]string{
 			"name":        gofakeit.ProductName(),
 			"description": gofakeit.Sentence(6),
-		})
+		}, json.Deterministic(true))
 		is.NoErr(err)
 		resp := srv.PostJSON("/{{.Plural}}", string(body))
 		resp.ExpectStatus(http.StatusCreated)

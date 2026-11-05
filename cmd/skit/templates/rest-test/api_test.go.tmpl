@@ -3,7 +3,7 @@ package {{.Pkg}}
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +51,10 @@ func TestRest_Create{{.Type}}_201(t *testing.T) {
 	}
 	h := newTestHandler(store)
 
-	body, err := json.Marshal(map[string]string{"name": name, "description": gofakeit.Sentence(6)})
+	body, err := json.Marshal(map[string]string{
+		"name":        name,
+		"description": gofakeit.Sentence(6),
+	}, json.Deterministic(true))
 	is.NoErr(err)
 	req := httptest.NewRequest(http.MethodPost, "/{{.Plural}}", bytes.NewReader(body))
 	w := httptest.NewRecorder()
