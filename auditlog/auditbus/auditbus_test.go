@@ -2,7 +2,7 @@ package auditbus_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/assanoff/skit/auditlog"
@@ -28,7 +28,7 @@ func TestPublishRecordsViaBus(t *testing.T) {
 
 	err := auditbus.Publish(context.Background(), bus, auditbus.Event{
 		ModelType: "widget", ModelID: "1", Method: "POST", CreatedBy: "u1",
-		Payload: json.RawMessage(`{"name":"a"}`),
+		Payload: jsontext.Value(`{"name":"a"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,10 +44,10 @@ func TestPublishInvalidPayload(t *testing.T) {
 	bus := eventbus.New(nil)
 	tests := []struct {
 		name    string
-		payload json.RawMessage
+		payload jsontext.Value
 	}{
-		{name: "empty", payload: json.RawMessage{}},
-		{name: "form", payload: json.RawMessage("name=a")},
+		{name: "empty", payload: jsontext.Value{}},
+		{name: "form", payload: jsontext.Value("name=a")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

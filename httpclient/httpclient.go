@@ -2,7 +2,8 @@ package httpclient
 
 import (
 	"cmp"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -148,7 +149,7 @@ func DoJSON(c *http.Client, req *http.Request, out any) error {
 	if out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.UnmarshalDecode(jsontext.NewDecoder(resp.Body), out); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("httpclient: decode response: %w", err)
 	}
 	return nil

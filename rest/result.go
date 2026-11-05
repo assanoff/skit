@@ -62,7 +62,7 @@ type Result[T any] struct {
 func NewResult[T any](items []T, total int, pg page.Page) Result[T] {
 	return Result[T]{
 		ErrorCode: errs.OK.String(),
-		Data:      Data[T]{Items: orEmpty(items), Pagination: NewPagination(total, pg)},
+		Data:      Data[T]{Items: items, Pagination: NewPagination(total, pg)},
 	}
 }
 
@@ -115,17 +115,8 @@ type CursorResult[T any] struct {
 func NewCursorResult[T any](items []T, next, prev string) CursorResult[T] {
 	return CursorResult[T]{
 		ErrorCode: errs.OK.String(),
-		Data:      CursorData[T]{Items: orEmpty(items), Next: next, Prev: prev},
+		Data:      CursorData[T]{Items: items, Next: next, Prev: prev},
 	}
-}
-
-// orEmpty returns items, or an empty slice for nil items: encoding/json writes
-// a nil slice as null, and a client reads an empty list as [].
-func orEmpty[T any](items []T) []T {
-	if items == nil {
-		return []T{}
-	}
-	return items
 }
 
 // Encode implements ResponseEncoder.

@@ -2,7 +2,7 @@ package orderapp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"log/slog"
 
@@ -34,7 +34,7 @@ func New(log *slog.Logger, pub broker.Publisher) *App {
 // Create announces the order: the event order.created goes to the topic
 // orders with the order as its JSON data.
 func (a *App) Create(ctx context.Context, o Order) error {
-	data, err := json.Marshal(o)
+	data, err := json.Marshal(o, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("orderapp: create: %w", err)
 	}

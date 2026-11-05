@@ -1,7 +1,7 @@
 package auditlog
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"reflect"
 	"strings"
@@ -52,7 +52,7 @@ func normalizeJSON(jsonData []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	normalizedJSON, err := json.Marshal(m)
+	normalizedJSON, err := json.Marshal(m, json.Deterministic(true))
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal JSON: %w", err)
 	}

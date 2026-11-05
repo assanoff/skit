@@ -1,7 +1,8 @@
 package broker
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"mime"
@@ -47,14 +48,14 @@ type CloudEvents struct{}
 // cloudEvent is the CloudEvents v1.0 structured-mode JSON envelope.
 // See https://github.com/cloudevents/spec/blob/v1.0/spec.md#context-attributes
 type cloudEvent struct {
-	SpecVersion     string          `json:"specversion"`
-	ID              string          `json:"id"`
-	Type            string          `json:"type"`
-	Source          string          `json:"source"`
-	Time            time.Time       `json:"time"`
-	DataContentType string          `json:"datacontenttype,omitempty"`
-	Data            json.RawMessage `json:"data,omitempty"`
-	DataBase64      []byte          `json:"data_base64,omitempty"`
+	SpecVersion     string         `json:"specversion"`
+	ID              string         `json:"id"`
+	Type            string         `json:"type"`
+	Source          string         `json:"source"`
+	Time            time.Time      `json:"time"`
+	DataContentType string         `json:"datacontenttype,omitempty"`
+	Data            jsontext.Value `json:"data,omitzero"`
+	DataBase64      []byte         `json:"data_base64,omitempty"`
 }
 
 // Marshal serializes m as a structured-mode JSON envelope, with the header
@@ -76,11 +77,11 @@ func (CloudEvents) Marshal(m Message) ([]byte, map[string]string, error) {
 	case !jsonData(m.ContentType):
 		ce.DataBase64 = m.Data
 	case len(m.Data) == 0:
-		ce.Data = json.RawMessage("null")
+		ce.Data = jsontext.Value("null")
 	default:
 		ce.Data = m.Data
 	}
-	body, err := json.Marshal(ce)
+	body, err := json.Marshal(ce, json.Deterministic(true))
 	if err != nil {
 		return nil, nil, Permanent(fmt.Errorf("broker: marshal cloudevent: %w", err))
 	}

@@ -93,6 +93,8 @@ linters:
           deny:
             - pkg: github.com/stretchr/testify
               desc: tests use github.com/matryer/is
+            - pkg: encoding/json$
+              desc: use encoding/json/v2 and encoding/json/jsontext
         # One semconv version: mixed versions drift attribute names and break the
         # schema URL of the Resource. otel, contrib and semconv move together.
         semconv:

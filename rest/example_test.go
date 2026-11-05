@@ -2,7 +2,7 @@ package rest_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -80,7 +80,7 @@ func ExampleDecode() {
 	// Output:
 	// 201 {"id":"43","name":"gizmo"}
 	// 400 {"code":"invalid_argument","title":"data validation error","detail":"validation failed","fields":[{"field":"name","error":"required"}]}
-	// 400 {"code":"invalid_argument","detail":"decode request body: unexpected end of JSON input"}
+	// 400 {"code":"invalid_argument","detail":"decode request body: jsontext: unexpected EOF within \"/name\" after offset 8"}
 }
 
 // The envelopes give every endpoint one shape, an error_code and the data: a

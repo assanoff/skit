@@ -24,7 +24,7 @@ type Info struct {
 	// Time is the time of that commit.
 	Time time.Time `json:"time,omitzero"`
 	// Modified reports a build from a tree with uncommitted changes.
-	Modified bool `json:"modified,omitempty"`
+	Modified bool `json:"modified,omitzero"`
 	// Go is the Go version the binary was built with.
 	Go string `json:"go"`
 }

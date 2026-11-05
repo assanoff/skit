@@ -1,7 +1,7 @@
 package errs
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -120,7 +120,7 @@ func (e *Error) WithArgs(args map[string]any) *Error {
 func (e *Error) Encode() ([]byte, string, error) {
 	out := *e
 	out.Message = Sanitize(out.Message)
-	data, err := json.Marshal(out)
+	data, err := json.Marshal(out, json.Deterministic(true))
 	if err != nil {
 		return nil, "", fmt.Errorf("errs: encode: %w", err)
 	}

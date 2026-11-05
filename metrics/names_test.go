@@ -2,7 +2,7 @@ package metrics_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"maps"
 	"os"

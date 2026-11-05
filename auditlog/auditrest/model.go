@@ -1,7 +1,7 @@
 package auditrest
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"time"
 
 	"github.com/assanoff/skit/auditlog"
@@ -9,15 +9,15 @@ import (
 
 // AppAuditLog is the REST representation of a single audit log version.
 type AppAuditLog struct {
-	ID        int             `json:"id"`
-	Version   int             `json:"version"`
-	ModelType string          `json:"model_type"`
-	ModelID   string          `json:"model_id"`
-	Method    string          `json:"method"`
-	Path      string          `json:"path"`
-	Payload   json.RawMessage `json:"payload"`
-	CreatedAt time.Time       `json:"created_at"`
-	CreatedBy string          `json:"created_by"`
+	ID        int            `json:"id"`
+	Version   int            `json:"version"`
+	ModelType string         `json:"model_type"`
+	ModelID   string         `json:"model_id"`
+	Method    string         `json:"method"`
+	Path      string         `json:"path"`
+	Payload   jsontext.Value `json:"payload"`
+	CreatedAt time.Time      `json:"created_at"`
+	CreatedBy string         `json:"created_by"`
 }
 
 // AppDiff is the textual diff between two versions of a model.
@@ -54,7 +54,7 @@ func toAppAuditLog(al auditlog.AuditLog) AppAuditLog {
 		ModelID:   al.ModelID,
 		Method:    al.Method,
 		Path:      al.Path,
-		Payload:   json.RawMessage(al.Payload),
+		Payload:   jsontext.Value(al.Payload),
 		CreatedAt: al.CreatedAt,
 		CreatedBy: al.CreatedBy,
 	}

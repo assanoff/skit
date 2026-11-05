@@ -2,7 +2,7 @@ package queue_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -156,7 +156,7 @@ func ExampleDecode() {
 	// Output:
 	// welcome 42
 	// <nil>
-	// queue: decode email.welcome: json: cannot unmarshal string into Go struct field welcomeEmail.user_id of type int64
+	// queue: decode email.welcome: json: cannot unmarshal JSON string into Go int64 within "/user_id"
 }
 
 // Check, at startup, finds the kinds the Registry sends to a queue with no

@@ -31,7 +31,7 @@ func Example() {
 	for _, path := range []string{"/healthz", "/readyz"} {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
-		fmt.Print(w.Code, " ", w.Body.String())
+		fmt.Println(w.Code, w.Body.String())
 	}
 	// Output:
 	// 200 {"status":"ok"}

@@ -2,7 +2,7 @@ package buildinfo_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -52,6 +52,6 @@ func ExampleRead() {
 	log.InfoContext(context.Background(), "starting service", "build", buildinfo.Read())
 
 	http.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(buildinfo.Read())
+		_ = json.MarshalWrite(w, buildinfo.Read(), json.Deterministic(true))
 	})
 }

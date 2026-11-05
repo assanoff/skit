@@ -3,7 +3,7 @@ package auditqueue
 import (
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"log/slog"
 	"time"
@@ -42,7 +42,7 @@ func NewRecorder(q Enqueuer, log *slog.Logger) *Recorder {
 // Record enqueues entry as a task of Queue (best-effort: a failed enqueue is
 // logged, not returned). The workers later write it through the audit core.
 func (r *Recorder) Record(ctx context.Context, entry auditlog.NewAuditLog) {
-	payload, err := json.Marshal(entry.Payload)
+	payload, err := json.Marshal(entry.Payload, json.Deterministic(true))
 	if err != nil {
 		r.logErr(ctx, "marshal payload", entry, err)
 		return
@@ -54,7 +54,7 @@ func (r *Recorder) Record(ctx context.Context, entry auditlog.NewAuditLog) {
 		Path:      entry.Path,
 		CreatedBy: entry.CreatedBy,
 		Payload:   payload,
-	})
+	}, json.Deterministic(true))
 	if err != nil {
 		r.logErr(ctx, "marshal event", entry, err)
 		return

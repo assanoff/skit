@@ -1,7 +1,8 @@
 package broker
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 	"time"
 
@@ -85,7 +86,7 @@ func TestMarshalEmptyDataIsNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var raw map[string]json.RawMessage
+	var raw map[string]jsontext.Value
 	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestCloudEventBinaryData(t *testing.T) {
 		Data:        data,
 	})
 	is.NoErr(err)
-	var raw map[string]json.RawMessage
+	var raw map[string]jsontext.Value
 	is.NoErr(json.Unmarshal(body, &raw))
 	is.Equal(string(raw["data_base64"]), `"CAP/AA=="`) // base64, as the spec asks
 	_, ok := raw["data"]
@@ -121,7 +122,7 @@ func TestCloudEventJSONTypes(t *testing.T) {
 	for _, ct := range []string{"", "application/json", "application/json; charset=utf-8", "application/vnd.x+json"} {
 		body, _, err := CloudEvents{}.Marshal(Message{Type: "x", ContentType: ct, Data: []byte(`{"a":1}`)})
 		is.NoErr(err)
-		var raw map[string]json.RawMessage
+		var raw map[string]jsontext.Value
 		is.NoErr(json.Unmarshal(body, &raw))
 		is.Equal(string(raw["data"]), `{"a":1}`) // JSON travels as is
 	}

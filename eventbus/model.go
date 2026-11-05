@@ -2,7 +2,7 @@ package eventbus
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 )
 
@@ -33,7 +33,7 @@ func NewData(domain, action string, params any) (Data, error) {
 	var raw []byte
 	if params != nil {
 		var err error
-		if raw, err = json.Marshal(params); err != nil {
+		if raw, err = json.Marshal(params, json.Deterministic(true)); err != nil {
 			return Data{}, fmt.Errorf("eventbus: marshal %s/%s params: %w", domain, action, err)
 		}
 	}

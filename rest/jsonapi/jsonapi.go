@@ -2,7 +2,7 @@ package jsonapi
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 
 	"github.com/hashicorp/jsonapi"
@@ -75,7 +75,7 @@ func (r Result[T]) Encode() ([]byte, string, error) {
 		many.Meta = r.Meta
 	}
 
-	data, err := json.Marshal(doc)
+	data, err := json.Marshal(doc, json.Deterministic(true))
 	if err != nil {
 		return nil, "", fmt.Errorf("jsonapi: encode result: %w", err)
 	}

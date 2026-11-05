@@ -2,7 +2,7 @@ package auditqueue_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/assanoff/skit/auditlog"

@@ -2,7 +2,7 @@ package rest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -162,7 +162,7 @@ func (j jsonResponse) Encode() (body []byte, contentType string, err error) {
 
 // encodeJSON marshals v as an application/json body.
 func encodeJSON(v any) (body []byte, contentType string, err error) {
-	body, err = json.Marshal(v)
+	body, err = json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		return nil, "", fmt.Errorf("rest: encode json: %w", err)
 	}

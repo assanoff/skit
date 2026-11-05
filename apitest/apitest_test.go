@@ -1,7 +1,7 @@
 package apitest_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"testing"
@@ -29,10 +29,10 @@ func echo() http.Handler {
 			"tenant":        r.Header.Get("X-Tenant"),
 		}
 		if r.URL.Path == "/list" {
-			_ = json.NewEncoder(w).Encode([]any{got})
+			_ = json.MarshalWrite(w, []any{got})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(got)
+		_ = json.MarshalWrite(w, got)
 	})
 }
 

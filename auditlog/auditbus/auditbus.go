@@ -2,7 +2,7 @@ package auditbus
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 
 	"github.com/assanoff/skit/auditlog"
 	"github.com/assanoff/skit/eventbus"
@@ -17,12 +17,12 @@ const (
 // Event is the payload a producer publishes to record an audit entry. Payload is
 // the raw JSON snapshot of the model at this version.
 type Event struct {
-	ModelType string          `json:"model_type"`
-	ModelID   string          `json:"model_id"`
-	Method    string          `json:"method"`
-	Path      string          `json:"path"`
-	CreatedBy string          `json:"created_by"`
-	Payload   json.RawMessage `json:"payload"`
+	ModelType string         `json:"model_type"`
+	ModelID   string         `json:"model_id"`
+	Method    string         `json:"method"`
+	Path      string         `json:"path"`
+	CreatedBy string         `json:"created_by"`
+	Payload   jsontext.Value `json:"payload"`
 }
 
 // Register subscribes rec to (Domain, Action) events on the bus. Wire it once at

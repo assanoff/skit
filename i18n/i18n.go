@@ -3,7 +3,7 @@ package i18n
 import (
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -42,7 +42,7 @@ func New(fsys fs.FS, cfg Config) (*Translator, error) {
 	}
 
 	bundle := goi18n.NewBundle(defTag)
-	bundle.RegisterUnmarshalFunc("json", json.Unmarshal)
+	bundle.RegisterUnmarshalFunc("json", unmarshalJSON)
 
 	localizers := map[string]*goi18n.Localizer{}
 	tags := []language.Tag{defTag}
@@ -69,6 +69,12 @@ func New(fsys fs.FS, cfg Config) (*Translator, error) {
 		tags:        tags,
 		defaultLang: defTag.String(),
 	}, nil
+}
+
+// unmarshalJSON decodes a catalog for the bundle, which takes a function of
+// two arguments.
+func unmarshalJSON(data []byte, v any) error {
+	return json.Unmarshal(data, v) //nolint:wrapcheck // New wraps the error of the load
 }
 
 // DefaultLang returns the configured default language tag.

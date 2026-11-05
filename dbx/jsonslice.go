@@ -2,7 +2,7 @@ package dbx
 
 import (
 	"database/sql/driver"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 )
 
@@ -26,10 +26,7 @@ type JSONSlice[T any] []T
 // A nil slice is written as an empty JSON array, not SQL NULL, so a NOT NULL
 // column with a '[]' default round-trips.
 func (s JSONSlice[T]) Value() (driver.Value, error) {
-	if s == nil {
-		return []byte("[]"), nil
-	}
-	b, err := json.Marshal([]T(s))
+	b, err := json.Marshal([]T(s), json.Deterministic(true))
 	if err != nil {
 		return nil, fmt.Errorf("dbx: json slice value: %w", err)
 	}

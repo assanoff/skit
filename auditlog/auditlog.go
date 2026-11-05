@@ -1,9 +1,8 @@
 package auditlog
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -225,8 +224,8 @@ const maxCreateAttempts = 3
 // this insert; Create then re-reads the latest version and retries, so concurrent
 // distinct changes are not lost (up to maxCreateAttempts).
 func (c *Core) Create(ctx context.Context, in NewAuditLog) (AuditLog, error) {
-	var body bytes.Buffer
-	if err := json.NewEncoder(&body).Encode(in.Payload); err != nil {
+	body, err := json.Marshal(in.Payload, json.Deterministic(true))
+	if err != nil {
 		return AuditLog{}, fmt.Errorf("auditlog: encode payload: %w", err)
 	}
 
@@ -238,7 +237,7 @@ func (c *Core) Create(ctx context.Context, in NewAuditLog) (AuditLog, error) {
 
 		// If a previous version exists and is unchanged, skip writing a new one.
 		if last.Version != 0 {
-			unchanged, eqErr := payloadsEqual(body.Bytes(), last.Payload)
+			unchanged, eqErr := payloadsEqual(body, last.Payload)
 			if eqErr != nil {
 				return AuditLog{}, eqErr
 			}
@@ -253,7 +252,7 @@ func (c *Core) Create(ctx context.Context, in NewAuditLog) (AuditLog, error) {
 			ModelID:   in.ModelID,
 			Method:    in.Method,
 			Path:      in.Path,
-			Payload:   body.Bytes(),
+			Payload:   body,
 			CreatedAt: time.Now().UTC(),
 			CreatedBy: in.CreatedBy,
 		}

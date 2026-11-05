@@ -2,7 +2,7 @@ package health
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"time"
 )
@@ -66,5 +66,5 @@ type report struct {
 func writeJSON(w http.ResponseWriter, status int, body report) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body) //nolint:errchkjson // a failed write means the client is gone
+	_ = json.MarshalWrite(w, body, json.Deterministic(true)) // a failed write means the client is gone
 }

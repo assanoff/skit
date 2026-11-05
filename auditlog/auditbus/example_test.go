@@ -3,7 +3,8 @@ package auditbus_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 
 	"github.com/assanoff/skit/auditlog"
@@ -25,7 +26,7 @@ func Example() {
 		ModelType: "widget",
 		ModelID:   "w-1",
 		CreatedBy: "ann",
-		Payload:   json.RawMessage(`{"name":"gear"}`),
+		Payload:   jsontext.Value(`{"name":"gear"}`),
 	})
 	fmt.Println("publish:", err)
 

@@ -15,7 +15,7 @@
 // Do looks the key up first:
 //
 //   - free or expired: fn runs under the lease as its deadline. A success is
-//     encoded with encoding/json and stored for the TTL. An error of fn is
+//     encoded with encoding/json/v2 and stored for the TTL. An error of fn is
 //     returned as it is, with the value of fn, and frees the key, as a panic
 //     of fn does, so a repeat runs fn again.
 //   - done: Do decodes the stored success and returns it; fn does not run.

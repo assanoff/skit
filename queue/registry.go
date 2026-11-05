@@ -2,7 +2,7 @@ package queue
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"reflect"
@@ -15,9 +15,9 @@ import (
 // trace of the producer, into the payload.
 type Encoder func(ctx context.Context, v any) ([]byte, error)
 
-// encodeJSON is the default Encoder, encoding/json.
+// encodeJSON is the default Encoder, encoding/json/v2 with map keys sorted.
 func encodeJSON(_ context.Context, v any) ([]byte, error) {
-	b, err := json.Marshal(v)
+	b, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		return nil, fmt.Errorf("json encoder: %w", err)
 	}

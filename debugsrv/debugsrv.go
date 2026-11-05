@@ -1,7 +1,7 @@
 package debugsrv
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
@@ -132,6 +132,6 @@ func versionHandler(v any) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(v)
+		_ = json.MarshalWrite(w, v, json.Deterministic(true))
 	}
 }

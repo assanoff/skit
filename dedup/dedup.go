@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -118,7 +118,7 @@ func (k *Keeper) Do[T any](ctx context.Context, key string, fn func(ctx context.
 	if err != nil {
 		return v, err
 	}
-	b, err := json.Marshal(v)
+	b, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		return zero, fmt.Errorf("dedup: encode %q: %w", key, err)
 	}
