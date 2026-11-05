@@ -1,6 +1,6 @@
 // Package pgschema provisions the Postgres tables of the SDK storage packages
 // at startup (queue, auditlog/auditpg, translation/translationpg) and derives
-// the advisory-lock keys of the SDK (lock).
+// the advisory-lock keys of the SDK (lock, partition).
 //
 // Ensure runs the idempotent DDL of a package in a transaction under an
 // advisory lock keyed by "skit.<pkg>.schema", so the replicas booting at once
