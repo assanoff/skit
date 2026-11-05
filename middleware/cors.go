@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// methodQuery is the QUERY method of RFC 10008: a GET with the query in its
+// body. Go 1.27 has no net/http constant for it.
+const methodQuery = "QUERY"
+
 // CORSConfig configures the CORS middleware. The zero value allows no origins
 // (every cross-origin request is passed through without CORS headers, so the
 // browser blocks it) — set AllowedOrigins to opt in.
@@ -13,7 +17,7 @@ type CORSConfig struct {
 	// AllowedOrigins is the set of permitted Origin values, e.g.
 	// {"https://app.example.com"}. The single entry "*" allows any origin.
 	AllowedOrigins []string
-	// AllowedMethods defaults to GET, POST, PUT, PATCH, DELETE, OPTIONS.
+	// AllowedMethods defaults to GET, QUERY, POST, PUT, PATCH, DELETE, OPTIONS.
 	AllowedMethods []string
 	// AllowedHeaders defaults to Origin, Content-Type, Accept, Authorization.
 	AllowedHeaders []string
@@ -37,7 +41,7 @@ func CORS(cfg CORSConfig) Middleware {
 	methods := cfg.AllowedMethods
 	if len(methods) == 0 {
 		methods = []string{
-			http.MethodGet, http.MethodPost, http.MethodPut,
+			http.MethodGet, methodQuery, http.MethodPost, http.MethodPut,
 			http.MethodPatch, http.MethodDelete, http.MethodOptions,
 		}
 	}

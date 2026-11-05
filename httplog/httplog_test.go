@@ -33,9 +33,18 @@ func TestCURL(t *testing.T) {
 	is.True(!strings.Contains(postCmd, "-X"))
 	is.True(strings.Contains(postCmd, `--data-raw '{"name":"x"}'`))
 
-	// Other methods get an explicit -X.
+	// A POST without a body: curl would send GET.
+	is.True(strings.HasPrefix(CURL(post, ""), "curl -X POST "))
+	is.True(!strings.Contains(CURL(post, ""), "--data-raw"))
+
+	// Other methods get an explicit -X, and their body too.
 	put := httptest.NewRequest(http.MethodPut, "/widgets/1", nil)
 	is.True(strings.Contains(CURL(put, ""), "-X PUT"))
+	is.True(strings.Contains(CURL(put, `{"name":"y"}`), `--data-raw '{"name":"y"}'`))
+	query := httptest.NewRequest("QUERY", "/widgets", nil)
+	queryCmd := CURL(query, `{"name":"x"}`)
+	is.True(strings.HasPrefix(queryCmd, "curl -X QUERY "))
+	is.True(strings.Contains(queryCmd, `--data-raw '{"name":"x"}'`))
 
 	// Single quotes in a value are shell-escaped.
 	is.True(strings.Contains(CURL(post, "a'b"), `--data-raw 'a'\''b'`))

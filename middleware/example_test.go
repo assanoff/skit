@@ -77,7 +77,7 @@ func ExampleCORS() {
 			w.Header().Get("Access-Control-Allow-Methods"))
 	}
 	// Output:
-	// 204 "https://app.example.com" "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+	// 204 "https://app.example.com" "GET, QUERY, POST, PUT, PATCH, DELETE, OPTIONS"
 	// 204 "" ""
 }
 
